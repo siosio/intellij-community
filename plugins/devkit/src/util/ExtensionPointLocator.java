@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package org.jetbrains.idea.devkit.util;
 
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import com.intellij.psi.search.GlobalSearchScope;
@@ -23,11 +24,14 @@ import com.intellij.psi.search.PsiNonJavaFileReferenceProcessor;
 import com.intellij.psi.search.PsiSearchHelper;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.xml.XmlTag;
+import com.intellij.psi.xml.XmlToken;
 import com.intellij.util.SmartList;
 import com.intellij.util.xml.DomElement;
 import com.intellij.util.xml.DomService;
 import com.intellij.util.xml.DomUtil;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.idea.devkit.dom.Extension;
 import org.jetbrains.idea.devkit.dom.ExtensionPoint;
 import org.jetbrains.idea.devkit.dom.IdeaPlugin;
 
@@ -70,19 +74,42 @@ public class ExtensionPointLocator {
 
   private static void findExtensionPointCandidates(PsiClass psiClass, final List<ExtensionPointCandidate> list) {
     String name = psiClass.getQualifiedName();
-    if (name == null) {
-      return;
-    }
+    if (name == null) return;
 
-    final Project project = psiClass.getProject();
-    final Collection<VirtualFile> candidates = DomService.getInstance().getDomFileCandidates(IdeaPlugin.class, project, GlobalSearchScope.allScope(project));
-    GlobalSearchScope scope = GlobalSearchScope.filesScope(project, candidates);
+    Project project = psiClass.getProject();
+    GlobalSearchScope scope = getCandidatesScope(project);
     PsiSearchHelper.SERVICE.getInstance(project).processUsagesInNonJavaFiles(name, new PsiNonJavaFileReferenceProcessor() {
       @Override
       public boolean process(PsiFile file, int startOffset, int endOffset) {
         PsiElement element = file.findElementAt(startOffset);
         processExtensionPointCandidate(element, list);
         return true;
+      }
+    }, scope);
+  }
+
+  @NotNull
+  private static GlobalSearchScope getCandidatesScope(@NotNull Project project) {
+    Collection<VirtualFile> candidates = DomService.getInstance().getDomFileCandidates(IdeaPlugin.class, project, GlobalSearchScope.allScope(project));
+    return GlobalSearchScope.filesScope(project, candidates);
+  }
+
+  public static boolean isRegisteredExtension(@NotNull PsiClass psiClass) {
+    String name = psiClass.getQualifiedName();
+    if (name == null) return false;
+
+    Project project = psiClass.getProject();
+    GlobalSearchScope scope = getCandidatesScope(project);
+    return !PsiSearchHelper.SERVICE.getInstance(project).processUsagesInNonJavaFiles(name, new PsiNonJavaFileReferenceProcessor() {
+      @Override
+      public boolean process(PsiFile file, int startOffset, int endOffset) {
+        PsiElement at = file.findElementAt(startOffset);
+        String tokenText = at instanceof XmlToken ? at.getText() : null;
+        if (!StringUtil.equals(name, tokenText)) return true;
+        XmlTag tag = PsiTreeUtil.getParentOfType(at, XmlTag.class);
+        if (tag == null) return true;
+        DomElement dom = DomUtil.getDomElement(tag);
+        return !(dom instanceof Extension && ((Extension)dom).getExtensionPoint() != null);
       }
     }, scope);
   }

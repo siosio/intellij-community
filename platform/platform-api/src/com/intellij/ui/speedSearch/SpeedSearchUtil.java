@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,11 +21,11 @@ import com.intellij.openapi.util.registry.Registry;
 import com.intellij.psi.codeStyle.MinusculeMatcher;
 import com.intellij.ui.SimpleColoredComponent;
 import com.intellij.ui.SimpleTextAttributes;
-import com.intellij.util.Processor;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.text.Matcher;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
@@ -62,10 +62,10 @@ public final class SpeedSearchUtil {
       if (!range.intersectsStrict(offset, endOffset)) continue;
       SimpleTextAttributes attributes = coloredIterator.getTextAttributes();
       SimpleTextAttributes highlighted = new SimpleTextAttributes(bg, attributes.getFgColor(), null, attributes.getStyle() | SimpleTextAttributes.STYLE_SEARCH_MATCH);
-      if (range.getStartOffset() > offset) {
-        offset = coloredIterator.split(range.getStartOffset() - offset, attributes);
-      }
       do {
+        if (range.getStartOffset() > offset) {
+          offset = coloredIterator.split(range.getStartOffset() - offset, attributes);
+        }
         if (range.getEndOffset() <= endOffset) {
           offset = coloredIterator.split(range.getEndOffset() - offset, highlighted);
           if (rangesIterator.hasNext()) {
@@ -108,7 +108,7 @@ public final class SpeedSearchUtil {
   public static void appendColoredFragmentForMatcher(@NotNull String text,
                                                      SimpleColoredComponent component,
                                                      @NotNull final SimpleTextAttributes attributes,
-                                                     Matcher matcher,
+                                                     @Nullable Matcher matcher,
                                                      Color selectedBg,
                                                      boolean selected) {
     if (!(matcher instanceof MinusculeMatcher) || (Registry.is("ide.highlight.match.in.selected.only") && !selected)) {
@@ -139,17 +139,14 @@ public final class SpeedSearchUtil {
     }
 
     final int[] lastOffset = {0};
-    ContainerUtil.process(searchTerms, new Processor<Pair<String, Integer>>() {
-      @Override
-      public boolean process(Pair<String, Integer> pair) {
-        if (pair.second > lastOffset[0]) {
-          simpleColoredComponent.append(text.substring(lastOffset[0], pair.second), plain);
-        }
-
-        simpleColoredComponent.append(text.substring(pair.second, pair.second + pair.first.length()), highlighted);
-        lastOffset[0] = pair.second + pair.first.length();
-        return true;
+    ContainerUtil.process(searchTerms, pair -> {
+      if (pair.second > lastOffset[0]) {
+        simpleColoredComponent.append(text.substring(lastOffset[0], pair.second), plain);
       }
+
+      simpleColoredComponent.append(text.substring(pair.second, pair.second + pair.first.length()), highlighted);
+      lastOffset[0] = pair.second + pair.first.length();
+      return true;
     });
 
     if (lastOffset[0] < text.length()) {

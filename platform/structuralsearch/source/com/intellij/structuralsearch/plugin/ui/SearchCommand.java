@@ -16,14 +16,12 @@ import com.intellij.openapi.wm.ToolWindowId;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
-import com.intellij.psi.PsiNameIdentifierOwner;
 import com.intellij.structuralsearch.*;
 import com.intellij.structuralsearch.impl.matcher.MatchResultImpl;
 import com.intellij.structuralsearch.plugin.StructuralSearchPlugin;
 import com.intellij.usageView.UsageInfo;
 import com.intellij.usages.*;
 import com.intellij.util.Alarm;
-import com.intellij.util.ObjectUtils;
 import com.intellij.util.Processor;
 import org.jetbrains.annotations.NotNull;
 
@@ -45,12 +43,7 @@ public class SearchCommand {
   }
 
   protected UsageViewContext createUsageViewContext() {
-    final Runnable searchStarter = new Runnable() {
-      @Override
-      public void run() {
-        new SearchCommand(myConfiguration, mySearchContext).startSearching();
-      }
-    };
+    final Runnable searchStarter = () -> new SearchCommand(myConfiguration, mySearchContext).startSearching();
     return new UsageViewContext(myConfiguration, mySearchContext, searchStarter);
   }
 
@@ -86,15 +79,10 @@ public class SearchCommand {
     ((FindManagerImpl)FindManager.getInstance(mySearchContext.getProject())).getFindUsagesManager().addToHistory(target);
     UsageViewManager.getInstance(mySearchContext.getProject()).searchAndShowUsages(
       new UsageTarget[]{target},
-      new Factory<UsageSearcher>() {
+      () -> new UsageSearcher() {
         @Override
-        public UsageSearcher create() {
-          return new UsageSearcher() {
-            @Override
-            public void generate(@NotNull final Processor<Usage> processor) {
-              findUsages(processor);
-            }
-          };
+        public void generate(@NotNull final Processor<Usage> processor) {
+          findUsages(processor);
         }
       },
       processPresentation,
@@ -146,10 +134,10 @@ public class SearchCommand {
         if (MatchResult.MULTI_LINE_MATCH.equals(result.getName())) {
           int start = -1;
           int end = -1;
-          PsiElement parent = result.getMatchRef().getElement().getParent();
+          PsiElement parent = result.getMatch().getParent();
 
           for (final MatchResult matchResult : ((MatchResultImpl)result).getMatches()) {
-            PsiElement el = matchResult.getMatchRef().getElement();
+            PsiElement el = matchResult.getMatch();
             final int elementStart = el.getTextRange().getStartOffset();
 
             if (start == -1 || start > elementStart) {
@@ -167,11 +155,7 @@ public class SearchCommand {
           info = new UsageInfo(parent, startOffset, end - parentStart);
         }
         else {
-          PsiElement element = result.getMatch();
-          if (element instanceof PsiNameIdentifierOwner) {
-            element = ObjectUtils.notNull(((PsiNameIdentifierOwner)element).getNameIdentifier(), element);
-          }
-          info = new UsageInfo(element, result.getStart(), result.getEnd() == -1 ? element.getTextLength() : result.getEnd());
+          info = new UsageInfo(StructuralSearchUtil.getPresentableElement(result.getMatch()));
         }
 
         Usage usage = new UsageInfo2UsageAdapter(info);
@@ -187,13 +171,8 @@ public class SearchCommand {
     catch (final StructuralSearchException e) {
       final Alarm alarm = new Alarm();
       alarm.addRequest(
-        new Runnable() {
-          @Override
-          public void run() {
-            NotificationGroup.toolWindowGroup("Structural Search", ToolWindowId.FIND)
-              .createNotification(SSRBundle.message("problem", e.getMessage()), MessageType.ERROR).notify(mySearchContext.getProject());
-          }
-        },
+        () -> NotificationGroup.toolWindowGroup("Structural Search", ToolWindowId.FIND)
+          .createNotification(SSRBundle.message("problem", e.getMessage()), MessageType.ERROR).notify(mySearchContext.getProject()),
         100, ModalityState.NON_MODAL
       );
     }

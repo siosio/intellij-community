@@ -52,7 +52,7 @@ class StackTraceElementObjectRenderer extends ToStringBasedRenderer implements F
   public XFullValueEvaluator getFullValueEvaluator(final EvaluationContextImpl evaluationContext, final ValueDescriptorImpl valueDescriptor) {
     return new JavaValue.JavaFullValueEvaluator(DebuggerBundle.message("message.node.navigate"), evaluationContext) {
       @Override
-      public void evaluate(@NotNull XFullValueEvaluationCallback callback) throws Exception {
+      public void evaluate(@NotNull XFullValueEvaluationCallback callback) {
         Value value = valueDescriptor.getValue();
         ClassType type = ((ClassType)value.type());
         Method toString = type.concreteMethodByName("toString", "()Ljava/lang/String;");
@@ -63,21 +63,13 @@ class StackTraceElementObjectRenderer extends ToStringBasedRenderer implements F
             if (res instanceof StringReference) {
               callback.evaluated("");
               final String line = ((StringReference)res).value();
-              ApplicationManager.getApplication().runReadAction(new Runnable() {
-                @Override
-                public void run() {
-                  ExceptionFilter filter = new ExceptionFilter(evaluationContext.getDebugProcess().getSession().getSearchScope());
-                  Filter.Result result = filter.applyFilter(line, line.length());
-                  if (result != null) {
-                    final HyperlinkInfo info = result.getFirstHyperlinkInfo();
-                    if (info != null) {
-                      DebuggerUIUtil.invokeLater(new Runnable() {
-                        @Override
-                        public void run() {
-                          info.navigate(valueDescriptor.getProject());
-                        }
-                      });
-                    }
+              ApplicationManager.getApplication().runReadAction(() -> {
+                ExceptionFilter filter = new ExceptionFilter(evaluationContext.getDebugProcess().getSession().getSearchScope());
+                Filter.Result result = filter.applyFilter(line, line.length());
+                if (result != null) {
+                  final HyperlinkInfo info = result.getFirstHyperlinkInfo();
+                  if (info != null) {
+                    DebuggerUIUtil.invokeLater(() -> info.navigate(valueDescriptor.getProject()));
                   }
                 }
               });

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,6 @@ package com.jetbrains.python.testing;
 
 import com.intellij.execution.ExecutionException;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.components.ApplicationComponent;
-import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.OrderRootType;
@@ -30,7 +28,9 @@ import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.openapi.vfs.newvfs.BulkFileListener;
 import com.intellij.openapi.vfs.newvfs.events.VFileContentChangeEvent;
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent;
+import com.intellij.util.Alarm;
 import com.intellij.util.messages.MessageBus;
+import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.update.MergingUpdateQueue;
 import com.intellij.util.ui.update.Update;
 import com.jetbrains.python.PyNames;
@@ -44,10 +44,10 @@ import java.util.List;
 /**
  * User: catherine
  */
-public class VFSTestFrameworkListener implements ApplicationComponent {
+public class VFSTestFrameworkListener {
   private static final Logger LOG = Logger.getInstance("#com.jetbrains.python.testing.VFSTestFrameworkListener");
-  private static final MergingUpdateQueue myQueue = new MergingUpdateQueue("TestFrameworkChecker", 5000, true, null);
-  private PyTestFrameworkService myService;
+  private final MergingUpdateQueue myQueue;
+  private final PyTestFrameworkService myService;
 
   public VFSTestFrameworkListener() {
     myService = PyTestFrameworkService.getInstance();
@@ -88,6 +88,7 @@ public class VFSTestFrameworkListener implements ApplicationComponent {
         }
       }
     });
+    myQueue = new MergingUpdateQueue("TestFrameworkChecker", 5000, true, null, ApplicationManager.getApplication(), null, Alarm.ThreadToUse.POOLED_THREAD);
   }
 
   public void updateAllTestFrameworks(final Sdk sdk) {
@@ -102,24 +103,10 @@ public class VFSTestFrameworkListener implements ApplicationComponent {
       @Override
       public void run() {
         final Boolean installed = isTestFrameworkInstalled(sdk, testPackageName);
-        if (installed != null)
-          testInstalled(installed, sdk.getHomePath(), testPackageName);
+        if (installed != null) ApplicationManager.getApplication().invokeLater( ( ()-> testInstalled(installed, sdk.getHomePath(), testPackageName)));
+
       }
     });
-  }
-
-  @Override
-  public void initComponent() {
-  }
-
-  @Override
-  public void disposeComponent() {
-  }
-
-  @NotNull
-  @Override
-  public String getComponentName() {
-    return "VFSTestFrameworkListener";
   }
 
   /**
@@ -141,7 +128,7 @@ public class VFSTestFrameworkListener implements ApplicationComponent {
   }
 
   public static VFSTestFrameworkListener getInstance() {
-    return ServiceManager.getService(VFSTestFrameworkListener.class);
+    return ApplicationManager.getApplication().getComponent(VFSTestFrameworkListener.class);
   }
 
   public void pyTestInstalled(boolean installed, String sdkHome) {

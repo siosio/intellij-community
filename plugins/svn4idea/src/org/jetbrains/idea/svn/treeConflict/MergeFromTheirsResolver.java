@@ -53,6 +53,7 @@ import com.intellij.util.continuation.TaskDescriptor;
 import com.intellij.util.continuation.Where;
 import com.intellij.vcsUtil.VcsUtil;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.svn.*;
 import org.jetbrains.idea.svn.api.Depth;
 import org.jetbrains.idea.svn.conflict.TreeConflictDescription;
@@ -239,15 +240,17 @@ public class MergeFromTheirsResolver {
 
     @Override
     public String getName() {
-      return "Apply patch";
+      return "Apply Patch";
     }
 
     @Override
-    public void apply(MultiMap<VirtualFile, TextFilePatchInProgress> patchGroups, LocalChangeList localList, String fileName,
-                      TransparentlyFailedValueI<Map<String, Map<String, CharSequence>>, PatchSyntaxException> additionalInfo) {
+    public void apply(@NotNull List<FilePatch> remaining, @NotNull MultiMap<VirtualFile, TextFilePatchInProgress> patchGroupsToApply,
+                      @Nullable LocalChangeList localList,
+                      @Nullable String fileName,
+                      @Nullable TransparentlyFailedValueI<Map<String, Map<String, CharSequence>>, PatchSyntaxException> additionalInfo) {
       final List<FilePatch> patches;
       try {
-        patches = ApplyPatchSaveToFileExecutor.patchGroupsToOneGroup(patchGroups, myBaseDir);
+        patches = ApplyPatchSaveToFileExecutor.patchGroupsToOneGroup(patchGroupsToApply, myBaseDir);
       }
       catch (IOException e) {
         myInner.handleException(e, true);
@@ -256,7 +259,7 @@ public class MergeFromTheirsResolver {
 
       final PatchApplier<BinaryFilePatch> patchApplier =
         new PatchApplier<BinaryFilePatch>(myVcs.getProject(), myBaseDir, patches, localList, null, null);
-      patchApplier.scheduleSelf(false, myInner, true);  // 3
+      patchApplier.execute(false, true);  // 3
       boolean thereAreCreations = false;
       for (FilePatch patch : patches) {
         if (patch.isNewFile() || ! Comparing.equal(patch.getAfterName(), patch.getBeforeName())) {
@@ -304,7 +307,7 @@ public class MergeFromTheirsResolver {
       final Project project = myVcs.getProject();
       final List<FilePatch> patches;
       try {
-        patches = IdeaTextPatchBuilder.buildPatch(project, myTheirsChanges, myBaseForPatch.getPath(), false);
+        patches = IdeaTextPatchBuilder.buildPatch(project, myTheirsChanges, ObjectUtils.assertNotNull(myBaseForPatch).getPath(), false);
         myTextPatches = ObjectsConvertor.convert(patches, new Convertor<FilePatch, TextFilePatch>() {
           @Override
           public TextFilePatch convert(FilePatch o) {

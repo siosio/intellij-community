@@ -17,12 +17,10 @@ package org.jetbrains.io;
 
 import com.google.gson.JsonParseException;
 import com.google.gson.stream.JsonToken;
-import com.intellij.util.text.CharArrayCharSequence;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.Closeable;
-import java.nio.CharBuffer;
 import java.util.Arrays;
 
 public final class JsonReaderEx implements Closeable {
@@ -118,26 +116,6 @@ public final class JsonReaderEx implements Closeable {
     this.stack = stack;
   }
 
-  // we must return string on subSequence() - JsonReaderEx will call toString in any case
-  public static final class CharSequenceBackedByChars extends CharArrayCharSequence {
-    public CharSequenceBackedByChars(@NotNull CharBuffer charBuffer) {
-      super(charBuffer.array(), charBuffer.arrayOffset(), charBuffer.position());
-    }
-
-    public CharSequenceBackedByChars(@NotNull char[] chars, int start, int end) {
-      super(chars, start, end);
-    }
-
-    public CharSequenceBackedByChars(@NotNull char[] chars) {
-      super(chars);
-    }
-
-    @Override
-    public CharSequence subSequence(int start, int end) {
-      return start == 0 && end == length() ? this : new String(myChars, myStart + start, end - start);
-    }
-  }
-
   private final static class JsonScope {
     /**
      * An array with no elements requires no separators or newlines before
@@ -208,6 +186,13 @@ public final class JsonReaderEx implements Closeable {
     subReader.peekedLong = peekedLong;
     subReader.peekedNumberLength = peekedNumberLength;
     subReader.peekedString = peekedString;
+    return subReader;
+  }
+
+  @Nullable
+  public JsonReaderEx createSubReaderAndSkipValue() {
+    JsonReaderEx subReader = subReader();
+    skipValue();
     return subReader;
   }
 
@@ -743,62 +728,6 @@ public final class JsonReaderEx implements Closeable {
   public CharSequence nextNameAsCharSequence() {
     // todo
     return nextName();
-  }
-
-  @SuppressWarnings("UnusedDeclaration")
-  private static final class MyCharSequence implements CharSequence {
-    private final CharSequence in;
-    private final int offset;
-    private final int length;
-
-    public MyCharSequence(CharSequence in, int offset, int length) {
-      this.in = in;
-      this.offset = offset;
-      this.length = length;
-    }
-
-    @Override
-    public int length() {
-      return length;
-    }
-
-    @Override
-    public char charAt(int index) {
-      return in.charAt(offset + index);
-    }
-
-    @NotNull
-    @Override
-    public CharSequence subSequence(int start, int end) {
-      if ((end - start) > length) {
-        throw new StringIndexOutOfBoundsException(end);
-      }
-      return in.subSequence(offset + start, offset + end);
-    }
-
-    @NotNull
-    @Override
-    public String toString() {
-      return in.subSequence(offset, in.length()).toString();
-    }
-
-    @Override
-    public boolean equals(Object object) {
-      if (!(object instanceof CharSequence)) {
-        return false;
-      }
-
-      CharSequence o = (CharSequence)object;
-      if (o.length() != length) {
-        return false;
-      }
-      for (int i = 0; i < length; i++) {
-        if (o.charAt(i) != charAt(i)) {
-          return false;
-        }
-      }
-      return true;
-    }
   }
 
   public String nextAsString() {

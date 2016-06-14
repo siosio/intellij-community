@@ -1,3 +1,18 @@
+/*
+ * Copyright 2000-2016 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.jetbrains.io;
 
 import io.netty.buffer.ByteBuf;
@@ -7,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.nio.CharBuffer;
+import java.nio.charset.StandardCharsets;
 
 public abstract class MessageDecoder extends Decoder {
   protected int contentLength;
@@ -33,18 +49,26 @@ public abstract class MessageDecoder extends Decoder {
         chunkedContent = CharBuffer.allocate(contentLength);
       }
 
-      ChannelBufferToString.readIntoCharBuffer(input, readableBytes, chunkedContent);
+      ChannelBufferToStringKt.readIntoCharBuffer(input, readableBytes, chunkedContent);
       consumedContentByteCount += readableBytes;
       input.release();
       return null;
     }
     else {
       CharBuffer charBuffer = chunkedContent;
+      CharSequence result;
       if (charBuffer != null) {
         chunkedContent = null;
         consumedContentByteCount = 0;
+        ChannelBufferToStringKt.readIntoCharBuffer(input, required, charBuffer);
+        result = new CharSequenceBackedByChars(charBuffer);
       }
-      return new JsonReaderEx.CharSequenceBackedByChars(ChannelBufferToString.readIntoCharBuffer(input, required, charBuffer));
+      else {
+        result = input.toString(input.readerIndex(), required, StandardCharsets.UTF_8);
+      }
+
+      input.readerIndex(input.readerIndex() + required);
+      return result;
     }
   }
 

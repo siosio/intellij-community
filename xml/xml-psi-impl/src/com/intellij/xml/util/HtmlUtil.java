@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ import com.intellij.lang.xhtml.XHTMLLanguage;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileTypes.FileType;
+import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.registry.Registry;
@@ -53,14 +54,10 @@ import com.intellij.xml.XmlElementDescriptor;
 import com.intellij.xml.XmlNSDescriptor;
 import com.intellij.xml.impl.schema.XmlAttributeDescriptorImpl;
 import com.intellij.xml.impl.schema.XmlElementDescriptorImpl;
-import com.intellij.xml.util.documentation.HtmlDescriptorsTable;
 import com.intellij.xml.util.documentation.MimeTypeDictionary;
 import gnu.trove.THashMap;
 import gnu.trove.THashSet;
-import org.jetbrains.annotations.NonNls;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.TestOnly;
+import org.jetbrains.annotations.*;
 
 import java.nio.charset.Charset;
 import java.util.*;
@@ -112,7 +109,7 @@ public class HtmlUtil {
     // nonexplicitly specified
     "map",
     // flow elements
-    "body", "object", "applet", "ins", "del", "dd", "li", "button", "th", "td", "iframe", "comment", "nobr"
+    "body", "object", "applet", "ins", "del", "dd", "li", "button", "th", "td", "iframe", "comment"
   };
 
   // flow elements are block or inline, so they should not close <p> for example
@@ -231,10 +228,6 @@ public class HtmlUtil {
     return HtmlPsiUtil.getRealXmlDocument(doc);
   }
 
-  public static String[] getHtmlTagNames() {
-    return HtmlDescriptorsTable.getHtmlTagNames();
-  }
-  
   public static boolean isShortNotationOfBooleanAttributePreferred() {
     return Registry.is("html.prefer.short.notation.of.boolean.attributes", true);
   }
@@ -322,22 +315,7 @@ public class HtmlUtil {
       final String tagName = tokenizer.nextToken();
       if (tagName.length() == 0) continue;
 
-      descriptors[index++] = new XmlElementDescriptorImpl(context instanceof XmlTag ? (XmlTag)context : null) {
-        @Override
-        public String getName(PsiElement context) {
-          return tagName;
-        }
-
-        @Override
-        public String getDefaultName() {
-          return tagName;
-        }
-
-        @Override
-        public boolean allowElementsFromNamespace(final String namespace, final XmlTag context) {
-          return true;
-        }
-      };
+      descriptors[index++] = new CustomXmlTagDescriptor(tagName);
     }
 
     return descriptors;
@@ -497,6 +475,18 @@ public class HtmlUtil {
     return "meta.rnc".equals(name);
   }
 
+  public static boolean tagHasHtml5Schema(@NotNull XmlTag context) {
+    XmlElementDescriptor descriptor = context.getDescriptor();
+    if (descriptor != null) {
+      XmlNSDescriptor nsDescriptor = descriptor.getNSDescriptor();
+      XmlFile descriptorFile = nsDescriptor != null ? nsDescriptor.getDescriptorFile() : null;
+      String descriptorPath = descriptorFile != null ? descriptorFile.getVirtualFile().getPath() : null;
+      return Comparing.equal(Html5SchemaProvider.getHtml5SchemaLocation(), descriptorPath) ||
+             Comparing.equal(Html5SchemaProvider.getXhtml5SchemaLocation(), descriptorPath);
+    }
+    return false;
+  }
+
   private static class TerminateException extends RuntimeException {
     private static final TerminateException INSTANCE = new TerminateException();
   }
@@ -618,6 +608,17 @@ public class HtmlUtil {
     return isHtmlFile(file) || file.getViewProvider() instanceof TemplateLanguageFileViewProvider;
   }
 
+  public static boolean supportsXmlTypedHandlers(PsiFile file) {
+    Language language = file.getLanguage();
+    while (language != null) {
+      if ("JavaScript".equals(language.getID())) return true;
+      if ("Dart".equals(language.getID())) return true;
+      language = language.getBaseLanguage();
+    }
+
+    return false;
+  }
+
   public static boolean hasHtmlPrefix(@NotNull String url) {
     return url.startsWith("http://") ||
            url.startsWith("https://") ||
@@ -665,5 +666,49 @@ public class HtmlUtil {
 
   public static boolean isScriptTag(@Nullable XmlTag tag) {
     return tag != null && tag.getLocalName().equalsIgnoreCase(SCRIPT_TAG_NAME);
+  }
+
+  public static class CustomXmlTagDescriptor extends XmlElementDescriptorImpl {
+    private final String myTagName;
+
+    public CustomXmlTagDescriptor(String tagName) {
+      super(null);
+      myTagName = tagName;
+    }
+
+    @Override
+    public String getName(PsiElement context) {
+      return myTagName;
+    }
+
+    @Override
+    public String getDefaultName() {
+      return myTagName;
+    }
+
+    @Override
+    public boolean allowElementsFromNamespace(final String namespace, final XmlTag context) {
+      return true;
+    }
+  }
+
+  @Nullable
+  public static Iterable<String> splitClassNames(@Nullable String classAttributeValue) {
+    // comma is useduse as separator because class name cannot contain comma but it can be part of JSF classes attributes
+    return classAttributeValue != null ? StringUtil.tokenize(classAttributeValue, " \t,") : Collections.emptyList();
+  }
+
+  @Contract("!null -> !null")
+  public static String getTagPresentation(final @Nullable XmlTag tag) {
+    if (tag == null) return null;
+    StringBuilder builder = new StringBuilder(tag.getLocalName());
+    String id = StringUtil.nullize(tag.getAttributeValue(ID_ATTRIBUTE_NAME), true);
+    if (id != null) {
+      builder.append('#').append(id);
+    }
+    for (String className : splitClassNames(tag.getAttributeValue(CLASS_ATTRIBUTE_NAME))) {
+      builder.append('.').append(className);
+    }
+    return builder.toString();
   }
 }

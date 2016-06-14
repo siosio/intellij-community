@@ -313,6 +313,10 @@ public class IntroduceVariableTest extends LightCodeInsightTestCase {
     doTest(new MockIntroduceVariableHandler("ab", true, true, false, "boolean"));
   }
 
+  public void testSubexpressionWithSpacesInSelectionAndTailingComment() {
+    doTest(new MockIntroduceVariableHandler("ab", true, true, false, CommonClassNames.JAVA_LANG_STRING));
+  }
+
   public void testDuplicatesAnonymousClassCreationWithSimilarParameters () {
     doTest(new MockIntroduceVariableHandler("foo1", true, true, false, "Foo"));
   }
@@ -450,7 +454,7 @@ public class IntroduceVariableTest extends LightCodeInsightTestCase {
   }
 
   public void testIntersectionWildcardExpectedType() {
-    doTest(new MockIntroduceVariableHandler("l", false, false, false, "java.util.List<? extends java.lang.Enum<? extends java.lang.Enum<? extends java.lang.Enum<?>>>>", true));
+    doTest(new MockIntroduceVariableHandler("l", false, false, false, "java.util.List<? extends java.lang.Enum<? extends java.lang.Enum<?>>>", true));
   }
 
   public void testMethodRefNotInContextInferredFilterWithNonAcceptableSince() {
@@ -476,8 +480,20 @@ public class IntroduceVariableTest extends LightCodeInsightTestCase {
     doTest(new MockIntroduceVariableHandler("c", false, false, false, "int"));
   }
 
+  public void testPutInLambdaBodyMultipleOccurrences() {
+    doTest(new MockIntroduceVariableHandler("c", true, false, false, "java.lang.Class<?>"));
+  }
+
   public void testPutInLambdaBodyVoidValueConflict() {
     doTest(new MockIntroduceVariableHandler("c", false, false, false, "int"));
+  }
+  
+  public void testPutInLambdaBodyVoid() {
+    doTest(new MockIntroduceVariableHandler("s", false, false, false, "java.lang.String"));
+  }
+
+  public void testPutInNestedLambdaBody() {
+    doTest(new MockIntroduceVariableHandler("s", false, false, false, "java.lang.String"));
   }
 
   public void testNormalizeDeclarations() {
@@ -492,6 +508,18 @@ public class IntroduceVariableTest extends LightCodeInsightTestCase {
     doTest(new MockIntroduceVariableHandler("m", false, false, false, "Foo.I"));
   }
 
+  public void testDenotableType1() {
+    doTest(new MockIntroduceVariableHandler("m", false, false, false, "A<? extends A<?>>"));
+  }
+
+  public void testDenotableType2() {
+    doTest(new MockIntroduceVariableHandler("m", false, false, false, "I<? extends I<?>>"));
+  }
+
+  public void testDenotableType3() {
+    doTest(new MockIntroduceVariableHandler("m", false, false, false, "java.util.function.IntFunction<java.lang.Class<?>[]>"));
+  }
+
   public void testReturnNonExportedArray() {
     doTest(new MockIntroduceVariableHandler("i", false, false, false, "java.io.File[]") {
       @Override
@@ -499,6 +527,29 @@ public class IntroduceVariableTest extends LightCodeInsightTestCase {
         return true;
       }
     });
+  }
+
+  public void testTypesHierarchyBasedOnCalledMethod() {
+    doTest(new MockIntroduceVariableHandler("v", true, false, false, "B") {
+      @Override
+      public IntroduceVariableSettings getSettings(Project project, Editor editor,
+                                                   PsiExpression expr, PsiExpression[] occurrences,
+                                                   TypeSelectorManagerImpl typeSelectorManager,
+                                                   boolean declareFinalIfAll,
+                                                   boolean anyAssignmentLHS,
+                                                   InputValidator validator,
+                                                   PsiElement anchor, final OccurrencesChooser.ReplaceChoice replaceChoice) {
+        final PsiType[] types = typeSelectorManager.getTypesForAll();
+        assertTrue(types[0].getPresentableText(), types[0].getPresentableText().equals("B"));
+        assertTrue(types[1].getPresentableText(), types[1].getPresentableText().equals("A"));
+        return super.getSettings(project, editor, expr, occurrences, typeSelectorManager, declareFinalIfAll, anyAssignmentLHS,
+                                 validator, anchor, replaceChoice);
+      }
+    });
+  }
+
+  public void testChooseIntersectionConjunctBasedOnFollowingCalls() throws Exception {
+    doTest(new MockIntroduceVariableHandler("m", false, false, false, "IA"));
   }
 
   private void doTest(IntroduceVariableBase testMe) {

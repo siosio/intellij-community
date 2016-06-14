@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,14 +18,15 @@ package com.intellij.refactoring;
 import com.intellij.JavaTestUtil;
 import com.intellij.codeInsight.CodeInsightUtil;
 import com.intellij.lang.java.JavaLanguage;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Pair;
 import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.CodeStyleSettings;
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
 import com.intellij.psi.codeStyle.CommonCodeStyleSettings;
 import com.intellij.psi.search.GlobalSearchScope;
+import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.refactoring.extractMethod.ExtractMethodHandler;
 import com.intellij.refactoring.extractMethod.ExtractMethodProcessor;
 import com.intellij.refactoring.extractMethod.PrepareFailedException;
@@ -36,7 +37,6 @@ import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.ArrayList;
 import java.util.List;
 
 public class ExtractMethodTest extends LightCodeInsightTestCase {
@@ -225,6 +225,10 @@ public class ExtractMethodTest extends LightCodeInsightTestCase {
     doDuplicatesTest();
   }
 
+  public void testDuplicatesFromAnonymous() throws Exception {
+    doDuplicatesTest();
+  }
+
   public void testCodeDuplicatesWithContinueNoReturn() throws Exception {
     doDuplicatesTest();
   }
@@ -266,6 +270,10 @@ public class ExtractMethodTest extends LightCodeInsightTestCase {
   }
 
   public void testCodeDuplicatesWithOutputValue1() throws Exception {
+    doDuplicatesTest();
+  }
+
+  public void testCodeDuplicatesWithEmptyStatementsBlocksParentheses() throws Exception {
     doDuplicatesTest();
   }
 
@@ -343,6 +351,10 @@ public class ExtractMethodTest extends LightCodeInsightTestCase {
   }
 
   public void testStopFolding() throws Exception {
+    doTest();
+  }
+
+  public void testStopFoldingForArrayWriteAccessInConsequentUsages() throws Exception {
     doTest();
   }
 
@@ -493,6 +505,10 @@ public class ExtractMethodTest extends LightCodeInsightTestCase {
   }
 
   public void testArrayAccessWithLocalIndex() throws Exception {
+    doTest();
+  }
+
+  public void testArrayAccessWithTopExpression() throws Exception {
     doTest();
   }
 
@@ -668,6 +684,14 @@ public class ExtractMethodTest extends LightCodeInsightTestCase {
     doDuplicatesTest();
   }
 
+  public void testSuggestChangeSignatureWithFolding() throws Exception {
+    doDuplicatesTest();
+  }
+
+  public void testSuggestChangeSignatureWithOutputVariables() throws Exception {
+    doDuplicatesTest();
+  }
+
   public void testSuggestChangeSignatureWithChangedParameterName() throws Exception {
     configureByFile(BASE_PATH + getTestName(false) + ".java");
     boolean success = performExtractMethod(true, true, getEditor(), getFile(), getProject(), false, null, false, "p");
@@ -703,6 +727,10 @@ public class ExtractMethodTest extends LightCodeInsightTestCase {
     doTest();
   }
 
+  public void testSkipThrowsDeclaredInLambda() throws Exception {
+    doTest();
+  }
+
   public void testChangedReturnType() throws Exception {
     doTestReturnTypeChanged(PsiType.getJavaLangObject(getPsiManager(), GlobalSearchScope.allScope(getProject())));
   }
@@ -722,6 +750,10 @@ public class ExtractMethodTest extends LightCodeInsightTestCase {
 
   public void testReassignFinalFieldInside() throws Exception {
     doTestReturnTypeChanged(PsiType.INT);
+  }
+
+  public void testShortenClassRefsInNewReturnType() throws Exception {
+    doTestReturnTypeChanged(PsiType.getTypeByName(CommonClassNames.JAVA_UTIL_COLLECTION, getProject(), GlobalSearchScope.allScope(getProject())));
   }
 
   public void testPassFieldAsParameterAndMakeStatic() throws Exception {
@@ -755,6 +787,22 @@ public class ExtractMethodTest extends LightCodeInsightTestCase {
 
   public void testConditionalExitCombinedWithNullabilityShouldPreserveVarsUsedInExitStatements() throws Exception {
     doTest();
+  }
+
+  public void testSingleExitPOintWithTryFinally() throws Exception {
+    doTest();
+  }
+
+  public void testQualifyWhenConflictingNamePresent() throws Exception {
+    final CodeStyleSettings settings = CodeStyleSettingsManager.getSettings(getProject());
+    settings.ELSE_ON_NEW_LINE = true;
+    settings.CATCH_ON_NEW_LINE = myCatchOnNewLine;
+    configureByFile(BASE_PATH + getTestName(false) + ".java");
+    final PsiClass psiClass = PsiTreeUtil.getParentOfType(getFile().findElementAt(getEditor().getSelectionModel().getLeadSelectionOffset()), PsiClass.class);
+    assertNotNull(psiClass);
+    boolean success = performExtractMethod(true, true, getEditor(), getFile(), getProject(), false, null, false, null, psiClass.getContainingClass());
+    assertTrue(success);
+    checkResultByFile(BASE_PATH + getTestName(false) + "_after.java");
   }
 
   private void doTestDisabledParam() throws PrepareFailedException {
@@ -856,6 +904,22 @@ public class ExtractMethodTest extends LightCodeInsightTestCase {
                                              String newNameOfFirstParam,
                                              int... disabledParams)
     throws PrepareFailedException, IncorrectOperationException {
+    return performExtractMethod(doRefactor, replaceAllDuplicates, editor, file, project, extractChainedConstructor, returnType, makeStatic,
+                                newNameOfFirstParam, null, disabledParams);
+  }
+
+  public static boolean performExtractMethod(boolean doRefactor,
+                                             boolean replaceAllDuplicates,
+                                             Editor editor,
+                                             PsiFile file,
+                                             Project project,
+                                             final boolean extractChainedConstructor,
+                                             PsiType returnType,
+                                             boolean makeStatic,
+                                             String newNameOfFirstParam,
+                                             PsiClass targetClass,
+                                             int... disabledParams)
+    throws PrepareFailedException, IncorrectOperationException {
     int startOffset = editor.getSelectionModel().getSelectionStart();
     int endOffset = editor.getSelectionModel().getSelectionEnd();
 
@@ -885,6 +949,7 @@ public class ExtractMethodTest extends LightCodeInsightTestCase {
     }
 
     if (doRefactor) {
+      processor.testTargetClass(targetClass);
       processor.testPrepare(returnType, makeStatic);
       processor.testNullness();
       if (disabledParams != null) {
@@ -905,7 +970,9 @@ public class ExtractMethodTest extends LightCodeInsightTestCase {
         for (final Match match : duplicates) {
           if (!match.getMatchStart().isValid() || !match.getMatchEnd().isValid()) continue;
           PsiDocumentManager.getInstance(project).commitAllDocuments();
-          processor.processMatch(match);
+          ApplicationManager.getApplication().runWriteAction(() -> {
+            processor.processMatch(match);
+          });
         }
       }
     }

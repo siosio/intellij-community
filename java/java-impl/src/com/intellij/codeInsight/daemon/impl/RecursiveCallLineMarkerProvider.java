@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ package com.intellij.codeInsight.daemon.impl;
 
 import com.intellij.codeHighlighting.Pass;
 import com.intellij.codeInsight.daemon.LineMarkerInfo;
-import com.intellij.codeInsight.daemon.LineMarkerProvider;
+import com.intellij.codeInsight.daemon.LineMarkerProviderDescriptor;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.editor.markup.GutterIconRenderer;
@@ -27,7 +27,9 @@ import com.intellij.psi.*;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.FunctionUtil;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
+import javax.swing.*;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
@@ -36,7 +38,7 @@ import java.util.Set;
 /**
  * @author Danila Ponomarenko
  */
-public class RecursiveCallLineMarkerProvider implements LineMarkerProvider {
+public class RecursiveCallLineMarkerProvider extends LineMarkerProviderDescriptor {
 
   @Override
   public LineMarkerInfo getLineMarkerInfo(@NotNull PsiElement element) {
@@ -75,12 +77,24 @@ public class RecursiveCallLineMarkerProvider implements LineMarkerProvider {
     return Comparing.equal(method, methodCall.resolveMethod());
   }
 
+  @NotNull
+  @Override
+  public String getName() {
+    return "Recursive call";
+  }
+
+  @Nullable
+  @Override
+  public Icon getIcon() {
+    return AllIcons.Gutter.RecursiveMethod;
+  }
+
   private static class RecursiveMethodCallMarkerInfo extends LineMarkerInfo<PsiMethodCallExpression> {
     private RecursiveMethodCallMarkerInfo(@NotNull PsiMethodCallExpression methodCall) {
       super(methodCall,
             methodCall.getTextRange(),
             AllIcons.Gutter.RecursiveMethod,
-            Pass.UPDATE_OVERRIDEN_MARKERS,
+            Pass.UPDATE_OVERRIDDEN_MARKERS,
             FunctionUtil.<PsiMethodCallExpression, String>constant("Recursive call"),
             null,
             GutterIconRenderer.Alignment.RIGHT

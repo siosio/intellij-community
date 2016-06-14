@@ -98,7 +98,7 @@ public class HgCommandExecutor {
 
   public void execute(@Nullable final VirtualFile repo, @NotNull final String operation, @Nullable final List<String> arguments,
                       @Nullable final HgCommandResultHandler handler) {
-    HgUtil.executeOnPooledThreadIfNeeded(new Runnable() {
+    HgUtil.executeOnPooledThread(new Runnable() {
       @Override
       public void run() {
         HgCommandResult result = executeInCurrentThread(repo, operation, arguments);
@@ -106,7 +106,7 @@ public class HgCommandExecutor {
           handler.process(result);
         }
       }
-    });
+    }, myProject);
   }
 
   public HgCommandResult executeInCurrentThread(@Nullable final VirtualFile repo,
@@ -204,7 +204,7 @@ public class HgCommandExecutor {
     }
     if (!myIsSilent) {
       LOG.info(cmdString);
-      myVcs.showMessageInConsole(cmdString, ConsoleViewContentType.NORMAL_OUTPUT.getAttributes());
+      myVcs.showMessageInConsole(cmdString, ConsoleViewContentType.NORMAL_OUTPUT);
     }
     else {
       LOG.debug(cmdString);
@@ -223,7 +223,7 @@ public class HgCommandExecutor {
       else if (!myOutputAlwaysSuppressed) {
         if (!myIsSilent && myShowOutput) {
           LOG.info(result.getRawOutput());
-          myVcs.showMessageInConsole(result.getRawOutput(), ConsoleViewContentType.SYSTEM_OUTPUT.getAttributes());
+          myVcs.showMessageInConsole(result.getRawOutput(), ConsoleViewContentType.SYSTEM_OUTPUT);
         }
         else {
           LOG.debug(result.getRawOutput());
@@ -238,7 +238,7 @@ public class HgCommandExecutor {
       }
       if (!myIsSilent) {
         LOG.info(result.getRawError());
-        myVcs.showMessageInConsole(result.getRawError(), ConsoleViewContentType.ERROR_OUTPUT.getAttributes());
+        myVcs.showMessageInConsole(result.getRawError(), ConsoleViewContentType.ERROR_OUTPUT);
       }
       else {
         LOG.debug(result.getRawError());

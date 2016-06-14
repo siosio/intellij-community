@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.RangeMarker;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
 import com.intellij.psi.util.PsiTreeUtil;
@@ -51,27 +52,31 @@ public class CreateClassFromNewFix extends CreateFromUsageBaseFix {
   @Override
   protected void invokeImpl(PsiClass targetClass) {
     assert ApplicationManager.getApplication().isWriteAccessAllowed();
+    final Project project = targetClass.getProject();
 
-    final PsiNewExpression newExpression = getNewExpression();
-
-    final PsiJavaCodeReferenceElement referenceElement = getReferenceElement(newExpression);
-    ApplicationManager.getApplication().invokeLater(new Runnable() {
-      @Override
-      public void run() {
-        final PsiClass[] psiClass = new PsiClass[1];
-        CommandProcessor.getInstance().executeCommand(newExpression.getProject(), new Runnable() {
-          @Override
-          public void run() {
-            psiClass[0] = CreateFromUsageUtils.createClass(referenceElement, CreateClassKind.CLASS, null);
-          }
-        }, getText(), getText());
-        new WriteCommandAction(newExpression.getProject(), getText(), getText()) {
-          @Override
-          protected void run(Result result) throws Throwable {
-            setupClassFromNewExpression(psiClass[0], newExpression);
-          }
-        }.execute();
+    ApplicationManager.getApplication().invokeLater(() -> {
+      if (project.isDisposed()) {
+        return;
       }
+
+      PsiDocumentManager.getInstance(project).commitAllDocuments();
+
+      final PsiNewExpression newExpression = getNewExpression();
+      if (newExpression == null) {
+        return;
+      }
+
+      final PsiJavaCodeReferenceElement referenceElement = getReferenceElement(newExpression);
+      final PsiClass[] psiClass = new PsiClass[1];
+      CommandProcessor.getInstance().executeCommand(newExpression.getProject(), () ->
+        psiClass[0] = CreateFromUsageUtils.createClass(referenceElement, CreateClassKind.CLASS, null), getText(), getText());
+
+      new WriteCommandAction(project, getText(), getText()) {
+        @Override
+        protected void run(@NotNull Result result) throws Throwable {
+          setupClassFromNewExpression(psiClass[0], newExpression);
+        }
+      }.execute();
     });
   }
 
@@ -107,22 +112,19 @@ public class CreateClassFromNewFix extends CreateFromUsageBaseFix {
       final Editor editor = positionCursor(project, aClass.getContainingFile(), aClass);
       if (editor == null) return;
       final RangeMarker textRange = editor.getDocument().createRangeMarker(aClass.getTextRange());
-      final Runnable runnable = new Runnable() {
-        @Override
-        public void run() {
-          new WriteCommandAction(project, getText(), getText()) {
-            @Override
-            protected void run(Result result) throws Throwable {
-              try {
-                editor.getDocument().deleteString(textRange.getStartOffset(), textRange.getEndOffset());
-              }
-              finally {
-                textRange.dispose();
-              }
+      final Runnable runnable = () -> {
+        new WriteCommandAction(project, getText(), getText()) {
+          @Override
+          protected void run(@NotNull Result result) throws Throwable {
+            try {
+              editor.getDocument().deleteString(textRange.getStartOffset(), textRange.getEndOffset());
             }
-          }.execute();
-          startTemplate(editor, template, project, null, getText());
-        }
+            finally {
+              textRange.dispose();
+            }
+          }
+        }.execute();
+        startTemplate(editor, template, project, null, getText());
       };
       if (ApplicationManager.getApplication().isUnitTestMode()) {
         runnable.run();

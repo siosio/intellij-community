@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,8 +31,12 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.arguments.GrArgumentLabel;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.arguments.GrNamedArgument;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.GrExpression;
+import org.jetbrains.plugins.groovy.lang.psi.impl.statements.expressions.TypesUtil;
 
-import java.util.*;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Created by Max Medvedev on 07/04/14
@@ -46,12 +50,7 @@ public class GrMapTypeFromNamedArgs extends GrMapType {
     @NotNull
     @Override
     protected List<Couple<PsiType>> compute() {
-      return ContainerUtil.map(myOtherEntries, new Function<Couple<GrExpression>, Couple<PsiType>>() {
-        @Override
-        public Couple<PsiType> fun(Couple<GrExpression> pair) {
-          return Couple.of(inferTypePreventingRecursion(pair.first), inferTypePreventingRecursion(pair.second));
-        }
-      });
+      return ContainerUtil.map(myOtherEntries, pair -> Couple.of(inferTypePreventingRecursion(pair.first), inferTypePreventingRecursion(pair.second)));
     }
   };
 
@@ -88,8 +87,11 @@ public class GrMapTypeFromNamedArgs extends GrMapType {
       if (name != null) {
         myStringEntries.put(name, expression);
       }
-      else if (label.getExpression() != null) {
-        myOtherEntries.add(Couple.of(label.getExpression(), expression));
+      else {
+        GrExpression labelExpression = label.getExpression();
+        if (labelExpression != null) {
+          myOtherEntries.add(Couple.of(labelExpression, expression));
+        }
       }
     }
   }
@@ -141,13 +143,9 @@ public class GrMapTypeFromNamedArgs extends GrMapType {
   }
 
   @Nullable
-  private static PsiType inferTypePreventingRecursion(final GrExpression expression) {
-    return RecursionManager.doPreventingRecursion(expression, false, new Computable<PsiType>() {
-      @Override
-      public PsiType compute() {
-        return expression.getType();
-      }
-    });
+  private PsiType inferTypePreventingRecursion(final GrExpression expression) {
+    return RecursionManager.doPreventingRecursion(expression, false,
+                                                  () -> TypesUtil.boxPrimitiveType(expression.getType(), expression.getManager(), myScope));
   }
 
   @NotNull

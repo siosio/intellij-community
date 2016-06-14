@@ -24,7 +24,6 @@ import com.intellij.openapi.keymap.Keymap;
 import com.intellij.openapi.keymap.KeymapManager;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.openapi.wm.impl.ToolWindowImpl;
@@ -98,7 +97,7 @@ public class ActivateToolWindowAction extends DumbAwareAction {
     presentation.setDescription(IdeBundle.message("action.activate.tool.window", title));
     Icon icon = toolWindow.getIcon();
     if (EventLog.LOG_TOOL_WINDOW_ID.equals(myToolWindowId)) {
-      icon = AllIcons.Ide.Info_notifications;
+      icon = AllIcons.Ide.Notification.InfoEvents;
     }
     presentation.setIcon(icon == null ? null : new SizedIcon(icon, icon.getIconHeight(), icon.getIconHeight()));
   }
@@ -113,11 +112,7 @@ public class ActivateToolWindowAction extends DumbAwareAction {
     if (event instanceof KeyEvent && event.isShiftDown()) {
       final Content[] contents = window.getContentManager().getContents();
       if (contents.length > 0 && window.getContentManager().getSelectedContent() != contents[0]) {
-        run = new Runnable() {
-          public void run() {
-            window.getContentManager().setSelectedContent(contents[0], true, true);
-          }
-        };
+        run = () -> window.getContentManager().setSelectedContent(contents[0], true, true);
       }
     }
 
@@ -140,10 +135,6 @@ public class ActivateToolWindowAction extends DumbAwareAction {
    */
   @NonNls
   public static String getActionIdForToolWindow(String id) {
-    //todo[kb] remove as soon as finish with vcs merging or provide aliasing mechanism
-    if (Registry.is("vcs.merge.toolwindows") && "Version Control".equals(id)) {
-      id = "Changes";
-    }
     return "Activate" + id.replaceAll(" ", "") + "ToolWindow";
   }
 

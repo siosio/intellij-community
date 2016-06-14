@@ -1,3 +1,5 @@
+import groovy.xml.MarkupBuilder
+import org.gradle.api.internal.tasks.testing.TestDescriptorInternal
 /*
  * Copyright 2000-2014 JetBrains s.r.o.
  *
@@ -52,26 +54,26 @@ gradle.taskGraph.beforeTask { Task task ->
 
   if (task instanceof Test) {
     try {
+      try {
+        def urls = task.classpath.files.findAll{
+          it.name.equals('idea_rt.jar') || it.name.startsWith('junit')
+        }.collect { it.toURI().toURL()}
+        Class.forName("org.gradle.launcher.daemon.bootstrap.DaemonMain").getClassLoader().addURLs(urls)
+      }
+      catch (all) {
+        logger.error("unable to enhance gradle daemon classloader with idea_rt.jar", all)
+      }
+
       logTestReportLocation(task.reports?.html?.entryPoint?.path)
 
-      task.beforeSuite { descriptor ->
-        logTestEvent("beforeSuite", descriptor, null, null)
-      }
-      task.afterSuite { descriptor, result ->
-        logTestEvent("afterSuite", descriptor, null, result)
-      }
+      task.beforeSuite { descriptor -> logTestEvent("beforeSuite", descriptor, null, null) }
+      task.afterSuite { descriptor, result -> logTestEvent("afterSuite", descriptor, null, result) }
 
-      task.beforeTest { descriptor ->
-        logTestEvent("beforeTest", descriptor, null, null)
-      }
-      task.onOutput { descriptor, event ->
-        logTestEvent("onOutput", descriptor, event, null)
-      }
-      task.afterTest { descriptor, result ->
-        logTestEvent("afterTest", descriptor, null, result)
-      }
+      task.beforeTest { descriptor -> logTestEvent("beforeTest", descriptor, null, null) }
+      task.onOutput { descriptor, event -> logTestEvent("onOutput", descriptor, event, null) }
+      task.afterTest { descriptor, result -> logTestEvent("afterTest", descriptor, null, result) }
 
-      if(ijTestFilteringSupported) {
+      if(ijTestIncludes != ['*'] && ijTestFilteringSupported) {
         task.filter {
           ijTestIncludes.each(){ includeTestsMatching "${it}" }
         }
@@ -83,9 +85,9 @@ gradle.taskGraph.beforeTask { Task task ->
   }
 }
 
-Object logTestEvent(def testEventType, def testDescriptor, def testEvent, def testResult) {
+static def logTestEvent(def testEventType, TestDescriptorInternal testDescriptor, def testEvent, def testResult) {
   def writer = new StringWriter()
-  def xml = new groovy.xml.MarkupBuilder(writer)
+  def xml = new MarkupBuilder(writer)
   xml.event(type: testEventType){
     test(id: testDescriptor.id, parentId: testDescriptor.parent?.id ?: '') {
       if(testDescriptor){
@@ -111,12 +113,33 @@ Object logTestEvent(def testEventType, def testDescriptor, def testEvent, def te
             failureType('comparison')
             xml.mkp.yieldUnescaped("<expected>$expected</expected>")
             xml.mkp.yieldUnescaped("<actual>$actual</actual>")
-          } else if('junit.framework.AssertionFailedError'.equals(testResult.exception?.class?.name) ||
+            return
+          }
+          try {
+            if ('com.intellij.rt.execution.junit.FileComparisonFailure'.equals(testResult.exception?.class?.name)) {
+              def expected = escapeCdata(testResult.exception.expected)
+              def actual = escapeCdata(testResult.exception.actual)
+              def filePath = escapeCdata(testResult.exception.filePath)
+              def actualFilePath
+              if (testResult.exception.hasProperty('actualFilePath')) {
+                actualFilePath = escapeCdata(testResult.exception.actualFilePath)
+              }
+              failureType('comparison')
+              xml.mkp.yieldUnescaped("<expected>$expected</expected>")
+              xml.mkp.yieldUnescaped("<actual>$actual</actual>")
+              xml.mkp.yieldUnescaped("<filePath>$filePath</filePath>")
+              if (actualFilePath) xml.mkp.yieldUnescaped("<actualFilePath>$actualFilePath</actualFilePath>")
+              return
+            }
+          }
+          catch (ignore) {
+          }
+          if ('junit.framework.AssertionFailedError'.equals(testResult.exception?.class?.name) ||
                     testResult.exception instanceof AssertionError) {
             failureType('assertionFailed')
-          } else {
-            failureType('error')
+            return
           }
+          failureType('error')
         }
       }
     }
@@ -125,17 +148,17 @@ Object logTestEvent(def testEventType, def testDescriptor, def testEvent, def te
   writeLog(writer.toString())
 }
 
-def logTestReportLocation(def report) {
+static def logTestReportLocation(def report) {
   if(!report) return
   def writer = new StringWriter()
-  def xml = new groovy.xml.MarkupBuilder(writer)
+  def xml = new MarkupBuilder(writer)
   xml.event(type: 'reportLocation', testReport: report)
   writeLog(writer.toString());
 }
 
-def logConfigurationError(aTitle, aMessage, boolean openSettings) {
+static def logConfigurationError(aTitle, aMessage, boolean openSettings) {
   def writer = new StringWriter()
-  def xml = new groovy.xml.MarkupBuilder(writer)
+  def xml = new MarkupBuilder(writer)
   xml.event(type: 'configurationError', openSettings: openSettings) {
     title(aTitle)
     message(aMessage)
@@ -143,21 +166,22 @@ def logConfigurationError(aTitle, aMessage, boolean openSettings) {
   writeLog(writer.toString());
 }
 
-String escapeCdata(String s) {
-  return "<![CDATA[" + s?.replaceAll("]]>", "]]]]><![CDATA[>")+ "]]>";
+static String escapeCdata(String s) {
+  return "<![CDATA[" + s?.getBytes("UTF-8")?.encodeBase64()?.toString() + "]]>";
 }
-def getStackTrace(Throwable t) {
+
+static def getStackTrace(Throwable t) {
   if(!t) return ''
   StringWriter sw = new StringWriter()
   t.printStackTrace(new PrintWriter(sw))
   sw.toString()
 }
 
-def wrap(String s) {
+static def wrap(String s) {
   if(!s) return s;
   s.replaceAll("\r\n|\n\r|\n|\r","<ijLogEol/>\n")
 }
 
-def writeLog(s) {
+static def writeLog(s) {
   println String.format("\n<ijLog>%s</ijLog>", wrap(s))
 }

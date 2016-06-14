@@ -8,6 +8,7 @@ import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiRecursiveElementWalkingVisitor;
 import com.intellij.psi.PsiWhiteSpace;
 import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.refactoring.util.AbstractVariableData;
 import com.intellij.util.containers.HashSet;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -21,14 +22,25 @@ import java.util.Set;
  * User : ktisha
  */
 public class SimpleDuplicatesFinder {
+  private static final Key<PsiElement> PARAMETER = Key.create("PARAMETER");
+  
+  protected PsiElement myReplacement;
   private final ArrayList<PsiElement> myPattern;
   private final Set<String> myParameters;
-  public static final Key<PsiElement> PARAMETER = Key.create("PARAMETER");
   private final Collection<String> myOutputVariables;
+
+  @Deprecated
+  public SimpleDuplicatesFinder(@NotNull final PsiElement statement1,
+                                @NotNull final PsiElement statement2,
+                                com.intellij.refactoring.extractMethod.AbstractVariableData[] variableData,
+                                Collection<String> variables) {
+    this(statement1, statement2, variables, variableData);
+  }
 
   public SimpleDuplicatesFinder(@NotNull final PsiElement statement1,
                                 @NotNull final PsiElement statement2,
-                                AbstractVariableData[] variableData, Collection<String> variables) {
+                                Collection<String> variables,
+                                AbstractVariableData[] variableData) {
     myOutputVariables = variables;
     myParameters = new HashSet<String>();
     for (AbstractVariableData data : variableData) {
@@ -100,6 +112,7 @@ public class SimpleDuplicatesFinder {
 
   @Nullable
   protected SimpleMatch isDuplicateFragment(@NotNull final PsiElement candidate) {
+    if (!canReplace(myReplacement, candidate)) return null;
     for (PsiElement pattern : myPattern) {
       if (PsiTreeUtil.isAncestor(pattern, candidate, false)) return null;
     }
@@ -157,6 +170,14 @@ public class SimpleDuplicatesFinder {
     }
 
     return true;
+  }
+
+  protected boolean canReplace(PsiElement replacement, PsiElement element) {
+    return !PsiTreeUtil.isAncestor(replacement, element, false);
+  }
+
+  public void setReplacement(PsiElement replacement) {
+    myReplacement = replacement;
   }
 
 }

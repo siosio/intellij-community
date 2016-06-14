@@ -64,7 +64,7 @@ public class JavaCompletionSorting {
 
     CompletionSorter sorter = CompletionSorter.defaultSorter(parameters, result.getPrefixMatcher());
     if (!smart && afterNew) {
-      sorter = sorter.weighBefore("liftShorter", new PreferExpected(true, expectedTypes));
+      sorter = sorter.weighBefore("liftShorter", new PreferExpected(true, expectedTypes, position));
     } else if (PsiTreeUtil.getParentOfType(position, PsiReferenceList.class) == null) {
       sorter = ((CompletionSorterImpl)sorter).withClassifier("liftShorterClasses", true, new LiftShorterClasses(position));
     }
@@ -73,16 +73,19 @@ public class JavaCompletionSorting {
     }
 
     List<LookupElementWeigher> afterPrefix = ContainerUtil.newArrayList();
+    afterPrefix.add(new PreferByKindWeigher(type, position, expectedTypes));
     if (!smart) {
       ContainerUtil.addIfNotNull(afterPrefix, preferStatics(position, expectedTypes));
+      if (!afterNew) {
+        afterPrefix.add(new PreferExpected(false, expectedTypes, position));
+      }
     }
-    if (!smart && !afterNew) {
-      afterPrefix.add(new PreferExpected(false, expectedTypes));
-    }
-    afterPrefix.add(new PreferByKindWeigher(type, position));
     ContainerUtil.addIfNotNull(afterPrefix, recursion(parameters, expectedTypes));
-    Collections.addAll(afterPrefix, new PreferSimilarlyEnding(expectedTypes),
-                       new PreferNonGeneric(), new PreferAccessible(position), new PreferSimple());
+    afterPrefix.add(new PreferSimilarlyEnding(expectedTypes));
+    if (ContainerUtil.or(expectedTypes, info -> !info.getType().equals(PsiType.VOID))) {
+      afterPrefix.add(new PreferNonGeneric());
+    }
+    Collections.addAll(afterPrefix, new PreferAccessible(position), new PreferSimple());
 
     sorter = sorter.weighAfter("prefix", afterPrefix.toArray(new LookupElementWeigher[afterPrefix.size()]));
     sorter = sorter.weighAfter("proximity", afterProximity.toArray(new LookupElementWeigher[afterProximity.size()]));
@@ -138,7 +141,7 @@ public class JavaCompletionSorting {
     };
   }
 
-  private static ExpectedTypeMatching getExpectedTypeMatching(LookupElement item, ExpectedTypeInfo[] expectedInfos) {
+  private static ExpectedTypeMatching getExpectedTypeMatching(LookupElement item, ExpectedTypeInfo[] expectedInfos, @Nullable String expectedMemberName) {
     PsiType itemType = JavaCompletionUtil.getLookupElementType(item);
 
     if (itemType != null) {
@@ -170,6 +173,22 @@ public class JavaCompletionSorting {
     }
     else if (expectedInfos.length > 0) {
       return ExpectedTypeMatching.unexpected;
+    }
+
+    return preferByMemberName(expectedMemberName, itemType);
+  }
+
+  @NotNull
+  private static ExpectedTypeMatching preferByMemberName(@Nullable String expectedMemberName, @Nullable PsiType itemType) {
+    if (expectedMemberName != null) {
+      PsiClass itemClass = PsiUtil.resolveClassInClassTypeOnly(itemType);
+      if (itemClass != null) {
+        if (itemClass.findMethodsByName(expectedMemberName, true).length > 0 ||
+            itemClass.findFieldByName(expectedMemberName, true) != null ||
+            itemClass.findInnerClassByName(expectedMemberName, true) != null) {
+          return ExpectedTypeMatching.expected;
+        }
+      }
     }
 
     return ExpectedTypeMatching.normal;
@@ -258,16 +277,13 @@ public class JavaCompletionSorting {
 
     public PreferDefaultTypeWeigher(ExpectedTypeInfo[] expectedTypes, CompletionParameters parameters) {
       super("defaultType");
-      myExpectedTypes = expectedTypes == null ? null : ContainerUtil.map2Array(expectedTypes, ExpectedTypeInfo.class, new Function<ExpectedTypeInfo, ExpectedTypeInfo>() {
-        @Override
-        public ExpectedTypeInfo fun(ExpectedTypeInfo info) {
-          PsiType type = removeClassWildcard(info.getType());
-          PsiType defaultType = removeClassWildcard(info.getDefaultType());
-          if (type == info.getType() && defaultType == info.getDefaultType()) {
-            return info;
-          }
-          return new ExpectedTypeInfoImpl(type, info.getKind(), defaultType, info.getTailType(), null, ExpectedTypeInfoImpl.NULL);
+      myExpectedTypes = expectedTypes == null ? null : ContainerUtil.map2Array(expectedTypes, ExpectedTypeInfo.class, info -> {
+        PsiType type = removeClassWildcard(info.getType());
+        PsiType defaultType = removeClassWildcard(info.getDefaultType());
+        if (type == info.getType() && defaultType == info.getDefaultType()) {
+          return info;
         }
+        return new ExpectedTypeInfoImpl(type, info.getKind(), defaultType, info.getTailType(), null, ExpectedTypeInfoImpl.NULL);
       });
       myParameters = parameters;
 
@@ -380,7 +396,7 @@ public class JavaCompletionSorting {
       if (object instanceof PsiDocCommentOwner) {
         final PsiDocCommentOwner member = (PsiDocCommentOwner)object;
         if (!JavaPsiFacade.getInstance(member.getProject()).getResolveHelper().isAccessible(member, myPosition, null)) return MyEnum.INACCESSIBLE;
-        if (member.isDeprecated()) return MyEnum.DEPRECATED;
+        if (JavaCompletionUtil.isEffectivelyDeprecated(member)) return MyEnum.DEPRECATED;
       }
       return MyEnum.NORMAL;
     }
@@ -429,14 +445,28 @@ public class JavaCompletionSorting {
     private final boolean myConstructorPossible;
     private final ExpectedTypeInfo[] myExpectedTypes;
     private final List<PsiType> myExpectedClasses = new SmartList<PsiType>();
+    private final String myExpectedMemberName;
 
-    public PreferExpected(boolean constructorPossible, ExpectedTypeInfo[] expectedTypes) {
+    public PreferExpected(boolean constructorPossible, ExpectedTypeInfo[] expectedTypes, PsiElement position) {
       super("expectedType");
       myConstructorPossible = constructorPossible;
       myExpectedTypes = expectedTypes;
       for (ExpectedTypeInfo info : expectedTypes) {
         ContainerUtil.addIfNotNull(myExpectedClasses, PsiUtil.substituteTypeParameter(info.getDefaultType(), CommonClassNames.JAVA_LANG_CLASS, 0, false));
       }
+
+      myExpectedMemberName = calcExpectedMemberNameByParentCall(position);
+    }
+
+    @Nullable
+    private static String calcExpectedMemberNameByParentCall(PsiElement position) {
+      if (position.getParent() instanceof PsiJavaCodeReferenceElement) {
+        PsiElement grand = position.getParent().getParent();
+        if (grand instanceof PsiJavaCodeReferenceElement && ((PsiJavaCodeReferenceElement)grand).getQualifier() == position.getParent()) {
+          return ((PsiJavaCodeReferenceElement)grand).getReferenceName();
+        }
+      }
+      return null;
     }
 
     @NotNull
@@ -451,10 +481,10 @@ public class JavaCompletionSorting {
             }
           }
         }
-        return ExpectedTypeMatching.normal;
+        return preferByMemberName(myExpectedMemberName, itemType);
       }
 
-      return getExpectedTypeMatching(item, myExpectedTypes);
+      return getExpectedTypeMatching(item, myExpectedTypes, myExpectedMemberName);
     }
   }
 

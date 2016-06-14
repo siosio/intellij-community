@@ -21,13 +21,14 @@ import com.intellij.execution.junit2.PsiMemberParameterizedLocation;
 import com.intellij.execution.junit2.info.MethodLocation;
 import com.intellij.ide.util.PsiClassListCellRenderer;
 import com.intellij.openapi.actionSystem.PlatformDataKeys;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.fileEditor.TextEditor;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
+import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Condition;
-import com.intellij.openapi.util.Conditions;
 import com.intellij.psi.*;
 import com.intellij.psi.search.searches.ClassInheritorsSearch;
 import com.intellij.psi.util.PsiClassUtil;
@@ -60,7 +61,8 @@ public class InheritorChooser {
                                           final Runnable performRunnable,
                                           final PsiMethod psiMethod,
                                           final PsiClass containingClass) {
-    return runMethodInAbstractClass(context, performRunnable, psiMethod, containingClass, Conditions.<PsiClass>alwaysTrue());
+    return runMethodInAbstractClass(context, performRunnable, psiMethod, containingClass,
+                                    psiClass -> psiClass.hasModifierProperty(PsiModifier.ABSTRACT));
   }
 
   public boolean runMethodInAbstractClass(final ConfigurationContext context,
@@ -68,7 +70,7 @@ public class InheritorChooser {
                                           final PsiMethod psiMethod,
                                           final PsiClass containingClass,
                                           final Condition<PsiClass> acceptAbstractCondition) {
-    if (containingClass != null && containingClass.hasModifierProperty(PsiModifier.ABSTRACT) && acceptAbstractCondition.value(containingClass)) {
+    if (containingClass != null && acceptAbstractCondition.value(containingClass)) {
       final Location location = context.getLocation();
       if (location instanceof MethodLocation) {
         final PsiClass aClass = ((MethodLocation)location).getContainingClass();
@@ -80,19 +82,14 @@ public class InheritorChooser {
       }
 
       final List<PsiClass> classes = new ArrayList<PsiClass>();
-      if (!ProgressManager.getInstance().runProcessWithProgressSynchronously(new Runnable() {
-        @Override
-        public void run() {
-          ClassInheritorsSearch.search(containingClass).forEach(new Processor<PsiClass>() {
-            @Override
-            public boolean process(PsiClass aClass) {
-              if (PsiClassUtil.isRunnableClass(aClass, true, true)) {
-                classes.add(aClass);
-              }
-              return true;
-            }
-          });
-        }
+      if (!ProgressManager.getInstance().runProcessWithProgressSynchronously(() -> {
+        final boolean isJUnit5 = ApplicationManager.getApplication().runReadAction((Computable<Boolean>)() -> JUnitUtil.isJUnit5(containingClass));
+        ClassInheritorsSearch.search(containingClass).forEach(aClass -> {
+          if (PsiClassUtil.isRunnableClass(aClass, !isJUnit5, true)) {
+            classes.add(aClass);
+          }
+          return true;
+        });
       }, "Search for " + containingClass.getQualifiedName() + " inheritors", true, containingClass.getProject())) {
         return true;
       }
@@ -142,12 +139,10 @@ public class InheritorChooser {
         .setMovable(false)
         .setResizable(false)
         .setRequestFocus(true)
-        .setItemChoosenCallback(new Runnable() {
-          public void run() {
-            final Object[] values = list.getSelectedValues();
-            if (values == null) return;
-            chooseAndPerform(values, psiMethod, context, performRunnable, classes);
-          }
+        .setItemChoosenCallback(() -> {
+          final Object[] values = list.getSelectedValues();
+          if (values == null) return;
+          chooseAndPerform(values, psiMethod, context, performRunnable, classes);
         }).createPopup().showInBestPositionFor(context.getDataContext());
       return true;
     }

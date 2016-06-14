@@ -18,7 +18,6 @@ package com.intellij.psi.impl.source.codeStyle.javadoc;
 import com.intellij.lang.java.JavaLanguage;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.CodeStyleSettings;
 import com.intellij.psi.javadoc.PsiDocComment;
@@ -35,7 +34,7 @@ import java.util.StringTokenizer;
  * @author Dmitry Skavish
  */
 public class JDParser {
-
+  private static final String JAVADOC_HEADER = "/**";
   private static final String PRE_TAG_START = "<pre>";
   private static final String PRE_TAG_END = "</pre>";
   private static final String P_END_TAG = "</p>";
@@ -45,16 +44,16 @@ public class JDParser {
   private static final char lineSeparator = '\n';
 
   private final CodeStyleSettings mySettings;
-  private final LanguageLevel myLanguageLevel;
 
-  public JDParser(@NotNull CodeStyleSettings settings, @NotNull LanguageLevel languageLevel) {
+  public JDParser(@NotNull CodeStyleSettings settings) {
     mySettings = settings;
-    myLanguageLevel = languageLevel;
   }
 
   public void formatCommentText(@NotNull PsiElement element, @NotNull CommentFormatter formatter) {
     CommentInfo info = getElementsCommentInfo(element);
-    JDComment comment = info != null ? parse(info, formatter) : null;
+    if (info == null || !isJavadoc(info)) return;
+
+    JDComment comment = parse(info, formatter);
     if (comment != null) {
       String indent = formatter.getIndent(info.getCommentOwner());
       String commentText = comment.generate(indent);
@@ -62,7 +61,11 @@ public class JDParser {
     }
   }
 
-  private CommentInfo getElementsCommentInfo(@Nullable PsiElement psiElement) {
+  private static boolean isJavadoc(CommentInfo info) {
+    return JAVADOC_HEADER.equals(info.commentHeader);
+  }
+
+  private static CommentInfo getElementsCommentInfo(@Nullable PsiElement psiElement) {
     CommentInfo info = null;
     if (psiElement instanceof PsiDocComment) {
       final PsiDocComment docComment = (PsiDocComment)psiElement;
@@ -104,7 +107,7 @@ public class JDParser {
     return comment;
   }
 
-  private JDComment createComment(@NotNull PsiElement psiElement, @NotNull CommentFormatter formatter) {
+  private static JDComment createComment(@NotNull PsiElement psiElement, @NotNull CommentFormatter formatter) {
     if (psiElement instanceof PsiClass) {
       return new JDClassComment(formatter);
     }
@@ -117,11 +120,10 @@ public class JDParser {
     return null;
   }
 
-  @NotNull
   private void parse(@Nullable String text, @NotNull JDComment comment) {
     if (text == null) return;
 
-    List<Boolean> markers = new ArrayList<Boolean>();
+    List<Boolean> markers = new ArrayList<>();
     List<String> l = toArray(text, "\n", markers);
 
     //if it is - we are dealing with multiline comment:
@@ -233,7 +235,7 @@ public class JDParser {
     s = s.trim();
     if (s.isEmpty()) return null;
     boolean p2nl = markers != null && mySettings.JD_P_AT_EMPTY_LINES;
-    List<String> list = new ArrayList<String>();
+    List<String> list = new ArrayList<>();
     StringTokenizer st = new StringTokenizer(s, separators, true);
     boolean first = true;
     int preCount = 0;
@@ -253,7 +255,7 @@ public class JDParser {
         first = true;
         if (p2nl) {
           if (isParaTag(token) && s.indexOf(P_END_TAG, curPos) < 0) {
-            list.add("");
+            list.add(isSelfClosedPTag(token) ? SELF_CLOSED_P_TAG : "");
             markers.add(Boolean.valueOf(preCount > 0));
             continue;
           }
@@ -277,6 +279,23 @@ public class JDParser {
     String withoutWS = removeWhiteSpacesFrom(token).toLowerCase();
     return withoutWS.equals(SELF_CLOSED_P_TAG) || withoutWS.equals(P_START_TAG);
   }
+  
+  private static boolean isSelfClosedPTag(@NotNull final String token) {
+    return removeWhiteSpacesFrom(token).toLowerCase().equals(SELF_CLOSED_P_TAG);
+  }
+  
+  private static boolean hasLineLongerThan(String str, int maxLength) {
+    if (str == null) return false;
+
+    for (String s : str.split("\n")) {
+      if (s.length() > maxLength) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+  
 
   @NotNull
   private static String removeWhiteSpacesFrom(@NotNull final String token) {
@@ -297,7 +316,7 @@ public class JDParser {
    */
   @Nullable
   private List<String> toArrayWrapping(@Nullable String s, int width) {
-    List<String> list = new ArrayList<String>();
+    List<String> list = new ArrayList<>();
     List<Pair<String, Boolean>> pairs = splitToParagraphs(s);
     if (pairs == null) {
       return null;
@@ -361,10 +380,10 @@ public class JDParser {
     s = s.trim();
     if (s.isEmpty()) return null;
 
-    List<Pair<String, Boolean>> result = new ArrayList<Pair<String, Boolean>>();
+    List<Pair<String, Boolean>> result = new ArrayList<>();
 
     StringBuilder sb = new StringBuilder();
-    List<Boolean> markers = new ArrayList<Boolean>();
+    List<Boolean> markers = new ArrayList<>();
     List<String> list = toArray(s, "\n", markers);
     Boolean[] marks = markers.toArray(new Boolean[markers.size()]);
     markers.clear();
@@ -373,18 +392,18 @@ public class JDParser {
       String s1 = list.get(i);
       if (marks[i].booleanValue()) {
         if (sb.length() != 0) {
-          result.add(new Pair<String, Boolean>(sb.toString(), false));
+          result.add(new Pair<>(sb.toString(), false));
           sb.setLength(0);
         }
         result.add(Pair.create(s1, marks[i]));
       }
       else {
-        if (s1.isEmpty()) {
+        if (s1.isEmpty() || s1.equals(SELF_CLOSED_P_TAG)) {
           if (sb.length() != 0) {
-            result.add(new Pair<String, Boolean>(sb.toString(), false));
+            result.add(new Pair<>(sb.toString(), false));
             sb.setLength(0);
           }
-          result.add(Pair.create("", marks[i]));
+          result.add(Pair.create(s1, marks[i]));
         }
         else if (mySettings.JD_PRESERVE_LINE_FEEDS) {
           result.add(Pair.create(s1, marks[i]));
@@ -396,7 +415,7 @@ public class JDParser {
       }
     }
     if (!mySettings.JD_PRESERVE_LINE_FEEDS && sb.length() != 0) {
-      result.add(new Pair<String, Boolean>(sb.toString(), false));
+      result.add(new Pair<>(sb.toString(), false));
     }
     return result;
   }
@@ -517,12 +536,14 @@ public class JDParser {
     },
   };
 
-  /**
-   * @see JDParser#formatJDTagDescription(String, CharSequence, boolean, int)
-   */
   @NotNull
   protected StringBuilder formatJDTagDescription(@Nullable String s, @NotNull CharSequence prefix) {
     return formatJDTagDescription(s, prefix, false, 0);
+  }
+  
+  @NotNull
+  protected StringBuilder formatJDTagDescription(@Nullable String s, @NotNull CharSequence prefix, boolean wrapLinesShorterRightMargin) {
+    return formatJDTagDescription(s, prefix, false, 0, wrapLinesShorterRightMargin);
   }
 
   private static boolean lineHasUnclosedPreTag(@NotNull String line) {
@@ -533,6 +554,14 @@ public class JDParser {
     return StringUtil.getOccurrenceCount(line, PRE_TAG_END) > StringUtil.getOccurrenceCount(line, PRE_TAG_START);
   }
 
+  @NotNull
+  protected StringBuilder formatJDTagDescription(@Nullable String str,
+                                                 @NotNull CharSequence prefix,
+                                                 boolean firstLineShorter,
+                                                 int firstLinePrefixLength) {
+    return formatJDTagDescription(str, prefix, firstLineShorter, firstLinePrefixLength, true);
+  }
+  
   /**
    * Returns formatted JavaDoc tag description, according to selected configuration
    * @param str JavaDoc tag description
@@ -545,21 +574,26 @@ public class JDParser {
   protected StringBuilder formatJDTagDescription(@Nullable String str,
                                                  @NotNull CharSequence prefix,
                                                  boolean firstLineShorter,
-                                                 int firstLinePrefixLength)
+                                                 int firstLinePrefixLength,
+                                                 boolean isWrapLinesShorterRightMargin)
   {
-    int rightMargin = mySettings.getRightMargin(JavaLanguage.INSTANCE);
+    final int rightMargin = mySettings.getRightMargin(JavaLanguage.INSTANCE);
+    final int maxCommentLength = rightMargin - prefix.length();
+    
     StringBuilder sb = new StringBuilder();
     List<String> list;
-
+    
+    boolean canWrap = isWrapLinesShorterRightMargin || hasLineLongerThan(str, maxCommentLength);
+    
     //If wrap comments selected, comments should be wrapped by the right margin
-    if (mySettings.WRAP_COMMENTS) {
-      list = toArrayWrapping(str, rightMargin - prefix.length());
+    if (mySettings.WRAP_COMMENTS && canWrap) {
+      list = toArrayWrapping(str, maxCommentLength);
 
       if (firstLineShorter
           && list != null && !list.isEmpty()
           && list.get(0).length() > rightMargin - firstLinePrefixLength)
       {
-        list = new ArrayList<String>();
+        list = new ArrayList<>();
         //want the first line to be shorter, according to it's prefix
         String firstLine = toArrayWrapping(str, rightMargin - firstLinePrefixLength).get(0);
         //so now first line is exactly same width we need
@@ -572,7 +606,7 @@ public class JDParser {
         }
 
         //getting all another lines according to their prefix
-        List<String> subList = toArrayWrapping(str, rightMargin - prefix.length());
+        List<String> subList = toArrayWrapping(str, maxCommentLength);
 
         //removing pre tag
         if (unclosedPreTag && subList != null && !subList.isEmpty()) {
@@ -583,7 +617,7 @@ public class JDParser {
       }
     }
     else {
-      list = toArray(str, "\n", new ArrayList<Boolean>());
+      list = toArray(str, "\n", new ArrayList<>());
     }
 
     if (list == null) {
@@ -596,13 +630,7 @@ public class JDParser {
         if (line.isEmpty() && !mySettings.JD_KEEP_EMPTY_LINES) continue;
         if (i != 0) sb.append(prefix);
         if (line.isEmpty() && mySettings.JD_P_AT_EMPTY_LINES && !insidePreTag) {
-          if (myLanguageLevel.isAtLeast(LanguageLevel.JDK_1_8)) {
-            //Self-closing elements are not allowed for javadoc tool from JDK8
-            sb.append(P_START_TAG);
-          }
-          else {
-            sb.append(SELF_CLOSED_P_TAG);
-          }
+          sb.append(P_START_TAG);
         }
         else {
           sb.append(line);

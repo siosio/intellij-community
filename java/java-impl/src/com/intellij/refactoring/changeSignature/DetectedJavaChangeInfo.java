@@ -22,6 +22,7 @@ import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.*;
+import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.refactoring.BaseRefactoringProcessor;
 import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.util.CanonicalTypes;
@@ -75,6 +76,10 @@ class DetectedJavaChangeInfo extends JavaChangeInfoImpl {
         if (!parameterInfo.getTypeWrapper().isValid()) {
           return null;
         }
+      }
+
+      if (PsiTreeUtil.findChildOfType(method.getParameterList(), PsiErrorElement.class) != null) {
+        return null;
       }
     }
     catch (IncorrectOperationException e) {
@@ -282,12 +287,9 @@ class DetectedJavaChangeInfo extends JavaChangeInfoImpl {
 
         @Override
         protected void invokeRefactoring(final BaseRefactoringProcessor processor) {
-          CommandProcessor.getInstance().executeCommand(myProject, new Runnable() {
-            @Override
-            public void run() {
-              temporallyRevertChanges(method, oldText);
-              doRefactor(processor);
-            }
+          CommandProcessor.getInstance().executeCommand(myProject, () -> {
+            temporallyRevertChanges(method, oldText);
+            doRefactor(processor);
           }, RefactoringBundle.message("changing.signature.of.0", DescriptiveNameUtil.getDescriptiveName(currentMethod)), null);
         }
 
@@ -305,16 +307,13 @@ class DetectedJavaChangeInfo extends JavaChangeInfoImpl {
   private static void temporallyRevertChanges(final PsiElement psiElement,
                                               final String oldText,
                                               final TextRange textRange) {
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      @Override
-      public void run() {
-        final PsiFile file = psiElement.getContainingFile();
-        final PsiDocumentManager documentManager = PsiDocumentManager.getInstance(psiElement.getProject());
-        final Document document = documentManager.getDocument(file);
-        if (document != null) {
-          document.replaceString(textRange.getStartOffset(), textRange.getEndOffset(), oldText);
-          documentManager.commitDocument(document);
-        }
+    ApplicationManager.getApplication().runWriteAction(() -> {
+      final PsiFile file = psiElement.getContainingFile();
+      final PsiDocumentManager documentManager = PsiDocumentManager.getInstance(psiElement.getProject());
+      final Document document = documentManager.getDocument(file);
+      if (document != null) {
+        document.replaceString(textRange.getStartOffset(), textRange.getEndOffset(), oldText);
+        documentManager.commitDocument(document);
       }
     });
   }

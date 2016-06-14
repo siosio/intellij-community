@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,7 +35,7 @@ public class JBAutoscroller implements ActionListener {
   private static final Key<ScrollDeltaProvider> SCROLL_HANDLER_KEY = Key.create("JBAutoScroller.AutoScrollHandler");
   private static final JBAutoscroller INSTANCE = new JBAutoscroller();
 
-  private final Timer myTimer = new Timer(SCROLL_UPDATE_INTERVAL, this);
+  private final Timer myTimer = UIUtil.createNamedTimer("JBAutoScroller",SCROLL_UPDATE_INTERVAL, this);
   private final DefaultScrollDeltaProvider myDefaultAutoScrollHandler = new DefaultScrollDeltaProvider();
 
   private SyntheticDragEvent myLatestDragEvent;
@@ -45,19 +45,23 @@ public class JBAutoscroller implements ActionListener {
   private JBAutoscroller() {
   }
 
-  public static void installOn(@NotNull JComponent component) {
-    installOn(component, null);
+  public static void installOn(@NotNull JComponent component, @Nullable AutoscrollLocker locker) {
+    installOn(component, null, locker);
   }
 
   public static void installOn(@NotNull JComponent component, @Nullable ScrollDeltaProvider handler) {
-    getInstance().doInstallOn(component, handler);
+    installOn(component, handler, null);
+  }
+
+  public static void installOn(@NotNull JComponent component, @Nullable ScrollDeltaProvider handler, @Nullable AutoscrollLocker locker) {
+    getInstance().doInstallOn(component, handler, locker);
   }
 
   private static JBAutoscroller getInstance() {
     return INSTANCE;
   }
 
-  private void doInstallOn(@NotNull JComponent component, @Nullable ScrollDeltaProvider handler) {
+  private void doInstallOn(@NotNull JComponent component, @Nullable ScrollDeltaProvider handler, @Nullable AutoscrollLocker locker) {
     component.setAutoscrolls(false); // disable swing autoscroll
 
     if (handler != null) {
@@ -67,7 +71,7 @@ public class JBAutoscroller implements ActionListener {
     if (component instanceof JTable) {
       JTable t = (JTable)component;
       new MoveTableCellEditorOnAutoscrollFix(t);
-      new ScrollOnTableSelectionChangeFix(t);
+      new ScrollOnTableSelectionChangeFix(t, locker);
     }
 
     component.addMouseListener(new MouseAdapter() {
@@ -190,6 +194,23 @@ public class JBAutoscroller implements ActionListener {
     }
   }
 
+  public static class AutoscrollLocker {
+    private boolean locked;
+
+    public boolean locked() {
+      return locked;
+    }
+
+    public void runWithLock(Runnable runnable) {
+      try {
+        locked = true;
+        runnable.run();
+      } finally {
+        locked = false;
+      }
+    }
+  }
+
   private static class SyntheticDragEvent extends MouseEvent {
     public SyntheticDragEvent(Component source, int id, long when, int modifiers,
                               int x, int y, int xAbs, int yAbs,
@@ -263,9 +284,11 @@ public class JBAutoscroller implements ActionListener {
   // Particularly, scrollRectToVisible in javax.swing.JTable#changeSelection won't be called.
   private static class ScrollOnTableSelectionChangeFix implements ListSelectionListener, PropertyChangeListener {
     private final JTable myTable;
+    private final AutoscrollLocker myLocker;
 
-    public ScrollOnTableSelectionChangeFix(JTable table) {
+    public ScrollOnTableSelectionChangeFix(JTable table, AutoscrollLocker locker) {
       myTable = table;
+      myLocker = locker;
 
       myTable.addPropertyChangeListener("selectionModel", this);
       myTable.addPropertyChangeListener("columnModel", this);
@@ -276,14 +299,18 @@ public class JBAutoscroller implements ActionListener {
 
     @Override
     public void valueChanged(ListSelectionEvent e) {
-      if (e.getValueIsAdjusting() || getInstance().isRunningOn(myTable)) return;
+      if (e.getValueIsAdjusting() || getInstance().isRunningOn(myTable) || locked()) return;
 
       int row = getLeadSelectionIndexIfSelectionIsNotEmpty(getRowSelectionModel());
       int col = getLeadSelectionIndexIfSelectionIsNotEmpty(getColumnSelectionModel());
 
-      if (row >= 0 && row < myTable.getRowCount() && col >= 0 && col < myTable.getColumnCount()) {
+      if (row >= 0 && row < myTable.getRowCount() || col >= 0 && col < myTable.getColumnCount()) {
         myTable.scrollRectToVisible(myTable.getCellRect(row, col, false));
       }
+    }
+
+    private boolean locked() {
+      return myLocker != null && myLocker.locked();
     }
 
     @Override

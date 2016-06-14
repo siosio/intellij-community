@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,12 +19,10 @@ import com.intellij.debugger.DebugEnvironment;
 import com.intellij.debugger.DebugUIEnvironment;
 import com.intellij.debugger.DebuggerManagerEx;
 import com.intellij.debugger.DefaultDebugUIEnvironment;
-import com.intellij.debugger.engine.DebugProcessImpl;
 import com.intellij.debugger.engine.JavaDebugProcess;
 import com.intellij.debugger.impl.DebuggerContextImpl;
 import com.intellij.debugger.impl.DebuggerSession;
 import com.intellij.debugger.impl.DebuggerStateManager;
-import com.intellij.debugger.ui.tree.render.BatchEvaluator;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.Executor;
 import com.intellij.execution.configurations.RemoteConnection;
@@ -71,17 +69,6 @@ public class DebuggerPanelsManager implements ProjectComponent {
       return null;
     }
 
-    final DebugProcessImpl debugProcess = debuggerSession.getProcess();
-    if (debugProcess.isDetached() || debugProcess.isDetaching()) {
-      debuggerSession.dispose();
-      return null;
-    }
-    if (modelEnvironment.isRemote()) {
-      // optimization: that way BatchEvaluator will not try to lookup the class file in remote VM
-      // which is an expensive operation when executed first time
-      debugProcess.putUserData(BatchEvaluator.REMOTE_SESSION_KEY, Boolean.TRUE);
-    }
-
     XDebugSession debugSession =
       XDebuggerManager.getInstance(myProject).startSessionAndShowTab(modelEnvironment.getSessionName(), environment.getReuseContent(), new XDebugProcessStarter() {
         @Override
@@ -102,10 +89,10 @@ public class DebuggerPanelsManager implements ProjectComponent {
         if (executor == DefaultDebugExecutor.getDebugExecutorInstance()) {
           DebuggerSession session = descriptor == null ? null : getSession(myProject, descriptor);
           if (session != null) {
-            getContextManager().setState(session.getContextManager().getContext(), session.getState(), DebuggerSession.EVENT_CONTEXT, null);
+            getContextManager().setState(session.getContextManager().getContext(), session.getState(), DebuggerSession.Event.CONTEXT, null);
           }
           else {
-            getContextManager().setState(DebuggerContextImpl.EMPTY_CONTEXT, DebuggerSession.STATE_DISPOSED, DebuggerSession.EVENT_CONTEXT, null);
+            getContextManager().setState(DebuggerContextImpl.EMPTY_CONTEXT, DebuggerSession.State.DISPOSED, DebuggerSession.Event.CONTEXT, null);
           }
         }
       }

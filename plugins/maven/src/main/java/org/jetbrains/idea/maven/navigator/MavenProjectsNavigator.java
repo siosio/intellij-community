@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,16 +20,11 @@ import com.intellij.execution.RunManagerAdapter;
 import com.intellij.execution.RunManagerEx;
 import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.ide.util.treeView.TreeState;
-import com.intellij.openapi.Disposable;
-import com.intellij.openapi.actionSystem.ActionManager;
-import com.intellij.openapi.actionSystem.AnAction;
-import com.intellij.openapi.actionSystem.CommonShortcuts;
-import com.intellij.openapi.actionSystem.DefaultActionGroup;
+import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.*;
 import com.intellij.openapi.project.DumbAwareRunnable;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.WriteExternalException;
@@ -63,7 +58,7 @@ import java.net.URL;
 import java.util.Collections;
 import java.util.List;
 
-@State(name = "MavenProjectNavigator", storages = {@Storage(file = StoragePathMacros.WORKSPACE_FILE)})
+@State(name = "MavenProjectNavigator", storages = {@Storage(StoragePathMacros.WORKSPACE_FILE)})
 public class MavenProjectsNavigator extends MavenSimpleProjectComponent implements PersistentStateComponent<MavenProjectsNavigatorState> {
   public static final String TOOL_WINDOW_ID = "Maven Projects";
 
@@ -94,6 +89,7 @@ public class MavenProjectsNavigator extends MavenSimpleProjectComponent implemen
     myShortcutsManager = shortcutsManager;
   }
 
+  @Override
   public MavenProjectsNavigatorState getState() {
     ApplicationManager.getApplication().assertIsDispatchThread();
     if (myStructure != null) {
@@ -108,6 +104,7 @@ public class MavenProjectsNavigator extends MavenSimpleProjectComponent implemen
     return myState;
   }
 
+  @Override
   public void loadState(MavenProjectsNavigatorState state) {
     myState = state;
     scheduleStructureUpdate();
@@ -185,6 +182,7 @@ public class MavenProjectsNavigator extends MavenSimpleProjectComponent implemen
     listenForProjectsChanges();
     if (isUnitTestMode()) return;
     MavenUtil.runWhenInitialized(myProject, new DumbAwareRunnable() {
+      @Override
       public void run() {
         if (myProject.isDisposed()) return;
         initToolWindow();
@@ -202,53 +200,36 @@ public class MavenProjectsNavigator extends MavenSimpleProjectComponent implemen
     myProjectsManager.addProjectsTreeListener(new MyProjectsListener());
 
     myShortcutsManager.addListener(new MavenShortcutsManager.Listener() {
+      @Override
       public void shortcutsUpdated() {
-        scheduleStructureRequest(new Runnable() {
-          public void run() {
-            myStructure.updateGoals();
-          }
-        });
+        scheduleStructureRequest(() -> myStructure.updateGoals());
       }
     });
 
     myTasksManager.addListener(new MavenTasksManager.Listener() {
+      @Override
       public void compileTasksChanged() {
-        scheduleStructureRequest(new Runnable() {
-          public void run() {
-            myStructure.updateGoals();
-          }
-        });
+        scheduleStructureRequest(() -> myStructure.updateGoals());
       }
     });
 
     RunManagerEx.getInstanceEx(myProject).addRunManagerListener(new RunManagerAdapter() {
+      @Override
       public void beforeRunTasksChanged() {
-        scheduleStructureRequest(new Runnable() {
-          public void run() {
-            myStructure.updateGoals();
-          }
-        });
+        scheduleStructureRequest(() -> myStructure.updateGoals());
       }
     });
 
     MavenRunner.getInstance(myProject).getSettings().addListener(new MavenRunnerSettings.Listener() {
       @Override
       public void skipTestsChanged() {
-        scheduleStructureRequest(new Runnable() {
-          public void run() {
-            myStructure.updateGoals();
-          }
-        });
+        scheduleStructureRequest(() -> myStructure.updateGoals());
       }
     });
 
     ((RunManagerEx)RunManager.getInstance(myProject)).addRunManagerListener(new RunManagerAdapter() {
       private void changed() {
-        scheduleStructureRequest(new Runnable() {
-          public void run() {
-            myStructure.updateRunConfigurations();
-          }
-        });
+        scheduleStructureRequest(() -> myStructure.updateRunConfigurations());
       }
 
       @Override
@@ -272,9 +253,9 @@ public class MavenProjectsNavigator extends MavenSimpleProjectComponent implemen
     initTree();
     JPanel panel = new MavenProjectsNavigatorPanel(myProject, myTree);
 
-    AnAction removeAction = ActionManager.getInstance().getAction("Maven.RemoveRunConfiguration");
+    AnAction removeAction = EmptyAction.wrap(ActionManager.getInstance().getAction("Maven.RemoveRunConfiguration"));
     removeAction.registerCustomShortcutSet(CommonShortcuts.getDelete(), myTree, myProject);
-    AnAction editSource = ActionManager.getInstance().getAction("Maven.EditRunConfiguration");
+    AnAction editSource = EmptyAction.wrap(ActionManager.getInstance().getAction("Maven.EditRunConfiguration"));
     editSource.registerCustomShortcutSet(CommonShortcuts.getEditSource(), myTree, myProject);
 
     final ToolWindowManagerEx manager = ToolWindowManagerEx.getInstanceEx(myProject);
@@ -293,12 +274,14 @@ public class MavenProjectsNavigator extends MavenSimpleProjectComponent implemen
       public void stateChanged() {
         if (myToolWindow.isDisposed()) return;
         boolean visible = myToolWindow.isVisible();
-        if (!visible || visible == wasVisible) return;
+        if (!visible || wasVisible) {
+          return;
+        }
         scheduleStructureUpdate();
-        wasVisible = visible;
+        wasVisible = true;
       }
     };
-    manager.addToolWindowManagerListener(listener);
+    manager.addToolWindowManagerListener(listener, myProject);
 
     ActionManager actionManager = ActionManager.getInstance();
 
@@ -310,12 +293,6 @@ public class MavenProjectsNavigator extends MavenSimpleProjectComponent implemen
     group.add(actionManager.getAction("Maven.ShowVersions"));
 
     myToolWindow.setAdditionalGearActions(group);
-
-    Disposer.register(myProject, new Disposable() {
-      public void dispose() {
-        manager.removeToolWindowManagerListener(listener);
-      }
-    });
   }
 
   private void initTree() {
@@ -357,41 +334,37 @@ public class MavenProjectsNavigator extends MavenSimpleProjectComponent implemen
   }
 
   public void selectInTree(final MavenProject project) {
-    scheduleStructureRequest(new Runnable() {
-      public void run() {
-        myStructure.select(project);
-      }
-    });
+    scheduleStructureRequest(() -> myStructure.select(project));
   }
 
   private void scheduleStructureRequest(final Runnable r) {
     if (isUnitTestMode()) {
-      r.run();
+      if (myStructure != null) {
+        r.run();
+      }
       return;
     }
 
     if (myToolWindow == null) return;
-    MavenUtil.invokeLater(myProject, new Runnable() {
-      public void run() {
-        if (!myToolWindow.isVisible()) return;
+    MavenUtil.invokeLater(myProject, () -> {
+      if (!myToolWindow.isVisible()) return;
 
-        boolean shouldCreate = myStructure == null;
-        if (shouldCreate) {
-          initStructure();
-        }
+      boolean shouldCreate = myStructure == null;
+      if (shouldCreate) {
+        initStructure();
+      }
 
-        r.run();
+      r.run();
 
-        if (shouldCreate) {
-          if (myState.treeState != null) {
-            TreeState treeState = new TreeState();
-            try {
-              treeState.readExternal(myState.treeState);
-              treeState.applyTo(myTree);
-            }
-            catch (InvalidDataException e) {
-              MavenLog.LOG.info(e);
-            }
+      if (shouldCreate) {
+        if (myState.treeState != null) {
+          TreeState treeState = new TreeState();
+          try {
+            treeState.readExternal(myState.treeState);
+            treeState.applyTo(myTree);
+          }
+          catch (InvalidDataException e) {
+            MavenLog.LOG.info(e);
           }
         }
       }
@@ -403,18 +376,16 @@ public class MavenProjectsNavigator extends MavenSimpleProjectComponent implemen
   }
 
   private void scheduleStructureUpdate() {
-    scheduleStructureRequest(new Runnable() {
-      public void run() {
-        myStructure.update();
-      }
-    });
+    scheduleStructureRequest(() -> myStructure.update());
   }
 
   private class MyProjectsListener extends MavenProjectsTree.ListenerAdapter implements MavenProjectsManager.Listener {
+    @Override
     public void activated() {
       scheduleStructureUpdate();
     }
 
+    @Override
     public void projectsScheduled() {
     }
 
@@ -424,20 +395,12 @@ public class MavenProjectsNavigator extends MavenSimpleProjectComponent implemen
 
     @Override
     public void projectsIgnoredStateChanged(final List<MavenProject> ignored, final List<MavenProject> unignored, boolean fromImport) {
-      scheduleStructureRequest(new Runnable() {
-        public void run() {
-          myStructure.updateIgnored(ContainerUtil.concat(ignored, unignored));
-        }
-      });
+      scheduleStructureRequest(() -> myStructure.updateIgnored(ContainerUtil.concat(ignored, unignored)));
     }
 
     @Override
     public void profilesChanged() {
-      scheduleStructureRequest(new Runnable() {
-        public void run() {
-          myStructure.updateProfiles();
-        }
-      });
+      scheduleStructureRequest(() -> myStructure.updateProfiles());
     }
 
     @Override
@@ -445,21 +408,19 @@ public class MavenProjectsNavigator extends MavenSimpleProjectComponent implemen
       scheduleUpdateProjects(MavenUtil.collectFirsts(updated), deleted);
     }
 
+    @Override
     public void projectResolved(Pair<MavenProject, MavenProjectChanges> projectWithChanges,
                                 NativeMavenProjectHolder nativeMavenProject) {
       scheduleUpdateProjects(Collections.singletonList(projectWithChanges.first), Collections.<MavenProject>emptyList());
     }
 
+    @Override
     public void pluginsResolved(MavenProject project) {
       scheduleUpdateProjects(Collections.singletonList(project), Collections.<MavenProject>emptyList());
     }
 
     private void scheduleUpdateProjects(final List<MavenProject> projects, final List<MavenProject> deleted) {
-      scheduleStructureRequest(new Runnable() {
-        public void run() {
-          myStructure.updateProjects(projects, deleted);
-        }
-      });
+      scheduleStructureRequest(() -> myStructure.updateProjects(projects, deleted));
     }
   }
 }

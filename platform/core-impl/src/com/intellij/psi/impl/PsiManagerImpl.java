@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,13 +26,13 @@ import com.intellij.openapi.progress.ProgressIndicatorProvider;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.FileIndexFacade;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.vfs.NonPhysicalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileFilter;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.file.impl.FileManager;
 import com.intellij.psi.impl.file.impl.FileManagerImpl;
 import com.intellij.psi.util.PsiModificationTracker;
-import com.intellij.testFramework.LightVirtualFile;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.messages.MessageBus;
 import com.intellij.util.messages.Topic;
@@ -129,7 +129,7 @@ public class PsiManagerImpl extends PsiManagerEx {
     else if (element instanceof PsiFileSystemItem) {
       virtualFile = ((PsiFileSystemItem)element).getVirtualFile();
     }
-    if (file != null && file.isPhysical() && virtualFile instanceof LightVirtualFile) return true;
+    if (file != null && file.isPhysical() && virtualFile.getFileSystem() instanceof NonPhysicalFileSystem) return true;
 
     if (virtualFile != null) {
       return myFileIndex.isInContent(virtualFile);
@@ -137,6 +137,7 @@ public class PsiManagerImpl extends PsiManagerEx {
     return false;
   }
 
+  @Override
   @TestOnly
   public void setAssertOnFileLoadingFilter(@NotNull VirtualFileFilter filter, @NotNull Disposable parentDisposable) {
     // Find something to ensure there's no changed files waiting to be processed in repository indices.
@@ -374,6 +375,10 @@ public class PsiManagerImpl extends PsiManagerEx {
     myTreeChangePreprocessors.add(preprocessor);
   }
 
+  public void removeTreeChangePreprocessor(@NotNull PsiTreeChangePreprocessor preprocessor) {
+    myTreeChangePreprocessors.remove(preprocessor);
+  }
+
   private void fireEvent(@NotNull PsiTreeChangeEventImpl event) {
     boolean isRealTreeChange = event.getCode() != PsiTreeChangeEventImpl.PsiEventType.PROPERTY_CHANGED
                                && event.getCode() != PsiTreeChangeEventImpl.PsiEventType.BEFORE_PROPERTY_CHANGE;
@@ -521,5 +526,6 @@ public class PsiManagerImpl extends PsiManagerEx {
   public void cleanupForNextTest() {
     assert ApplicationManager.getApplication().isUnitTestMode();
     myFileManager.cleanupForNextTest();
+    dropResolveCaches();
   }
 }

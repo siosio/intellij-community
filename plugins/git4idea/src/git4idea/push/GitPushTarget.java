@@ -19,7 +19,10 @@ import com.intellij.dvcs.push.PushTarget;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Condition;
 import com.intellij.util.containers.ContainerUtil;
-import git4idea.*;
+import git4idea.GitLocalBranch;
+import git4idea.GitRemoteBranch;
+import git4idea.GitStandardRemoteBranch;
+import git4idea.GitUtil;
 import git4idea.branch.GitBranchUtil;
 import git4idea.repo.GitBranchTrackInfo;
 import git4idea.repo.GitRemote;
@@ -100,7 +103,7 @@ public class GitPushTarget implements PushTarget {
     if (existingRemoteBranch != null) {
       return new GitPushTarget(existingRemoteBranch, false);
     }
-    GitRemoteBranch rb = new GitStandardRemoteBranch(remote, branchName, GitBranch.DUMMY_HASH);
+    GitRemoteBranch rb = new GitStandardRemoteBranch(remote, branchName);
     return new GitPushTarget(rb, true);
   }
 

@@ -20,14 +20,15 @@ import com.intellij.codeInspection.ex.InspectionProfileImpl;
 import com.intellij.testFramework.TestDataFile;
 import com.intellij.testFramework.TestDataPath;
 import com.jetbrains.python.codeInsight.PyCodeInsightSettings;
-import com.jetbrains.python.documentation.DocStringFormat;
-import com.jetbrains.python.documentation.PyDocumentationSettings;
+import com.jetbrains.python.documentation.docstrings.DocStringFormat;
 import com.jetbrains.python.fixtures.PyTestCase;
 import com.jetbrains.python.inspections.*;
 import com.jetbrains.python.inspections.unresolvedReference.PyUnresolvedReferencesInspection;
 import com.jetbrains.python.psi.LanguageLevel;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
+
+import java.util.List;
 
 /**
  * @author dcheryasov
@@ -243,6 +244,11 @@ public class PyQuickFixTest extends PyTestCase {
     doInspectionTest(PyRedundantParenthesesInspection.class, PyBundle.message("QFIX.redundant.parentheses"), true, true);
   }
 
+  // PY-18203
+  public void testRedundantParenthesesInTuples() {
+    doInspectionTest(PyRedundantParenthesesInspection.class, PyBundle.message("QFIX.redundant.parentheses"), true, true);
+  }
+
   // PY-1020
   public void testChainedComparisons() {
     doInspectionTest(PyChainedComparisonsInspection.class, PyBundle.message("QFIX.chained.comparison"), true, true);
@@ -290,12 +296,7 @@ public class PyQuickFixTest extends PyTestCase {
 
   // PY-2083
   public void testUnresolvedWith() {
-    runWithLanguageLevel(LanguageLevel.PYTHON25, new Runnable() {
-      @Override
-      public void run() {
-        doInspectionTest(PyUnresolvedReferencesInspection.class, PyBundle.message("QFIX.unresolved.reference.add.future"), true, true);
-      }
-    });
+    runWithLanguageLevel(LanguageLevel.PYTHON25, () -> doInspectionTest(PyUnresolvedReferencesInspection.class, PyBundle.message("QFIX.unresolved.reference.add.future"), true, true));
   }
 
   // PY-2092
@@ -322,11 +323,13 @@ public class PyQuickFixTest extends PyTestCase {
 
   // PY-1445
   public void testConvertSingleQuotedDocstring() {
+    getIndentOptions().INDENT_SIZE = 2;
     doInspectionTest(PySingleQuotedDocstringInspection.class, PyBundle.message("QFIX.convert.single.quoted.docstring"), true, true);
   }
 
   // PY-8926
   public void testConvertSingleQuotedDocstringEscape() {
+    getIndentOptions().INDENT_SIZE = 2;
     doInspectionTest(PySingleQuotedDocstringInspection.class, PyBundle.message("QFIX.convert.single.quoted.docstring"), true, true);
   }
 
@@ -336,6 +339,11 @@ public class PyQuickFixTest extends PyTestCase {
   }
 
   public void testDefaultArgumentEmptyList() {
+    doInspectionTest(PyDefaultArgumentInspection.class, PyBundle.message("QFIX.default.argument"), true, true);
+  }
+
+  // PY-17392
+  public void testDefaultArgumentCommentsInsideParameters() {
     doInspectionTest(PyDefaultArgumentInspection.class, PyBundle.message("QFIX.default.argument"), true, true);
   }
 
@@ -374,7 +382,17 @@ public class PyQuickFixTest extends PyTestCase {
     doInspectionTest(PyMissingConstructorInspection.class, PyBundle.message("QFIX.add.super"), true, true);
   }
 
-  // PY-16258
+  // PY-16420
+  public void testAddCallSuperRepeatedOptionalParamsPassedToSuperConstructor() {
+    doInspectionTest(PyMissingConstructorInspection.class, PyBundle.message("QFIX.add.super"), true, true);
+  }
+
+  // PY-16420
+  public void testAddCallSuperRepeatedOptionalTupleParamsPassedToSuperConstructor() {
+    doInspectionTest(PyMissingConstructorInspection.class, PyBundle.message("QFIX.add.super"), true, true);
+  }
+
+  // PY-16289
   public void testAddCallSuperCommentAfterColonPreserved() {
     doInspectionTest(PyMissingConstructorInspection.class, PyBundle.message("QFIX.add.super"), true, true);
   }
@@ -411,12 +429,7 @@ public class PyQuickFixTest extends PyTestCase {
 
   // PY-3120
   public void testSetFunctionToLiteral() {
-    runWithLanguageLevel(LanguageLevel.PYTHON27, new Runnable() {
-      @Override
-      public void run() {
-        doInspectionTest(PySetFunctionToLiteralInspection.class, PyBundle.message("QFIX.replace.function.set.with.literal"), true, true);
-      }
-    });
+    runWithLanguageLevel(LanguageLevel.PYTHON27, () -> doInspectionTest(PySetFunctionToLiteralInspection.class, PyBundle.message("QFIX.replace.function.set.with.literal"), true, true));
   }
 
   public void testDictComprehensionToCall() {
@@ -425,38 +438,74 @@ public class PyQuickFixTest extends PyTestCase {
 
   // PY-3394
   public void testDocstringParams() {
-    PyDocumentationSettings documentationSettings = PyDocumentationSettings.getInstance(myFixture.getModule());
-    documentationSettings.setFormat(DocStringFormat.EPYTEXT);
-    try {
-      doInspectionTest(PyDocstringInspection.class,
-                       PyBundle.message("QFIX.docstring.add.$0", "b"), true, true);
-    }
-    finally {
-      documentationSettings.setFormat(DocStringFormat.PLAIN);
-    }
+    getIndentOptions().INDENT_SIZE = 2;
+    runWithDocStringFormat(DocStringFormat.EPYTEXT,
+                           () -> doInspectionTest(PyIncorrectDocstringInspection.class, PyBundle.message("QFIX.docstring.add.$0", "b"), true, true));
   }
 
   public void testDocstringParams1() {
-    PyDocumentationSettings documentationSettings = PyDocumentationSettings.getInstance(myFixture.getModule());
-    documentationSettings.setFormat(DocStringFormat.EPYTEXT);
-    try {
-      doInspectionTest(PyDocstringInspection.class, PyBundle.message("QFIX.docstring.remove.$0", "c"), true, true);
-    }
-    finally {
-      documentationSettings.setFormat(DocStringFormat.PLAIN);
-    }
+    getIndentOptions().INDENT_SIZE = 2;
+    runWithDocStringFormat(DocStringFormat.EPYTEXT,
+                           () -> doInspectionTest(PyIncorrectDocstringInspection.class, PyBundle.message("QFIX.docstring.remove.$0", "c"), true, true));
   }
 
   // PY-4964
   public void testDocstringParams2() {
-    PyDocumentationSettings documentationSettings = PyDocumentationSettings.getInstance(myFixture.getModule());
-    documentationSettings.setFormat(DocStringFormat.EPYTEXT);
-    try {
-      doInspectionTest(PyDocstringInspection.class, PyBundle.message("QFIX.docstring.add.$0", "ham"), true, true);
-    }
-    finally {
-      documentationSettings.setFormat(DocStringFormat.PLAIN);
-    }
+    runWithDocStringFormat(DocStringFormat.EPYTEXT,
+                           () -> doInspectionTest(PyIncorrectDocstringInspection.class, PyBundle.message("QFIX.docstring.add.$0", "ham"), true, true));
+  }
+
+  // PY-9795
+  public void testGoogleDocStringAddParam() {
+    runWithDocStringFormat(DocStringFormat.GOOGLE,
+                           () -> doInspectionTest(PyIncorrectDocstringInspection.class, PyBundle.message("QFIX.docstring.add.$0", "b"), true, true));
+  }
+
+  // PY-9795
+  public void testGoogleDocStringRemoveParam() {
+    runWithDocStringFormat(DocStringFormat.GOOGLE,
+                           () -> doInspectionTest(PyIncorrectDocstringInspection.class, PyBundle.message("QFIX.docstring.remove.$0", "c"), true, true));
+  }
+
+  // PY-9795
+  public void testGoogleDocStringRemoveParamWithSection() {
+    runWithDocStringFormat(DocStringFormat.GOOGLE,
+                           () -> doInspectionTest(PyIncorrectDocstringInspection.class, PyBundle.message("QFIX.docstring.remove.$0", "c"), true, true));
+  }
+
+  // PY-16761
+  public void testGoogleDocStringRemovePositionalVararg() {
+    runWithDocStringFormat(DocStringFormat.GOOGLE,
+                           () -> doInspectionTest(PyIncorrectDocstringInspection.class, PyBundle.message("QFIX.docstring.remove.$0", "args"), true, true));
+  }
+
+  // PY-16761
+  public void testGoogleDocStringRemoveKeywordVararg() {
+    runWithDocStringFormat(DocStringFormat.GOOGLE, () -> doInspectionTest(PyIncorrectDocstringInspection.class, PyBundle.message("QFIX.docstring.remove.$0", "kwargs"), true, true));
+  }
+
+  // PY-16908
+  public void testNumpyDocStringRemoveFirstOfCombinedParams() {
+    runWithDocStringFormat(DocStringFormat.NUMPY,
+                           () -> doInspectionTest(PyIncorrectDocstringInspection.class, PyBundle.message("QFIX.docstring.remove.$0", "x"), true, true));
+  }
+
+  // PY-16908
+  public void testNumpyDocStringRemoveMidOfCombinedParams() {
+    runWithDocStringFormat(DocStringFormat.NUMPY,
+                           () -> doInspectionTest(PyIncorrectDocstringInspection.class, PyBundle.message("QFIX.docstring.remove.$0", "y"), true, true));
+  }
+  
+  // PY-16908
+  public void testNumpyDocStringRemoveLastOfCombinedParams() {
+    runWithDocStringFormat(DocStringFormat.NUMPY,
+                           () -> doInspectionTest(PyIncorrectDocstringInspection.class, PyBundle.message("QFIX.docstring.remove.$0", "z"), true, true));
+  }
+
+  // PY-16908
+  public void testNumpyDocStringRemoveCombinedVarargParam() {
+    runWithDocStringFormat(DocStringFormat.NUMPY,
+                           () -> doInspectionTest(PyIncorrectDocstringInspection.class, PyBundle.message("QFIX.docstring.remove.$0", "args"), true, true));
   }
 
   public void testUnnecessaryBackslash() {
@@ -519,6 +568,16 @@ public class PyQuickFixTest extends PyTestCase {
     myFixture.checkHighlighting(true, false, true);
   }
 
+  public void testImplementAbstractProperty() {
+    doInspectionTest("ImplementAbstractProperty.py", PyAbstractClassInspection.class, PyBundle.message("QFIX.NAME.implement.methods"),
+                     true, true);
+  }
+
+  public void testImplementAbstractProperty1() {
+    doInspectionTest("ImplementAbstractProperty.py", PyAbstractClassInspection.class, PyBundle.message("QFIX.NAME.implement.methods"),
+                     true, true);
+  }
+
   @Override
   @NonNls
   protected String getTestDataPath() {
@@ -550,6 +609,7 @@ public class PyQuickFixTest extends PyTestCase {
    * @param available       true if the fix should be available, false if it should be explicitly not available.
    * @throws Exception
    */
+  @SuppressWarnings("Duplicates")
   protected void doInspectionTest(@NonNls @NotNull String[] testFiles,
                                   @NotNull Class inspectionClass,
                                   @NonNls @NotNull String quickFixName,
@@ -558,17 +618,21 @@ public class PyQuickFixTest extends PyTestCase {
     myFixture.enableInspections(inspectionClass);
     myFixture.configureByFiles(testFiles);
     myFixture.checkHighlighting(true, false, false);
-    final IntentionAction intentionAction = myFixture.findSingleIntention(quickFixName);
+    final List<IntentionAction> intentionActions = myFixture.filterAvailableIntentions(quickFixName);
     if (available) {
-      assertNotNull(intentionAction);
+      if (intentionActions.isEmpty()) {
+        throw new AssertionError("Quickfix \"" + quickFixName + "\" is not available");
+      }
+      if (intentionActions.size() > 1) {
+        throw new AssertionError("There are more than one quickfix with the name \"" + quickFixName + "\"");
+      }
       if (applyFix) {
-        myFixture.launchAction(intentionAction);
-
-        myFixture.checkResultByFile(graftBeforeExt(testFiles[0], "_after"));
+        myFixture.launchAction(intentionActions.get(0));
+        myFixture.checkResultByFile(graftBeforeExt(testFiles[0], "_after"), true);
       }
     }
     else {
-      assertNull(intentionAction);
+      assertEmpty("Quick fix \"" + quickFixName + "\" should not be available", intentionActions);
     }
   }
 

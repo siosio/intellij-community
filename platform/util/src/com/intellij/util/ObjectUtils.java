@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,13 +31,17 @@ public class ObjectUtils {
   public static final Object NULL = new Object();
 
   @NotNull
-  public static <T> T assertNotNull(@Nullable final T t) {
-    return _assertNotNull(t);
+  public static <T> T assertNotNull(@Nullable T t) {
+    return notNull(t);
   }
 
-  @NotNull
-  private static <T> T _assertNotNull(@NotNull T t) {
-    return t;
+  public static <T> void assertAllElementsNotNull(@NotNull T[] array) {
+    for (int i = 0; i < array.length; i++) {
+      T t = array[i];
+      if (t == null) {
+        throw new NullPointerException("Element [" + i + "] is null");
+      }
+    }
   }
 
   @Contract("null, null -> null")
@@ -45,9 +49,34 @@ public class ObjectUtils {
     return t1 == null? t2 : t1;
   }
 
+  @Contract("null,null->null")
+  public static <T> T coalesce(@Nullable T t1, @Nullable T t2) {
+    return t1 != null ? t1 : t2;
+  }
+
+  @Contract("null,null,null->null")
+  public static <T> T coalesce(@Nullable T t1, @Nullable T t2, @Nullable T t3) {
+    return t1 != null ? t1 : t2 != null ? t2 : t3;
+  }
+
+  @Nullable
+  public static <T> T coalesce(@Nullable Iterable<T> o) {
+    if (o == null) return null;
+    for (T t : o) {
+      if (t != null) return t;
+    }
+    return null;
+  }
+
+  @NotNull
+  public static <T> T notNull(@Nullable T value) {
+    //noinspection ConstantConditions
+    return notNull(value, value);
+  }
+
   @NotNull
   public static <T> T notNull(@Nullable T value, @NotNull T defaultValue) {
-    return value != null ? value : defaultValue;
+    return value == null ? defaultValue : value;
   }
 
   @Nullable

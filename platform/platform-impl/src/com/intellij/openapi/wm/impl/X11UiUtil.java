@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
  */
 package com.intellij.openapi.wm.impl;
 
-import com.intellij.Patches;
 import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.execution.util.ExecUtil;
 import com.intellij.openapi.diagnostic.Logger;
@@ -37,7 +36,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static com.intellij.util.ArrayUtil.newLongArray;
-import static com.intellij.util.containers.ContainerUtil.newHashSet;
 
 public class X11UiUtil {
   private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.wm.impl.X11UiUtil");
@@ -50,7 +48,7 @@ public class X11UiUtil {
   private static final int CLIENT_MESSAGE = 33;
   private static final int FORMAT_BYTE = 8;
   private static final int FORMAT_LONG = 32;
-  private static final long EVENT_MASK = (3l << 19);
+  private static final long EVENT_MASK = (3L << 19);
   private static final long NET_WM_STATE_TOGGLE = 2;
 
   @SuppressWarnings("SpellCheckingInspection")
@@ -165,7 +163,7 @@ public class X11UiUtil {
         unsafe.setMemory(data, 64, (byte)0);
 
         int result = (Integer)XGetWindowProperty.invoke(
-          null, display, window, name, 0l, 65535l, (long)False, type, data, data + 8, data + 16, data + 24, data + 32);
+          null, display, window, name, 0L, 65535L, (long)False, type, data, data + 8, data + 16, data + 24, data + 32);
         if (result == 0) {
           int format = unsafe.getInt(data + 8);
           long pointer = SystemInfo.is64Bit ? unsafe.getLong(data + 32) : unsafe.getInt(data + 32);
@@ -325,14 +323,6 @@ public class X11UiUtil {
 
   public static boolean isFullScreenSupported() {
     if (X11 == null) return false;
-
-    if (Patches.SUN_BUG_ID_8013359) {
-      String wmName = getWmName();
-      if (wmName != null &&
-          (wmName.startsWith("Mutter") || newHashSet("Metacity", "GNOME Shell", "Muffin", "Marco").contains(wmName))) {
-        return false;  // Metacity clones suffer from child window placement bug
-      }
-    }
 
     IdeFrame[] frames = WindowManager.getInstance().getAllProjectFrames();
     if (frames.length == 0) return true;  // no frame to check the property so be optimistic here

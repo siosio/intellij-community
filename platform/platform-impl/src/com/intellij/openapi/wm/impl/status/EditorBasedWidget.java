@@ -19,6 +19,7 @@ import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileEditor.*;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.StatusBar;
 import com.intellij.openapi.wm.StatusBarWidget;
@@ -33,12 +34,13 @@ public abstract class EditorBasedWidget extends FileEditorManagerAdapter impleme
   protected Project myProject;
 
   protected MessageBusConnection myConnection;
-  private boolean myDisposed;
+  private volatile boolean myDisposed;
 
   protected EditorBasedWidget(@NotNull Project project) {
     myProject = project;
     myConnection = myProject.getMessageBus().connect(this);
     myConnection.subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, this);
+    Disposer.register(project, this);
   }
 
   @Nullable

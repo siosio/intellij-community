@@ -16,9 +16,7 @@
 package com.intellij.codeInsight.daemon.lambda;
 
 import com.intellij.openapi.projectRoots.Sdk;
-import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.PsiType;
-import com.intellij.refactoring.BaseRefactoringProcessor;
 import com.intellij.refactoring.ChangeSignatureBaseTest;
 import com.intellij.refactoring.changeSignature.ParameterInfoImpl;
 import com.intellij.refactoring.changeSignature.ThrownExceptionInfo;
@@ -27,11 +25,11 @@ import com.intellij.testFramework.IdeaTestUtil;
 public class ChangeSignatureTouchLambdaTest extends ChangeSignatureBaseTest {
  
   public void testVariableDeclaration() {
-    doTestConflict();
+    doTest(null, null, null, new ParameterInfoImpl[] {new ParameterInfoImpl(-1, "b", PsiType.BOOLEAN)}, new ThrownExceptionInfo[0], false);
   }
 
   public void testMethodArgument() throws Exception {
-    doTestConflict();
+    doTest(null, null, null, new ParameterInfoImpl[] {new ParameterInfoImpl(-1, "b", PsiType.BOOLEAN)}, new ThrownExceptionInfo[0], false);
   }
 
   public void testDefaultMethodTouched() throws Exception {
@@ -42,16 +40,21 @@ public class ChangeSignatureTouchLambdaTest extends ChangeSignatureBaseTest {
     doTest(null, null, null, new ParameterInfoImpl[] {new ParameterInfoImpl(-1, "b", PsiType.BOOLEAN, "false")}, new ThrownExceptionInfo[0], true);
   }
 
-  private void doTestConflict() {
-    try {
-      doTest(null, null, null, new ParameterInfoImpl[] {new ParameterInfoImpl(-1, "b", PsiType.BOOLEAN)}, new ThrownExceptionInfo[0], false);
-      fail("Conflict expected");
-    }
-    catch (BaseRefactoringProcessor.ConflictsInTestsException ignored) { }
+  public void testAddExceptionToCatchInOneLineLambda() throws Exception {
+    doTest(null, null, new String[] {"java.io.IOException"}, false);
+  }
+
+  public void testAddUncheckedExceptionInMethodRef() throws Exception {
+    doTest(null, null, new String[] {"java.lang.NullPointerException"}, false);
   }
 
   @Override
   protected String getRelativePath() {
     return "/codeInsight/daemonCodeAnalyzer/lambda/changeSignature/";
+  }
+
+  @Override
+  protected Sdk getProjectJDK() {
+    return IdeaTestUtil.getMockJdk18();
   }
 }

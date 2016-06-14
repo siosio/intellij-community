@@ -25,8 +25,10 @@ import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.util.Function;
 import com.intellij.util.containers.ArrayListSet;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.Stack;
@@ -39,6 +41,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
 import org.jetbrains.idea.maven.dom.references.MavenFilteredPropertyPsiReferenceProvider;
+import org.jetbrains.idea.maven.importing.MavenImporter;
 import org.jetbrains.idea.maven.model.*;
 import org.jetbrains.idea.maven.server.MavenEmbedderWrapper;
 import org.jetbrains.idea.maven.server.NativeMavenProjectHolder;
@@ -246,19 +249,11 @@ public class MavenProjectsTree {
   }
 
   public void setIgnoredFilesPaths(final List<String> paths) {
-    doChangeIgnoreStatus(new Runnable() {
-      public void run() {
-        myIgnoredFilesPaths = new ArrayList<String>(paths);
-      }
-    });
+    doChangeIgnoreStatus(() -> myIgnoredFilesPaths = new ArrayList<String>(paths));
   }
 
   public void removeIgnoredFilesPaths(final Collection<String> paths) {
-    doChangeIgnoreStatus(new Runnable() {
-      public void run() {
-        myIgnoredFilesPaths.removeAll(paths);
-      }
-    });
+    doChangeIgnoreStatus(() -> myIgnoredFilesPaths.removeAll(paths));
   }
 
   public boolean getIgnoredState(MavenProject project) {
@@ -277,14 +272,12 @@ public class MavenProjectsTree {
 
   private void doSetIgnoredState(List<MavenProject> projects, final boolean ignored, boolean fromImport) {
     final List<String> paths = MavenUtil.collectPaths(MavenUtil.collectFiles(projects));
-    doChangeIgnoreStatus(new Runnable() {
-      public void run() {
-        if (ignored) {
-          myIgnoredFilesPaths.addAll(paths);
-        }
-        else {
-          myIgnoredFilesPaths.removeAll(paths);
-        }
+    doChangeIgnoreStatus(() -> {
+      if (ignored) {
+        myIgnoredFilesPaths.addAll(paths);
+      }
+      else {
+        myIgnoredFilesPaths.removeAll(paths);
       }
     }, fromImport);
   }
@@ -296,11 +289,9 @@ public class MavenProjectsTree {
   }
 
   public void setIgnoredFilesPatterns(final List<String> patterns) {
-    doChangeIgnoreStatus(new Runnable() {
-      public void run() {
-        myIgnoredFilesPatternsCache = null;
-        myIgnoredFilesPatterns = new ArrayList<String>(patterns);
-      }
+    doChangeIgnoreStatus(() -> {
+      myIgnoredFilesPatternsCache = null;
+      myIgnoredFilesPatterns = new ArrayList<String>(patterns);
     });
   }
 
@@ -903,7 +894,7 @@ public class MavenProjectsTree {
     if (customNonFilteredExtensions.isEmpty()) {
       return Collections.emptySet();
     }
-    return Collections.unmodifiableCollection(customNonFilteredExtensions);
+    return Collections.unmodifiableList(customNonFilteredExtensions);
   }
 
   public int getFilterConfigCrc(ProjectFileIndex fileIndex) {
@@ -1237,27 +1228,59 @@ public class MavenProjectsTree {
                       @NotNull MavenEmbeddersManager embeddersManager,
                       @NotNull MavenConsole console,
                       @NotNull MavenProgressIndicator process) throws MavenProcessCanceledException {
-    resolve(project, mavenProject, generalSettings, embeddersManager, console, new ResolveContext(), process);
+    resolve(project, ContainerUtil.list(mavenProject), generalSettings, embeddersManager, console, new ResolveContext(), process);
   }
 
   public void resolve(@NotNull Project project,
-                      @NotNull MavenProject mavenProject,
+                      @NotNull Collection<MavenProject> mavenProjects,
                       @NotNull MavenGeneralSettings generalSettings,
                       @NotNull MavenEmbeddersManager embeddersManager,
                       @NotNull MavenConsole console,
                       @NotNull ResolveContext context,
                       @NotNull MavenProgressIndicator process) throws MavenProcessCanceledException {
+
+    if(mavenProjects.isEmpty()) return;
+
     MavenEmbedderWrapper embedder = embeddersManager.getEmbedder(MavenEmbeddersManager.FOR_DEPENDENCIES_RESOLVE);
     embedder.customizeForResolve(getWorkspaceMap(), console, process, generalSettings.isAlwaysUpdateSnapshots());
 
     try {
       process.checkCanceled();
-      process.setText(ProjectBundle.message("maven.resolving.pom", mavenProject.getDisplayName()));
+      final List<String> names = ContainerUtil.mapNotNull(mavenProjects, project12 -> project12.getDisplayName());
+      final String text = StringUtil.shortenPathWithEllipsis(StringUtil.join(names, ", "), 200);
+      process.setText(ProjectBundle.message("maven.resolving.pom", text));
       process.setText2("");
-      Pair<MavenProjectChanges, NativeMavenProjectHolder> resolveResult =
-        mavenProject.resolve(project, generalSettings, embedder, new MavenProjectReader(), myProjectLocator, context);
 
-      fireProjectResolved(Pair.create(mavenProject, resolveResult.first), resolveResult.second);
+      final MavenExplicitProfiles explicitProfiles = new MavenExplicitProfiles(new LinkedHashSet<String>(), new LinkedHashSet<String>());
+      Collection<VirtualFile> files = ContainerUtil.map(mavenProjects, project1 -> {
+        explicitProfiles.getEnabledProfiles().addAll(project1.getActivatedProfilesIds().getEnabledProfiles());
+        explicitProfiles.getDisabledProfiles().addAll(project1.getActivatedProfilesIds().getDisabledProfiles());
+        return project1.getFile();
+      });
+      Collection<MavenProjectReaderResult> results = new MavenProjectReader().resolveProject(
+        generalSettings, embedder, files, explicitProfiles, myProjectLocator);
+
+      for (MavenProjectReaderResult result : results) {
+        MavenProject mavenProjectCandidate = null;
+        for (MavenProject mavenProject : mavenProjects) {
+          MavenId mavenId = result.mavenModel.getMavenId();
+          if (mavenProject.getMavenId().equals(mavenId)) {
+            mavenProjectCandidate = mavenProject;
+            break;
+          } else if (mavenProject.getMavenId().equals(mavenId.getGroupId(), mavenId.getArtifactId())) {
+            mavenProjectCandidate = mavenProject;
+          }
+        }
+
+        if(mavenProjectCandidate == null) continue;
+        MavenProjectChanges changes = mavenProjectCandidate.set(result, generalSettings, false, result.readingProblems.isEmpty(), false);
+        if (result.nativeMavenProject != null) {
+          for (MavenImporter eachImporter : mavenProjectCandidate.getSuitableImporters()) {
+            eachImporter.resolve(project, mavenProjectCandidate, result.nativeMavenProject, embedder, context);
+          }
+        }
+        fireProjectResolved(Pair.create(mavenProjectCandidate, changes), result.nativeMavenProject);
+      }
     }
     finally {
       embeddersManager.release(embedder);

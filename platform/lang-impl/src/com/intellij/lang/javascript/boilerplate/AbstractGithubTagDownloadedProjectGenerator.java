@@ -1,6 +1,9 @@
 package com.intellij.lang.javascript.boilerplate;
 
+import com.intellij.ide.BrowserUtil;
 import com.intellij.ide.util.projectWizard.WebProjectTemplate;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
@@ -12,8 +15,10 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.platform.templates.github.GeneratorException;
 import com.intellij.platform.templates.github.GithubTagInfo;
 import com.intellij.platform.templates.github.ZipUtil;
+import com.intellij.ui.components.labels.ActionLink;
 import com.intellij.util.NullableFunction;
 import com.intellij.util.PlatformUtils;
+import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -71,11 +76,8 @@ public abstract class AbstractGithubTagDownloadedProjectGenerator extends WebPro
     catch (GeneratorException e) {
       showErrorMessage(project, e.getMessage());
     }
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      @Override
-      public void run() {
-        baseDir.refresh(true, true);
-      }
+    ApplicationManager.getApplication().runWriteAction(() -> {
+      baseDir.refresh(true, true);
     });
   }
 
@@ -157,4 +159,14 @@ public abstract class AbstractGithubTagDownloadedProjectGenerator extends WebPro
     Messages.showErrorDialog(project, fullMessage, title);
   }
 
+  public ActionLink createGitHubLink() {
+    final ActionLink link = new ActionLink(getName() + " on GitHub", new AnAction() {
+      @Override
+      public void actionPerformed(AnActionEvent e) {
+        BrowserUtil.open("https://github.com/" + getGithubUserName() + "/" + getGithubRepositoryName());
+      }
+    });
+    link.setFont(UIUtil.getLabelFont(UIUtil.FontSize.SMALL));
+    return link;
+  }
 }

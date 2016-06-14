@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,13 +23,14 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiDirectory;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
+import com.intellij.psi.util.QualifiedName;
 import com.jetbrains.python.PyNames;
 import com.jetbrains.python.packaging.PyPackageUtil;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.impl.PyPsiUtils;
-import com.intellij.psi.util.QualifiedName;
 import com.jetbrains.python.psi.resolve.PyResolveContext;
 import com.jetbrains.python.psi.stubs.PyClassNameIndex;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
@@ -43,7 +44,7 @@ public class SetupTaskIntrospector {
   private static final Map<String, List<SetupTask>> ourDistutilsTaskCache = new HashMap<String, List<SetupTask>>();
   private static final Map<String, List<SetupTask>> ourSetuptoolsTaskCache = new HashMap<String, List<SetupTask>>();
 
-  private static boolean usesSetuptools(PyFile file) {
+  public static boolean usesSetuptools(@NotNull PyFile file) {
     final List<PyFromImportStatement> imports = file.getFromImports();
     for (PyFromImportStatement anImport : imports) {
       final QualifiedName qName = anImport.getImportSourceQName();
@@ -116,7 +117,7 @@ public class SetupTaskIntrospector {
                               ? PyClassNameIndex.findClass("distutils.command.build_ext.build_ext", file.getProject())
                               : file.findTopLevelClass(name);
     if (taskClass != null) {
-      final PyTargetExpression description = taskClass.findClassAttribute("description", true);
+      final PyTargetExpression description = taskClass.findClassAttribute("description", true, null);
       if (description != null) {
         final String descriptionText = PyPsiUtils.strValue(PyPsiUtils.flattenParens(description.findAssignedValue()));
         if (descriptionText != null) {
@@ -133,7 +134,7 @@ public class SetupTaskIntrospector {
         }
       }
 
-      final PyTargetExpression negativeOpt = taskClass.findClassAttribute("negative_opt", true);
+      final PyTargetExpression negativeOpt = taskClass.findClassAttribute("negative_opt", true, null);
       final Map<String, String> negativeOptMap = negativeOpt == null
                                                  ? Collections.<String, String>emptyMap()
                                                  : parseNegativeOpt(negativeOpt.findAssignedValue());
@@ -152,7 +153,7 @@ public class SetupTaskIntrospector {
 
   private static List<PyExpression> resolveSequenceValue(PyClass aClass, String name) {
     List<PyExpression> result = new ArrayList<PyExpression>();
-    collectSequenceElements(aClass.findClassAttribute(name, true), result);
+    collectSequenceElements(aClass.findClassAttribute(name, true, null), result);
     return result;
   }
 

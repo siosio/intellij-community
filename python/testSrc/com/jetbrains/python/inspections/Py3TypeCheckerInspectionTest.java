@@ -31,25 +31,21 @@ public class Py3TypeCheckerInspectionTest extends PyTestCase {
   }
 
   private void doTest() {
-    runWithLanguageLevel(LanguageLevel.PYTHON32, new Runnable() {
-      @Override
-      public void run() {
-        myFixture.configureByFile(TEST_DIRECTORY + getTestName(false) + ".py");
-        myFixture.enableInspections(PyTypeCheckerInspection.class);
-        myFixture.checkHighlighting(true, false, true);
-      }
+    runWithLanguageLevel(LanguageLevel.PYTHON35, () -> {
+      myFixture.copyDirectoryToProject("typing", "");
+      myFixture.configureByFile(TEST_DIRECTORY + getTestName(false) + ".py");
+      myFixture.enableInspections(PyTypeCheckerInspection.class);
+      myFixture.checkHighlighting(true, false, true);
     });
   }
 
   private void doMultiFileTest() {
-    runWithLanguageLevel(LanguageLevel.PYTHON32, new Runnable() {
-      @Override
-      public void run() {
-        myFixture.copyDirectoryToProject(TEST_DIRECTORY + getTestName(false), "");
-        myFixture.configureFromTempProjectFile("a.py");
-        myFixture.enableInspections(PyTypeCheckerInspection.class);
-        myFixture.checkHighlighting(true, false, true);
-      }
+    runWithLanguageLevel(LanguageLevel.PYTHON35, () -> {
+      myFixture.copyDirectoryToProject(TEST_DIRECTORY + getTestName(false), "");
+      myFixture.copyDirectoryToProject("typing", "");
+      myFixture.configureFromTempProjectFile("a.py");
+      myFixture.enableInspections(PyTypeCheckerInspection.class);
+      myFixture.checkHighlighting(true, false, true);
     });
   }
 
@@ -64,6 +60,52 @@ public class Py3TypeCheckerInspectionTest extends PyTestCase {
   }
 
   public void testBuiltinsPy3() {
+    doTest();
+  }
+
+  // PY-16125
+  public void testTypingIterableForLoop() {
+    doTest();
+  }
+
+  // PY-16146
+  public void testTypingListSubscriptionExpression() {
+    doTest();
+  }
+
+  // PY-16855
+  public void testTypingTypeVarWithUnresolvedBound() {
+    doTest();
+  }
+
+  // PY-16303
+  public void testTypingTupleInDocstring() {
+    doTest();
+  }
+
+  // PY-16898
+  public void testAsyncForIterable() {
+    doTest();
+  }
+
+  // PY-18275
+  public void testStrFormatPy3() {
+    doTest();
+  }
+  
+  // PY-18762
+  public void testHomogeneousTuples() {
+    myFixture.copyDirectoryToProject("typing/typing.py", TEST_DIRECTORY);
+    doTest();
+  }
+
+  // PY-9924
+  public void testTupleGetItemWithSlice() {
+    doTest();
+  }
+
+  // PY-9924
+  public void testListGetItemWithSlice() {
     doTest();
   }
 }

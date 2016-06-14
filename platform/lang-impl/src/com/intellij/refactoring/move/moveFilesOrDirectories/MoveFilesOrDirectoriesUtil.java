@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,13 +33,12 @@ import com.intellij.refactoring.move.MoveHandler;
 import com.intellij.refactoring.util.CommonRefactoringUtil;
 import com.intellij.util.Function;
 import com.intellij.util.IncorrectOperationException;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
+import java.util.*;
 
 public class MoveFilesOrDirectoriesUtil {
   private static final Logger LOG = Logger.getInstance("#com.intellij.refactoring.move.moveFilesOrDirectories.MoveFilesOrDirectoriesUtil");
@@ -128,49 +127,54 @@ public class MoveFilesOrDirectoriesUtil {
     final MoveFilesOrDirectoriesDialog.Callback doRun = new MoveFilesOrDirectoriesDialog.Callback() {
       @Override
       public void run(final MoveFilesOrDirectoriesDialog moveDialog) {
-        CommandProcessor.getInstance().executeCommand(project, new Runnable() {
-          @Override
-          public void run() {
-            final PsiDirectory targetDirectory = moveDialog != null ? moveDialog.getTargetDirectory() : initialTargetDirectory;
+        CommandProcessor.getInstance().executeCommand(project, () -> {
+          final PsiDirectory targetDirectory1 = moveDialog != null ? moveDialog.getTargetDirectory() : initialTargetDirectory;
+          if (targetDirectory1 == null) {
+            LOG.error("It is null! The target directory, it is null!");
+            return;
+          }
 
-            LOG.assertTrue(targetDirectory != null);
-            targetElement[0] = targetDirectory;
+          Collection<PsiElement> toCheck = ContainerUtil.newArrayList((PsiElement)targetDirectory1);
+          for (PsiElement e : newElements) {
+            toCheck.add(e instanceof PsiFileSystemItem && e.getParent() != null ? e.getParent() : e);
+          }
+          if (!CommonRefactoringUtil.checkReadOnlyStatus(project, toCheck, false)) {
+            return;
+          }
 
-            try {
-              final int[] choice = elements.length > 1 || elements[0] instanceof PsiDirectory ? new int[]{-1} : null;
-              final List<PsiElement> els = new ArrayList<PsiElement>();
-              for (final PsiElement psiElement : newElements) {
-                if (psiElement instanceof PsiFile) {
-                  final PsiFile file = (PsiFile)psiElement;
-                  final boolean fileExist = ApplicationManager.getApplication().runWriteAction(new Computable<Boolean>() {
-                    @Override
-                    public Boolean compute() {
-                      return CopyFilesOrDirectoriesHandler.checkFileExist(targetDirectory, choice, file, file.getName(), "Move");
-                    }
-                  });
-                  if (fileExist) continue;
-                }
-                checkMove(psiElement, targetDirectory);
-                els.add(psiElement);
+          targetElement[0] = targetDirectory1;
+
+          try {
+            final int[] choice = elements.length > 1 || elements[0] instanceof PsiDirectory ? new int[]{-1} : null;
+            final List<PsiElement> els = new ArrayList<PsiElement>();
+            for (final PsiElement psiElement : newElements) {
+              if (psiElement instanceof PsiFile) {
+                final PsiFile file = (PsiFile)psiElement;
+                final boolean fileExist = ApplicationManager.getApplication().runWriteAction(new Computable<Boolean>() {
+                  @Override
+                  public Boolean compute() {
+                    return CopyFilesOrDirectoriesHandler.checkFileExist(targetDirectory1, choice, file, file.getName(), "Move");
+                  }
+                });
+                if (fileExist) continue;
               }
-              final Runnable callback = new Runnable() {
-                @Override
-                public void run() {
-                  if (moveDialog != null) moveDialog.close(DialogWrapper.CANCEL_EXIT_CODE);
-                }
-              };
-              if (els.isEmpty()) {
-                callback.run();
-                return;
-              }
-              new MoveFilesOrDirectoriesProcessor(project, els.toArray(new PsiElement[els.size()]), targetDirectory,
-                                                  RefactoringSettings.getInstance().MOVE_SEARCH_FOR_REFERENCES_FOR_FILE,
-                                                  false, false, moveCallback, callback).run();
+              checkMove(psiElement, targetDirectory1);
+              els.add(psiElement);
             }
-            catch (IncorrectOperationException e) {
-              CommonRefactoringUtil.showErrorMessage(RefactoringBundle.message("error.title"), e.getMessage(),
-                                                     "refactoring.moveFile", project);
+            final Runnable callback = () -> {
+              if (moveDialog != null) moveDialog.close(DialogWrapper.CANCEL_EXIT_CODE);
+            };
+            if (els.isEmpty()) {
+              callback.run();
+              return;
             }
+            new MoveFilesOrDirectoriesProcessor(project, els.toArray(new PsiElement[els.size()]), targetDirectory1,
+                                                RefactoringSettings.getInstance().MOVE_SEARCH_FOR_REFERENCES_FOR_FILE,
+                                                false, false, moveCallback, callback).run();
+          }
+          catch (IncorrectOperationException e) {
+            CommonRefactoringUtil.showErrorMessage(RefactoringBundle.message("error.title"), e.getMessage(),
+                                                   "refactoring.moveFile", project);
           }
         }, MoveHandler.REFACTORING_NAME, null);
       }

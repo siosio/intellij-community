@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -53,10 +53,13 @@ import java.util.*;
 
 @State(
   name = "ExternalResourceManagerImpl",
-  storages = {@Storage(file = StoragePathMacros.APP_CONFIG + "/other.xml")}
+  storages = {
+    @Storage("javaeeExternalResources.xml"),
+    @Storage(value = "other.xml", deprecated = true)
+  }
 )
 public class ExternalResourceManagerExImpl extends ExternalResourceManagerEx implements PersistentStateComponent<Element> {
-  static final Logger LOG = Logger.getInstance(ExternalResourceManagerExImpl.class);
+  private static final Logger LOG = Logger.getInstance(ExternalResourceManagerExImpl.class);
 
   @NonNls public static final String J2EE_1_3 = "http://java.sun.com/dtd/";
   @NonNls public static final String J2EE_1_2 = "http://java.sun.com/j2ee/dtds/";
@@ -80,29 +83,25 @@ public class ExternalResourceManagerExImpl extends ExternalResourceManagerEx imp
     }
   };
 
-  private final CachedValueProvider<MultiMap<String, String>> myUrlByNamespaceProvider = new CachedValueProvider<MultiMap<String, String>>() {
-    @Nullable
-    @Override
-    public CachedValueProvider.Result<MultiMap<String, String>> compute() {
-      MultiMap<String, String> result = new MultiMap<String, String>();
+  private final CachedValueProvider<MultiMap<String, String>> myUrlByNamespaceProvider = () -> {
+    MultiMap<String, String> result = new MultiMap<String, String>();
 
-      Collection<Map<String, Resource>> values = myStandardResources.getValue().values();
-      for (Map<String, Resource> map : values) {
-        for (Map.Entry<String, Resource> entry : map.entrySet()) {
-          String url = entry.getValue().getResourceUrl();
-          if (url != null) {
-            VirtualFile file = VfsUtilCore.findRelativeFile(url, null);
-            if (file != null) {
-              String namespace = XmlNamespaceIndex.computeNamespace(file);
-              if (namespace != null) {
-                result.putValue(namespace, entry.getKey());
-              }
+    Collection<Map<String, Resource>> values = myStandardResources.getValue().values();
+    for (Map<String, Resource> map : values) {
+      for (Map.Entry<String, Resource> entry : map.entrySet()) {
+        String url = entry.getValue().getResourceUrl();
+        if (url != null) {
+          VirtualFile file = VfsUtilCore.findRelativeFile(url, null);
+          if (file != null) {
+            String namespace = XmlNamespaceIndex.computeNamespace(file);
+            if (namespace != null) {
+              result.putValue(namespace, entry.getKey());
             }
           }
         }
       }
-      return CachedValueProvider.Result.create(result, ExternalResourceManagerExImpl.this);
     }
+    return CachedValueProvider.Result.create(result, ExternalResourceManagerExImpl.this);
   };
 
   private String myDefaultHtmlDoctype = HTML5_DOCTYPE_ELEMENT;
@@ -270,21 +269,11 @@ public class ExternalResourceManagerExImpl extends ExternalResourceManagerEx imp
   @TestOnly
   public static void addTestResource(final String url, final String location, Disposable parentDisposable) {
     final ExternalResourceManagerExImpl instance = (ExternalResourceManagerExImpl)getInstance();
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      @Override
-      public void run() {
-        instance.addResource(url, location);
-      }
-    });
+    ApplicationManager.getApplication().runWriteAction(() -> instance.addResource(url, location));
     Disposer.register(parentDisposable, new Disposable() {
       @Override
       public void dispose() {
-        ApplicationManager.getApplication().runWriteAction(new Runnable() {
-          @Override
-          public void run() {
-            instance.removeResource(url);
-          }
-        });
+        ApplicationManager.getApplication().runWriteAction(() -> instance.removeResource(url));
       }
     });
   }
@@ -627,22 +616,12 @@ public class ExternalResourceManagerExImpl extends ExternalResourceManagerEx imp
 
   @TestOnly
   public static void registerResourceTemporarily(final String url, final String location, Disposable disposable) {
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      @Override
-      public void run() {
-        getInstance().addResource(url, location);
-      }
-    });
+    ApplicationManager.getApplication().runWriteAction(() -> getInstance().addResource(url, location));
 
     Disposer.register(disposable, new Disposable() {
       @Override
       public void dispose() {
-        ApplicationManager.getApplication().runWriteAction(new Runnable() {
-          @Override
-          public void run() {
-            getInstance().removeResource(url);
-          }
-        });
+        ApplicationManager.getApplication().runWriteAction(() -> getInstance().removeResource(url));
       }
     });
   }

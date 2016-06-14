@@ -15,14 +15,17 @@
  */
 package com.intellij.openapi.diff.impl.incrementalMerge.ui;
 
-import com.intellij.icons.AllIcons;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.ex.ActionUtil;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.diff.DiffBundle;
 import com.intellij.openapi.diff.impl.incrementalMerge.Change;
 import com.intellij.openapi.diff.impl.incrementalMerge.MergeList;
 import com.intellij.openapi.diff.impl.util.DiffPanelOuterComponent;
 import com.intellij.openapi.project.DumbAware;
+import com.intellij.openapi.project.Project;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.FilteringIterator;
 import org.jetbrains.annotations.Nullable;
@@ -35,24 +38,29 @@ public class ApplyNonConflicts extends AnAction implements DumbAware {
   @Nullable private final DiffPanelOuterComponent myDiffPanel;
 
   public ApplyNonConflicts(@Nullable DiffPanelOuterComponent diffPanel) {
-    super(DiffBundle.message("merge.dialog.apply.all.non.conflicting.changes.action.name"), null, AllIcons.Diff.ApplyNotConflicts);
+    ActionUtil.copyFrom(this, "Diff.ApplyNonConflicts");
     myDiffPanel = diffPanel;
   }
 
   public void actionPerformed(AnActionEvent e) {
-    MergeList mergeList = MergeList.fromDataContext(e.getDataContext());
+    final MergeList mergeList = MergeList.fromDataContext(e.getDataContext());
     assert mergeList != null;
 
-    List<Change> notConflicts = ContainerUtil.collect(getNotConflicts(mergeList));
-    mergeList.startBulkUpdate();
-    try {
-      for (Change change : notConflicts) {
-        Change.apply(change, MergeList.BRANCH_SIDE);
+    final List<Change> notConflicts = ContainerUtil.collect(getNotConflicts(mergeList));
+    final Project project = mergeList.getLeftChangeList().getProject();
+
+    ApplicationManager.getApplication().runWriteAction(() -> CommandProcessor.getInstance().executeCommand(project, () -> {
+      mergeList.startBulkUpdate();
+      try {
+        for (Change change : notConflicts) {
+          Change.doApply(change, MergeList.BRANCH_SIDE);
+        }
       }
-    }
-    finally {
-      mergeList.finishBulkUpdate();
-    }
+      finally {
+        mergeList.finishBulkUpdate();
+      }
+    }, null, DiffBundle.message("save.merge.result.command.name")));
+
     if (myDiffPanel != null) {
       myDiffPanel.requestScrollEditors();
     }

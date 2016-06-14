@@ -123,8 +123,8 @@ public class I18nInspection extends BaseLocalInspectionTool {
   public void readSettings(@NotNull Element node) throws InvalidDataException {
     super.readSettings(node);
     for (Object o : node.getChildren()) {
-      if (o instanceof Element && Comparing.strEqual(node.getAttributeValue("name"), SKIP_FOR_ENUM)) {
-        final String ignoreForConstantsAttr = node.getAttributeValue("value");
+      if (o instanceof Element && Comparing.strEqual(((Element)o).getAttributeValue("name"), SKIP_FOR_ENUM)) {
+        final String ignoreForConstantsAttr = ((Element)o).getAttributeValue("value");
         if (ignoreForConstantsAttr != null) {
           ignoreForEnumConstants = Boolean.parseBoolean(ignoreForConstantsAttr);
         }
@@ -287,13 +287,10 @@ public class I18nInspection extends BaseLocalInspectionTool {
     final JTextField text = new JTextField(nonNlsCommentPattern);
     final FieldPanel nonNlsCommentPatternComponent =
       new FieldPanel(text, CodeInsightBundle.message("inspection.i18n.option.ignore.comment.pattern"),
-                     CodeInsightBundle.message("inspection.i18n.option.ignore.comment.title"), null, new Runnable() {
-        @Override
-        public void run() {
-          nonNlsCommentPattern = text.getText();
-          cacheNonNlsCommentPattern();
-        }
-      });
+                     CodeInsightBundle.message("inspection.i18n.option.ignore.comment.title"), null, () -> {
+                       nonNlsCommentPattern = text.getText();
+                       cacheNonNlsCommentPattern();
+                     });
     panel.add(nonNlsCommentPatternComponent, gc);
 
     final JScrollPane scrollPane = ScrollPaneFactory.createScrollPane(panel);
@@ -424,13 +421,14 @@ public class I18nInspection extends BaseLocalInspectionTool {
     return null;
   }
 
-  private ProblemDescriptor[] checkElement(final PsiElement element, InspectionManager manager, boolean isOnTheFly) {
+  private ProblemDescriptor[] checkElement(@NotNull PsiElement element, @NotNull InspectionManager manager, boolean isOnTheFly) {
     StringI18nVisitor visitor = new StringI18nVisitor(manager, isOnTheFly);
     element.accept(visitor);
     List<ProblemDescriptor> problems = visitor.getProblems();
     return problems.isEmpty() ? null : problems.toArray(new ProblemDescriptor[problems.size()]);
   }
 
+  @NotNull
   private static LocalQuickFix createIntroduceConstantFix() {
     return new LocalQuickFix() {
       @Override
@@ -442,15 +440,12 @@ public class I18nInspection extends BaseLocalInspectionTool {
       @Override
       public void applyFix(@NotNull final Project project, @NotNull final ProblemDescriptor descriptor) {
         //do it later because it is invoked from write action
-        ApplicationManager.getApplication().invokeLater(new Runnable() {
-          @Override
-          public void run() {
-            PsiElement element = descriptor.getPsiElement();
-            if (!(element instanceof PsiExpression)) return;
+        ApplicationManager.getApplication().invokeLater(() -> {
+          PsiElement element = descriptor.getPsiElement();
+          if (!(element instanceof PsiExpression)) return;
 
-            PsiExpression[] expressions = {(PsiExpression)element};
-            new IntroduceConstantHandler().invoke(project, expressions);
-          }
+          PsiExpression[] expressions = {(PsiExpression)element};
+          new IntroduceConstantHandler().invoke(project, expressions);
         }, project.getDisposed());
       }
 
@@ -462,30 +457,35 @@ public class I18nInspection extends BaseLocalInspectionTool {
     };
   }
 
-  private class StringI18nVisitor extends JavaRecursiveElementVisitor {
+  private class StringI18nVisitor extends JavaRecursiveElementWalkingVisitor {
     private final List<ProblemDescriptor> myProblems = new ArrayList<ProblemDescriptor>();
     private final InspectionManager myManager;
     private final boolean myOnTheFly;
 
-    private StringI18nVisitor(final InspectionManager manager, boolean onTheFly) {
+    private StringI18nVisitor(@NotNull InspectionManager manager, boolean onTheFly) {
       myManager = manager;
       myOnTheFly = onTheFly;
     }
 
-    @Override public void visitAnonymousClass(PsiAnonymousClass aClass) {
-      final PsiExpressionList argumentList = aClass.getArgumentList();
-      if (argumentList != null) {
-        argumentList.accept(this);
-      }
+    @Override
+    public void visitAnonymousClass(PsiAnonymousClass aClass) {
+      visitElement(aClass); // visit argument list but anon. class members should be not visited
     }
 
-    @Override public void visitClass(PsiClass aClass) {}
+    @Override
+    public void visitClass(PsiClass aClass) {
+    }
 
-    @Override public void visitField(PsiField field) {}
+    @Override
+    public void visitField(PsiField field) {
+    }
 
-    @Override public void visitMethod(PsiMethod method) {}
+    @Override
+    public void visitMethod(PsiMethod method) {
+    }
 
-    @Override public void visitLiteralExpression(PsiLiteralExpression expression) {
+    @Override
+    public void visitLiteralExpression(PsiLiteralExpression expression) {
       Object value = expression.getValue();
       if (!(value instanceof String)) return;
       String stringValue = (String)value;
@@ -517,7 +517,8 @@ public class I18nInspection extends BaseLocalInspectionTool {
         if (PsiUtil.isLanguageLevel5OrHigher(expression)) {
           for (PsiModifierListOwner element : nonNlsTargets) {
             if (!AnnotationUtil.isAnnotated(element, AnnotationUtil.NLS, true, false)) {
-              if (!element.getManager().isInProject(element) || facade.findClass(AnnotationUtil.NON_NLS, element.getResolveScope()) != null) {
+              if (!element.getManager().isInProject(element) ||
+                  facade.findClass(AnnotationUtil.NON_NLS, element.getResolveScope()) != null) {
                 fixes.add(new AddAnnotationFix(AnnotationUtil.NON_NLS, element));
               }
             }
@@ -533,16 +534,17 @@ public class I18nInspection extends BaseLocalInspectionTool {
     }
 
     private boolean isNotConstantFieldInitializer(final PsiExpression expression) {
-      PsiField parentField = expression.getParent() instanceof PsiField ? (PsiField) expression.getParent() : null;
+      PsiField parentField = expression.getParent() instanceof PsiField ? (PsiField)expression.getParent() : null;
       return parentField != null && expression == parentField.getInitializer() &&
              parentField.hasModifierProperty(PsiModifier.FINAL) &&
              parentField.hasModifierProperty(PsiModifier.STATIC);
     }
 
 
-    @Override public void visitAnnotation(PsiAnnotation annotation) {
+    @Override
+    public void visitAnnotation(PsiAnnotation annotation) {
       //prevent from @SuppressWarnings
-      if (!BatchSuppressManager.SUPPRESS_INSPECTIONS_ANNOTATION_NAME.equals(annotation.getQualifiedName())){
+      if (!BatchSuppressManager.SUPPRESS_INSPECTIONS_ANNOTATION_NAME.equals(annotation.getQualifiedName())) {
         super.visitAnnotation(annotation);
       }
     }
@@ -552,16 +554,19 @@ public class I18nInspection extends BaseLocalInspectionTool {
     }
   }
 
-  private boolean canBeI18ned(@NotNull Project project, @NotNull PsiLiteralExpression expression, @NotNull String value, @NotNull Set<PsiModifierListOwner> nonNlsTargets) {
+  private boolean canBeI18ned(@NotNull Project project,
+                              @NotNull PsiLiteralExpression expression,
+                              @NotNull String value,
+                              @NotNull Set<PsiModifierListOwner> nonNlsTargets) {
     if (ignoreForNonAlpha && !StringUtil.containsAlphaCharacters(value)) {
       return false;
     }
 
-    if (JavaI18nUtil.isPassedToAnnotatedParam(project, expression, AnnotationUtil.NON_NLS, new HashMap<String, Object>(), nonNlsTargets)) {
+    if (JavaI18nUtil.isPassedToAnnotatedParam(expression, AnnotationUtil.NON_NLS, new HashMap<String, Object>(), nonNlsTargets)) {
       return false;
     }
 
-    if (isInNonNlsCall(project, expression, nonNlsTargets)) {
+    if (isInNonNlsCall(expression, nonNlsTargets)) {
       return false;
     }
 
@@ -569,11 +574,11 @@ public class I18nInspection extends BaseLocalInspectionTool {
       return false;
     }
 
-    if (isPassedToNonNlsVariable(project, expression, nonNlsTargets)) {
+    if (isPassedToNonNlsVariable(expression, nonNlsTargets)) {
       return false;
     }
 
-    if (JavaI18nUtil.mustBePropertyKey(project, expression, new HashMap<String, Object>())) {
+    if (JavaI18nUtil.mustBePropertyKey(expression, new HashMap<String, Object>())) {
       return false;
     }
 
@@ -667,10 +672,9 @@ public class I18nInspection extends BaseLocalInspectionTool {
            || isPackageNonNls(psiPackage.getParentPackage());
   }
 
-  private boolean isPassedToNonNlsVariable(@NotNull Project project,
-                                           @NotNull PsiLiteralExpression expression,
+  private boolean isPassedToNonNlsVariable(@NotNull PsiLiteralExpression expression,
                                            final Set<PsiModifierListOwner> nonNlsTargets) {
-    PsiExpression toplevel = JavaI18nUtil.getToplevelExpression(project, expression);
+    PsiExpression toplevel = JavaI18nUtil.getTopLevelExpression(expression);
     PsiVariable var = null;
     if (toplevel instanceof PsiAssignmentExpression) {
       PsiExpression lExpression = ((PsiAssignmentExpression)toplevel).getLExpression();
@@ -774,8 +778,9 @@ public class I18nInspection extends BaseLocalInspectionTool {
     return false;
   }
 
-  private static boolean isInNonNlsCall(@NotNull Project project, @NotNull PsiExpression expression, final Set<PsiModifierListOwner> nonNlsTargets) {
-    expression = JavaI18nUtil.getToplevelExpression(project, expression);
+  private static boolean isInNonNlsCall(@NotNull PsiExpression expression,
+                                        final Set<PsiModifierListOwner> nonNlsTargets) {
+    expression = JavaI18nUtil.getTopLevelExpression(expression);
     final PsiElement parent = expression.getParent();
     if (parent instanceof PsiExpressionList) {
       final PsiElement grParent = parent.getParent();

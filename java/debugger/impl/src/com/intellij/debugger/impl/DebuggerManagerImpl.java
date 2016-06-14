@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,11 +21,11 @@ import com.intellij.debugger.engine.*;
 import com.intellij.debugger.settings.DebuggerSettings;
 import com.intellij.debugger.ui.GetJPDADialog;
 import com.intellij.debugger.ui.breakpoints.BreakpointManager;
+import com.intellij.debugger.ui.tree.render.BatchEvaluator;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.ExecutionResult;
 import com.intellij.execution.configurations.JavaParameters;
 import com.intellij.execution.configurations.RemoteConnection;
-import com.intellij.execution.configurations.RunProfileState;
 import com.intellij.execution.process.KillableColoredProcessHandler;
 import com.intellij.execution.process.ProcessAdapter;
 import com.intellij.execution.process.ProcessEvent;
@@ -39,7 +39,6 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.colors.EditorColorsListener;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
-import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.JavaSdk;
@@ -55,6 +54,7 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiClass;
 import com.intellij.util.EventDispatcher;
 import com.intellij.util.Function;
+import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
 import org.jdom.Element;
 import org.jetbrains.annotations.NonNls;
@@ -65,46 +65,46 @@ import javax.swing.*;
 import java.io.File;
 import java.util.*;
 import java.util.jar.Attributes;
+import java.util.stream.Stream;
 
-@State(name = "DebuggerManager", storages = {@Storage(file = StoragePathMacros.WORKSPACE_FILE)})
+@State(name = "DebuggerManager", storages = {@Storage(StoragePathMacros.WORKSPACE_FILE)})
 public class DebuggerManagerImpl extends DebuggerManagerEx implements PersistentStateComponent<Element> {
   private static final Logger LOG = Logger.getInstance("#com.intellij.debugger.impl.DebuggerManagerImpl");
 
   private final Project myProject;
-  private final HashMap<ProcessHandler, DebuggerSession> mySessions = new HashMap<ProcessHandler, DebuggerSession>();
+  private final HashMap<ProcessHandler, DebuggerSession> mySessions = new HashMap<>();
   private final BreakpointManager myBreakpointManager;
   private final List<NameMapper> myNameMappers = ContainerUtil.createLockFreeCopyOnWriteList();
-  private final List<Function<DebugProcess, PositionManager>> myCustomPositionManagerFactories =
-    new ArrayList<Function<DebugProcess, PositionManager>>();
+  private final List<Function<DebugProcess, PositionManager>> myCustomPositionManagerFactories = new SmartList<>();
 
   private final EventDispatcher<DebuggerManagerListener> myDispatcher = EventDispatcher.create(DebuggerManagerListener.class);
   private final MyDebuggerStateManager myDebuggerStateManager = new MyDebuggerStateManager();
 
   private final DebuggerContextListener mySessionListener = new DebuggerContextListener() {
     @Override
-    public void changeEvent(DebuggerContextImpl newContext, int event) {
+    public void changeEvent(@NotNull DebuggerContextImpl newContext, DebuggerSession.Event event) {
 
       final DebuggerSession session = newContext.getDebuggerSession();
-      if (event == DebuggerSession.EVENT_PAUSE && myDebuggerStateManager.myDebuggerSession != session) {
+      if (event == DebuggerSession.Event.PAUSE && myDebuggerStateManager.myDebuggerSession != session) {
         // if paused in non-active session; switch current session
-        myDebuggerStateManager.setState(newContext, session != null? session.getState() : DebuggerSession.STATE_DISPOSED, event, null);
+        myDebuggerStateManager.setState(newContext, session != null? session.getState() : DebuggerSession.State.DISPOSED, event, null);
         return;
       }
 
       if (myDebuggerStateManager.myDebuggerSession == session) {
         myDebuggerStateManager.fireStateChanged(newContext, event);
       }
-      if (event == DebuggerSession.EVENT_ATTACHED) {
+      if (event == DebuggerSession.Event.ATTACHED) {
         myDispatcher.getMulticaster().sessionAttached(session);
       }
-      else if (event == DebuggerSession.EVENT_DETACHED) {
+      else if (event == DebuggerSession.Event.DETACHED) {
         myDispatcher.getMulticaster().sessionDetached(session);
       }
-      else if (event == DebuggerSession.EVENT_DISPOSE) {
+      else if (event == DebuggerSession.Event.DISPOSE) {
         dispose(session);
         if (myDebuggerStateManager.myDebuggerSession == session) {
           myDebuggerStateManager
-            .setState(DebuggerContextImpl.EMPTY_CONTEXT, DebuggerSession.STATE_DISPOSED, DebuggerSession.EVENT_DISPOSE, null);
+            .setState(DebuggerContextImpl.EMPTY_CONTEXT, DebuggerSession.State.DISPOSED, DebuggerSession.Event.DISPOSE, null);
         }
       }
     }
@@ -155,6 +155,7 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
     }
   }
 
+  @Nullable
   @Override
   public DebuggerSession getSession(DebugProcess process) {
     ApplicationManager.getApplication().assertIsDispatchThread();
@@ -164,11 +165,12 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
     return null;
   }
 
+  @NotNull
   @Override
   public Collection<DebuggerSession> getSessions() {
     synchronized (mySessions) {
       final Collection<DebuggerSession> values = mySessions.values();
-      return values.isEmpty() ? Collections.<DebuggerSession>emptyList() : new ArrayList<DebuggerSession>(values);
+      return values.isEmpty() ? Collections.emptyList() : new ArrayList<>(values);
     }
   }
 
@@ -206,57 +208,28 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
     myBreakpointManager.writeExternal(element);
   }
 
+  /**
+   * @deprecated to be removed with {@link DebuggerManager#registerPositionManagerFactory(Function)}
+   */
+  @Deprecated
+  public Stream<Function<DebugProcess, PositionManager>> getCustomPositionManagerFactories() {
+    return myCustomPositionManagerFactories.stream();
+  }
+
   @Override
   @Nullable
   public DebuggerSession attachVirtualMachine(@NotNull DebugEnvironment environment) throws ExecutionException {
     ApplicationManager.getApplication().assertIsDispatchThread();
-    final DebugProcessEvents debugProcess = new DebugProcessEvents(myProject);
-    debugProcess.addDebugProcessListener(new DebugProcessAdapter() {
-      @Override
-      public void processAttached(final DebugProcess process) {
-        process.removeDebugProcessListener(this);
-        for (Function<DebugProcess, PositionManager> factory : myCustomPositionManagerFactories) {
-          final PositionManager positionManager = factory.fun(process);
-          if (positionManager != null) {
-            process.appendPositionManager(positionManager);
-          }
-        }
-        for (PositionManagerFactory factory : Extensions.getExtensions(PositionManagerFactory.EP_NAME, myProject)) {
-          final PositionManager manager = factory.createPositionManager(debugProcess);
-          if (manager != null) {
-            process.appendPositionManager(manager);
-          }
-        }
-      }
-
-      @Override
-      public void processDetached(final DebugProcess process, final boolean closedByUser) {
-        debugProcess.removeDebugProcessListener(this);
-      }
-
-      @Override
-      public void attachException(final RunProfileState state,
-                                  final ExecutionException exception,
-                                  final RemoteConnection remoteConnection) {
-        debugProcess.removeDebugProcessListener(this);
-      }
-    });
-    DebuggerSession session = new DebuggerSession(environment.getSessionName(), debugProcess);
-    ExecutionResult executionResult;
-    try {
-      executionResult = session.attach(environment);
-    }
-    catch (ExecutionException e) {
-      session.dispose();
-      throw e;
-    }
+    DebugProcessEvents debugProcess = new DebugProcessEvents(myProject);
+    DebuggerSession session = DebuggerSession.create(environment.getSessionName(), debugProcess, environment);
+    ExecutionResult executionResult = session.getProcess().getExecutionResult();
     if (executionResult == null) {
       return null;
     }
     session.getContextManager().addListener(mySessionListener);
     getContextManager()
       .setState(DebuggerContextUtil.createDebuggerContext(session, session.getContextManager().getContext().getSuspendContext()),
-                session.getState(), DebuggerSession.EVENT_CONTEXT, null);
+                session.getState(), DebuggerSession.Event.CONTEXT, null);
 
     final ProcessHandler processHandler = executionResult.getProcessHandler();
 
@@ -283,12 +256,9 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
             // if processWillTerminate() is called from AWT thread debugProcess.waitFor() will block it and the whole app will hang
             if (!DebuggerManagerThreadImpl.isManagerThread()) {
               if (SwingUtilities.isEventDispatchThread()) {
-                ProgressManager.getInstance().runProcessWithProgressSynchronously(new Runnable() {
-                  @Override
-                  public void run() {
-                    ProgressManager.getInstance().getProgressIndicator().setIndeterminate(true);
-                    debugProcess.waitFor(10000);
-                  }
+                ProgressManager.getInstance().runProcessWithProgressSynchronously(() -> {
+                  ProgressManager.getInstance().getProgressIndicator().setIndeterminate(true);
+                  debugProcess.waitFor(10000);
                 }, "Waiting For Debugger Response", false, debugProcess.getProject());
               }
               else {
@@ -300,6 +270,17 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
       });
     }
     myDispatcher.getMulticaster().sessionCreated(session);
+
+    if (debugProcess.isDetached() || debugProcess.isDetaching()) {
+      session.dispose();
+      return null;
+    }
+    if (environment.isRemote()) {
+      // optimization: that way BatchEvaluator will not try to lookup the class file in remote VM
+      // which is an expensive operation when executed first time
+      debugProcess.putUserData(BatchEvaluator.REMOTE_SESSION_KEY, Boolean.TRUE);
+    }
+
     return session;
   }
 
@@ -370,16 +351,19 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
     return "DebuggerManager";
   }
 
+  @NotNull
   @Override
   public BreakpointManager getBreakpointManager() {
     return myBreakpointManager;
   }
 
+  @NotNull
   @Override
   public DebuggerContextImpl getContext() {
     return getContextManager().getContext();
   }
 
+  @NotNull
   @Override
   public DebuggerStateManager getContextManager() {
     return myDebuggerStateManager;
@@ -504,43 +488,39 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
     }
     final String _debuggeeRunProperties = debuggeeRunProperties;
 
-    ApplicationManager.getApplication().runReadAction(new Runnable() {
-      @Override
-      @SuppressWarnings({"HardCodedStringLiteral"})
-      public void run() {
-        JavaSdkUtil.addRtJar(parameters.getClassPath());
+    ApplicationManager.getApplication().runReadAction(() -> {
+      JavaSdkUtil.addRtJar(parameters.getClassPath());
 
-        final Sdk jdk = parameters.getJdk();
-        final boolean forceClassicVM = shouldForceClassicVM(jdk);
-        final boolean forceNoJIT = shouldForceNoJIT(jdk);
-        final String debugKey = System.getProperty(DEBUG_KEY_NAME, "-Xdebug");
-        final boolean needDebugKey = shouldAddXdebugKey(jdk) || !"-Xdebug".equals(debugKey) /*the key is non-standard*/;
+      final Sdk jdk = parameters.getJdk();
+      final boolean forceClassicVM = shouldForceClassicVM(jdk);
+      final boolean forceNoJIT = shouldForceNoJIT(jdk);
+      final String debugKey = System.getProperty(DEBUG_KEY_NAME, "-Xdebug");
+      final boolean needDebugKey = shouldAddXdebugKey(jdk) || !"-Xdebug".equals(debugKey) /*the key is non-standard*/;
 
-        if (forceClassicVM || forceNoJIT || needDebugKey || !isJVMTIAvailable(jdk)) {
-          parameters.getVMParametersList().replaceOrPrepend("-Xrunjdwp:", "-Xrunjdwp:" + _debuggeeRunProperties);
-        }
-        else {
-          // use newer JVMTI if available
-          parameters.getVMParametersList().replaceOrPrepend("-Xrunjdwp:", "");
-          parameters.getVMParametersList().replaceOrPrepend("-agentlib:jdwp=", "-agentlib:jdwp=" + _debuggeeRunProperties);
-        }
-
-        if (forceNoJIT) {
-          parameters.getVMParametersList().replaceOrPrepend("-Djava.compiler=", "-Djava.compiler=NONE");
-          parameters.getVMParametersList().replaceOrPrepend("-Xnoagent", "-Xnoagent");
-        }
-
-        if (needDebugKey) {
-          parameters.getVMParametersList().replaceOrPrepend(debugKey, debugKey);
-        }
-        else {
-          // deliberately skip outdated parameter because it can disable full-speed debugging for some jdk builds
-          // see http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6272174
-          parameters.getVMParametersList().replaceOrPrepend("-Xdebug", "");
-        }
-
-        parameters.getVMParametersList().replaceOrPrepend("-classic", forceClassicVM ? "-classic" : "");
+      if (forceClassicVM || forceNoJIT || needDebugKey || !isJVMTIAvailable(jdk)) {
+        parameters.getVMParametersList().replaceOrPrepend("-Xrunjdwp:", "-Xrunjdwp:" + _debuggeeRunProperties);
       }
+      else {
+        // use newer JVMTI if available
+        parameters.getVMParametersList().replaceOrPrepend("-Xrunjdwp:", "");
+        parameters.getVMParametersList().replaceOrPrepend("-agentlib:jdwp=", "-agentlib:jdwp=" + _debuggeeRunProperties);
+      }
+
+      if (forceNoJIT) {
+        parameters.getVMParametersList().replaceOrPrepend("-Djava.compiler=", "-Djava.compiler=NONE");
+        parameters.getVMParametersList().replaceOrPrepend("-Xnoagent", "-Xnoagent");
+      }
+
+      if (needDebugKey) {
+        parameters.getVMParametersList().replaceOrPrepend(debugKey, debugKey);
+      }
+      else {
+        // deliberately skip outdated parameter because it can disable full-speed debugging for some jdk builds
+        // see http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6272174
+        parameters.getVMParametersList().replaceOrPrepend("-Xdebug", "");
+      }
+
+      parameters.getVMParametersList().replaceOrPrepend("-classic", forceClassicVM ? "-classic" : "");
     });
 
     return new RemoteConnection(useSockets, "127.0.0.1", address, debuggerInServerMode);
@@ -608,13 +588,14 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
   private static class MyDebuggerStateManager extends DebuggerStateManager {
     private DebuggerSession myDebuggerSession;
 
+    @NotNull
     @Override
     public DebuggerContextImpl getContext() {
       return myDebuggerSession == null ? DebuggerContextImpl.EMPTY_CONTEXT : myDebuggerSession.getContextManager().getContext();
     }
 
     @Override
-    public void setState(final DebuggerContextImpl context, int state, int event, String description) {
+    public void setState(@NotNull final DebuggerContextImpl context, DebuggerSession.State state, DebuggerSession.Event event, String description) {
       ApplicationManager.getApplication().assertIsDispatchThread();
       myDebuggerSession = context.getDebuggerSession();
       if (myDebuggerSession != null) {

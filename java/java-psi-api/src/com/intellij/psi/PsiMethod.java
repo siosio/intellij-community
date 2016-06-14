@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ import java.util.List;
  * @see PsiClass#getMethods()
  */
 public interface PsiMethod extends PsiMember, PsiNameIdentifierOwner, PsiModifierListOwner, PsiDocCommentOwner, PsiTypeParameterListOwner,
-                                   PomRenameableTarget<PsiElement>, PsiTarget {
+                                   PomRenameableTarget<PsiElement>, PsiTarget, PsiParameterListOwner {
   /**
    * The empty array of PSI methods which can be reused to avoid unnecessary allocations.
    */
@@ -67,6 +67,7 @@ public interface PsiMethod extends PsiMember, PsiNameIdentifierOwner, PsiModifie
    *
    * @return the parameter list instance.
    */
+  @Override
   @NotNull
   PsiParameterList getParameterList();
 
@@ -83,6 +84,7 @@ public interface PsiMethod extends PsiMember, PsiNameIdentifierOwner, PsiModifie
    *
    * @return the method body, or null if the method belongs to a compiled class.
    */
+  @Override
   @Nullable
   PsiCodeBlock getBody();
 

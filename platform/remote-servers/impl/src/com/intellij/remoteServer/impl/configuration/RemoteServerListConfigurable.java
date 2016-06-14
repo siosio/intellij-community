@@ -4,7 +4,6 @@ import com.intellij.openapi.actionSystem.ActionGroup;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonShortcuts;
-import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.options.SearchableConfigurable;
 import com.intellij.openapi.project.DumbAwareAction;
@@ -55,18 +54,24 @@ public class RemoteServerListConfigurable extends MasterDetailsComponent impleme
     myServersManager = manager;
     myServerType = type;
     initTree();
+    myToReInitWholePanel = true;
+    reInitWholePanelIfNeeded();
+  }
+
+  @Nullable
+  private ServerType<?> getSingleServerType() {
+    if (myServerType != null) {
+      return myServerType;
+    }
+    ServerType[] serverTypes = ServerType.EP_NAME.getExtensions();
+    return serverTypes.length == 1 ? serverTypes[0] : null;
   }
 
   @Nullable
   @Override
   protected String getEmptySelectionString() {
-    final String typeNames = StringUtil.join(Extensions.getExtensions(ServerType.EP_NAME),
-                    new Function<ServerType, String>() {
-                      @Override
-                      public String fun(ServerType type) {
-                        return type.getPresentableName();
-                      }
-                    }, ", ");
+    final String typeNames = StringUtil.join(ServerType.EP_NAME.getExtensions(),
+                                             type -> type.getPresentableName(), ", ");
 
     if (typeNames.length() > 0) {
       return CloudBundle.getText("clouds.configure.empty.selection.string", typeNames);
@@ -81,7 +86,8 @@ public class RemoteServerListConfigurable extends MasterDetailsComponent impleme
   @Nls
   @Override
   public String getDisplayName() {
-    return "Clouds";
+    ServerType<?> singleServerType = getSingleServerType();
+    return singleServerType == null ? "Clouds" : singleServerType.getPresentableName();
   }
 
   @Override
@@ -117,12 +123,7 @@ public class RemoteServerListConfigurable extends MasterDetailsComponent impleme
   @Nullable
   @Override
   public Runnable enableSearch(final String option) {
-    return new Runnable() {
-      @Override
-      public void run() {
-        ObjectUtils.assertNotNull(SpeedSearchSupply.getSupply(myTree, true)).findAndSelectElement(option);
-      }
-    };
+    return () -> ObjectUtils.assertNotNull(SpeedSearchSupply.getSupply(myTree, true)).findAndSelectElement(option);
   }
 
   @Override
@@ -171,11 +172,12 @@ public class RemoteServerListConfigurable extends MasterDetailsComponent impleme
   @Override
   protected ArrayList<AnAction> createActions(boolean fromPopup) {
     ArrayList<AnAction> actions = new ArrayList<AnAction>();
-    if (myServerType == null) {
+    ServerType<?> singleServerType = getSingleServerType();
+    if (singleServerType == null) {
       actions.add(new AddRemoteServerGroup());
     }
     else {
-      actions.add(new AddRemoteServerAction(myServerType, IconUtil.getAddIcon()));
+      actions.add(new AddRemoteServerAction(singleServerType, IconUtil.getAddIcon()));
     }
     actions.add(new MyDeleteAction());
     return actions;
@@ -250,16 +252,13 @@ public class RemoteServerListConfigurable extends MasterDetailsComponent impleme
 
     @Override
     public void actionPerformed(AnActionEvent e) {
-      String name = UniqueNameGenerator.generateUniqueName(myServerType.getPresentableName(), new Condition<String>() {
-        @Override
-        public boolean value(String s) {
-          for (NamedConfigurable<RemoteServer<?>> configurable : getConfiguredServers()) {
-            if (configurable.getDisplayName().equals(s)) {
-              return false;
-            }
+      String name = UniqueNameGenerator.generateUniqueName(myServerType.getPresentableName(), s -> {
+        for (NamedConfigurable<RemoteServer<?>> configurable : getConfiguredServers()) {
+          if (configurable.getDisplayName().equals(s)) {
+            return false;
           }
-          return true;
         }
+        return true;
       });
       MyNode node = addServerNode(myServersManager.createServer(myServerType, name), true);
       selectNodeInTree(node);

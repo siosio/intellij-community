@@ -16,19 +16,26 @@
 package com.intellij.execution.impl;
 
 import com.intellij.ProjectTopics;
-import com.intellij.execution.ExecutionException;
-import com.intellij.execution.Executor;
-import com.intellij.execution.RunnerAndConfigurationSettings;
+import com.intellij.execution.*;
+import com.intellij.execution.configuration.EmptyRunProfileState;
 import com.intellij.execution.configurations.*;
+import com.intellij.execution.executors.DefaultRunExecutor;
+import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.runners.ExecutionEnvironment;
+import com.intellij.execution.runners.ExecutionEnvironmentBuilder;
+import com.intellij.execution.runners.GenericProgramRunner;
+import com.intellij.execution.runners.RunContentBuilder;
+import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.options.SettingsEditor;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.testFramework.LightPlatformTestCase;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.messages.MessageBus;
 import com.intellij.util.messages.MessageBusConnection;
+import com.intellij.util.ui.UIUtil;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -36,6 +43,7 @@ import org.jmock.Expectations;
 import org.jmock.Mockery;
 
 import javax.swing.*;
+import java.io.OutputStream;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -79,8 +87,13 @@ public class ModuleRunConfigurationManagerTest extends LightPlatformTestCase {
 
   @Override
   public void tearDown() throws Exception {
-    myManager = null;
-    super.tearDown();
+    try {
+      ExecutionTestUtil.terminateAllRunningDescriptors(ExecutionManager.getInstance(getProject()));
+      myManager = null;
+    }
+    finally {
+      super.tearDown();
+    }
   }
 
   public void testInitComponentSubscribesForModulesTopic() throws Exception {
@@ -114,6 +127,27 @@ public class ModuleRunConfigurationManagerTest extends LightPlatformTestCase {
     assertSameElements("one run config should be removed", myRemovedSettings, Collections.singleton(mySettings));
   }
 
+  public void testSuppressToolwindowActivation() throws Exception {
+    RunnerAndConfigurationSettings settings = new RunnerAndConfigurationSettingsImpl(
+      new MyRunManagerImpl(), new MyModuleBasedConfiguration("my-name", getProject(), getModule()), false
+    );
+    settings.setActivateToolWindowBeforeRun(true);
+    MockProgramRunner programRunner = new MockProgramRunner();
+    ExecutionEnvironment env = new ExecutionEnvironmentBuilder(getProject(), DefaultRunExecutor.getRunExecutorInstance())
+      .runnerAndSettings(programRunner, settings)
+      .build();
+    RunContentDescriptor descriptorToReuse = new RunContentDescriptor(null, null, new JPanel(), "name");
+    descriptorToReuse.setActivateToolWindowWhenAdded(false);
+    descriptorToReuse.setReuseToolWindowActivation(true);
+    env.setContentToReuse(descriptorToReuse);
+    ExecutionManager executionManager = ExecutionManager.getInstance(getProject());
+    executionManager.restartRunProfile(env);
+    UIUtil.dispatchAllInvocationEvents();
+    RunContentDescriptor lastDescriptor = ExecutionTestUtil.getSingleRunContentDescriptor(executionManager);
+    assertFalse(lastDescriptor.isActivateToolWindowWhenAdded());
+    Disposer.dispose(descriptorToReuse);
+  }
+
   private static final class MyRunConfigurationModule extends RunConfigurationModule {
     private final Module myModule;
     public MyRunConfigurationModule(@NotNull final Project project, @NotNull final Module module) {
@@ -131,7 +165,7 @@ public class ModuleRunConfigurationManagerTest extends LightPlatformTestCase {
 
   private final class MyRunManagerImpl extends RunManagerImpl {
     public MyRunManagerImpl() {
-      super(LightPlatformTestCase.getProject(), PropertiesComponent.getInstance());
+      super(LightPlatformTestCase.getProject(), PropertiesComponent.getInstance(LightPlatformTestCase.getProject()));
     }
 
     @NotNull
@@ -170,7 +204,7 @@ public class ModuleRunConfigurationManagerTest extends LightPlatformTestCase {
     @Nullable
     @Override
     public RunProfileState getState(@NotNull Executor executor, @NotNull ExecutionEnvironment env) throws ExecutionException {
-      return null;
+      return EmptyRunProfileState.INSTANCE;
     }
   }
 
@@ -211,6 +245,54 @@ public class ModuleRunConfigurationManagerTest extends LightPlatformTestCase {
     @Override
     public ConfigurationFactory[] getConfigurationFactories() {
       return new ConfigurationFactory[0];
+    }
+  }
+
+  private static class MockProgramRunner extends GenericProgramRunner {
+    private RunContentDescriptor myLastDescriptor;
+
+    @NotNull
+    @Override
+    public String getRunnerId() {
+      return "MockProgramRunner";
+    }
+
+    @Override
+    protected RunContentDescriptor doExecute(@NotNull RunProfileState state, @NotNull ExecutionEnvironment env) throws ExecutionException {
+      ExecutionResult executionResult = new DefaultExecutionResult(null, new NopProcessHandler());
+      myLastDescriptor = new RunContentBuilder(executionResult, env).showRunContent(env.getContentToReuse());
+      return myLastDescriptor;
+    }
+
+    @Override
+    public boolean canRun(@NotNull String executorId, @NotNull RunProfile profile) {
+      return true;
+    }
+
+    public RunContentDescriptor getLastDescriptor() {
+      return myLastDescriptor;
+    }
+  }
+
+  public static class NopProcessHandler extends ProcessHandler {
+    @Override
+    protected void destroyProcessImpl() {
+      notifyProcessTerminated(0);
+    }
+
+    @Override
+    protected void detachProcessImpl() {
+    }
+
+    @Override
+    public boolean detachIsDefault() {
+      return false;
+    }
+
+    @Nullable
+    @Override
+    public OutputStream getProcessInput() {
+      return null;
     }
   }
 }

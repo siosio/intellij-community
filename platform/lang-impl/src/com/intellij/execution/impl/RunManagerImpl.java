@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,14 +27,15 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.project.DumbService;
+import com.intellij.openapi.project.IndexNotReadyException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ModuleRootAdapter;
 import com.intellij.openapi.roots.ModuleRootEvent;
 import com.intellij.openapi.updateSettings.impl.pluginsAdvertisement.UnknownFeaturesCollector;
 import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.ui.IconDeferrer;
 import com.intellij.util.EventDispatcher;
-import com.intellij.util.Function;
 import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.HashMap;
@@ -52,7 +53,7 @@ import java.util.*;
 @State(
   name = "RunManager",
   defaultStateAsResource = true,
-  storages = @Storage(file = StoragePathMacros.WORKSPACE_FILE)
+  storages = @Storage(StoragePathMacros.WORKSPACE_FILE)
 )
 public class RunManagerImpl extends RunManagerEx implements PersistentStateComponent<Element>, NamedComponent, Disposable {
   private static final Logger LOG = Logger.getInstance(RunManagerImpl.class);
@@ -95,9 +96,8 @@ public class RunManagerImpl extends RunManagerEx implements PersistentStateCompo
 
   private final EventDispatcher<RunManagerListener> myDispatcher = EventDispatcher.create(RunManagerListener.class);
 
-  public RunManagerImpl(final Project project,
-                        PropertiesComponent propertiesComponent) {
-    myConfig = new RunManagerConfig(propertiesComponent, this);
+  public RunManagerImpl(@NotNull Project project, @NotNull PropertiesComponent propertiesComponent) {
+    myConfig = new RunManagerConfig(propertiesComponent);
     myProject = project;
 
     initializeConfigurationTypes(ConfigurationType.CONFIGURATION_TYPE_EP.getExtensions());
@@ -114,12 +114,7 @@ public class RunManagerImpl extends RunManagerEx implements PersistentStateCompo
 
   // separate method needed for tests
   public final void initializeConfigurationTypes(@NotNull final ConfigurationType[] factories) {
-    Arrays.sort(factories, new Comparator<ConfigurationType>() {
-      @Override
-      public int compare(@NotNull final ConfigurationType o1, @NotNull final ConfigurationType o2) {
-        return o1.getDisplayName().compareTo(o2.getDisplayName());
-      }
-    });
+    Arrays.sort(factories, (o1, o2) -> o1.getDisplayName().compareTo(o2.getDisplayName()));
 
     final ArrayList<ConfigurationType> types = new ArrayList<ConfigurationType>(Arrays.asList(factories));
     types.add(UnknownConfigurationType.INSTANCE);
@@ -360,7 +355,7 @@ public class RunManagerImpl extends RunManagerEx implements PersistentStateCompo
     setBeforeRunTasks(configuration, tasks, addEnabledTemplateTasksIfAbsent);
 
     if (existingSettings == settings) {
-      myDispatcher.getMulticaster().runConfigurationChanged(settings);
+      myDispatcher.getMulticaster().runConfigurationChanged(settings, existingId);
     }
     else {
       myDispatcher.getMulticaster().runConfigurationAdded(settings);
@@ -405,13 +400,23 @@ public class RunManagerImpl extends RunManagerEx implements PersistentStateCompo
   }
 
   public void saveOrder() {
+    setOrder(null);
+  }
+
+  private void doSaveOrder(@Nullable Comparator<RunnerAndConfigurationSettings> comparator) {
+    List<RunnerAndConfigurationSettings> sorted = new ArrayList<>(
+      ContainerUtil.filter(myConfigurations.values(), o -> !(o.getType() instanceof UnknownConfigurationType)));
+    if (comparator != null) sorted.sort(comparator);
+    
     myOrder.clear();
-    for (RunnerAndConfigurationSettings each : myConfigurations.values()) {
-      if (each.getType() instanceof UnknownConfigurationType) {
-        continue;
-      }
+    for (RunnerAndConfigurationSettings each : sorted) {
       myOrder.add(each.getUniqueID());
     }
+  }
+
+  public void setOrder(@Nullable Comparator<RunnerAndConfigurationSettings> comparator) {
+    doSaveOrder(comparator);
+    setOrdered(false);// force recache of configurations list
   }
 
   @Override
@@ -477,42 +482,36 @@ public class RunManagerImpl extends RunManagerEx implements PersistentStateCompo
 
     if (myOrder.isEmpty()) {
       // IDEA-63663 Sort run configurations alphabetically if clean checkout
-      Collections.sort(order, new Comparator<Pair<String, RunnerAndConfigurationSettings>>() {
-        @Override
-        public int compare(@NotNull Pair<String, RunnerAndConfigurationSettings> o1, @NotNull Pair<String, RunnerAndConfigurationSettings> o2) {
-          boolean temporary1 = o1.getSecond().isTemporary();
-          boolean temporary2 = o2.getSecond().isTemporary();
-          if (temporary1 == temporary2) {
-            return o1.first.compareTo(o2.first);
-          }
-          else {
-            return temporary1 ? 1 : -1;
-          }
+      Collections.sort(order, (o1, o2) -> {
+        boolean temporary1 = o1.getSecond().isTemporary();
+        boolean temporary2 = o2.getSecond().isTemporary();
+        if (temporary1 == temporary2) {
+          return o1.first.compareTo(o2.first);
+        }
+        else {
+          return temporary1 ? 1 : -1;
         }
       });
     }
     else {
-      Collections.sort(order, new Comparator<Pair<String, RunnerAndConfigurationSettings>>() {
-        @Override
-        public int compare(@NotNull Pair<String, RunnerAndConfigurationSettings> o1, @NotNull Pair<String, RunnerAndConfigurationSettings> o2) {
-          int i1 = folderNames.indexOf(o1.getSecond().getFolderName());
-          int i2 = folderNames.indexOf(o2.getSecond().getFolderName());
-          if (i1 != i2) {
-            return i1 - i2;
+      Collections.sort(order, (o1, o2) -> {
+        int i1 = folderNames.indexOf(o1.getSecond().getFolderName());
+        int i2 = folderNames.indexOf(o2.getSecond().getFolderName());
+        if (i1 != i2) {
+          return i1 - i2;
+        }
+        boolean temporary1 = o1.getSecond().isTemporary();
+        boolean temporary2 = o2.getSecond().isTemporary();
+        if (temporary1 == temporary2) {
+          int index1 = myOrder.indexOf(o1.first);
+          int index2 = myOrder.indexOf(o2.first);
+          if (index1 == -1 && index2 == -1) {
+            return o1.second.getName().compareTo(o2.second.getName());
           }
-          boolean temporary1 = o1.getSecond().isTemporary();
-          boolean temporary2 = o2.getSecond().isTemporary();
-          if (temporary1 == temporary2) {
-            int index1 = myOrder.indexOf(o1.first);
-            int index2 = myOrder.indexOf(o2.first);
-            if (index1 == -1 && index2 == -1) {
-              return o1.second.getName().compareTo(o2.second.getName());
-            }
-            return index1 - index2;
-          }
-          else {
-            return temporary1 ? 1 : -1;
-          }
+          return index1 - index2;
+        }
+        else {
+          return temporary1 ? 1 : -1;
         }
       });
     }
@@ -534,6 +533,9 @@ public class RunManagerImpl extends RunManagerEx implements PersistentStateCompo
   public static boolean canRunConfiguration(@NotNull RunnerAndConfigurationSettings configuration, @NotNull Executor executor) {
     try {
       configuration.checkSettings(executor);
+    }
+    catch (IndexNotReadyException ignored) {
+      return Registry.is("dumb.aware.run.configurations");
     }
     catch (RuntimeConfigurationError ignored) {
       return false;
@@ -689,13 +691,10 @@ public class RunManagerImpl extends RunManagerEx implements PersistentStateCompo
     List<Element> children = parentNode.getChildren(CONFIGURATION);
     Element[] sortedElements = children.toArray(new Element[children.size()]);
     // ensure templates are loaded first
-    Arrays.sort(sortedElements, new Comparator<Element>() {
-      @Override
-      public int compare(@NotNull Element a, @NotNull Element b) {
-        final boolean aDefault = Boolean.valueOf(a.getAttributeValue("default", "false"));
-        final boolean bDefault = Boolean.valueOf(b.getAttributeValue("default", "false"));
-        return aDefault == bDefault ? 0 : aDefault ? -1 : 1;
-      }
+    Arrays.sort(sortedElements, (a, b) -> {
+      final boolean aDefault = Boolean.valueOf(a.getAttributeValue("default", "false"));
+      final boolean bDefault = Boolean.valueOf(b.getAttributeValue("default", "false"));
+      return aDefault == bDefault ? 0 : aDefault ? -1 : 1;
     });
 
     // element could be detached, so, we must not use for each
@@ -721,12 +720,7 @@ public class RunManagerImpl extends RunManagerEx implements PersistentStateCompo
       }
     }
 
-    try {
-      myOrder.readExternal(parentNode);
-    }
-    catch (InvalidDataException e) {
-      throw new RuntimeException(e);
-    }
+    myOrder.readExternal(parentNode);
 
     // migration (old ids to UUIDs)
     readList(myOrder);
@@ -735,12 +729,7 @@ public class RunManagerImpl extends RunManagerEx implements PersistentStateCompo
     Element recentNode = parentNode.getChild(RECENT);
     if (recentNode != null) {
       JDOMExternalizableStringList list = new JDOMExternalizableStringList();
-      try {
-        list.readExternal(recentNode);
-      }
-      catch (InvalidDataException e) {
-        throw new RuntimeException(e);
-      }
+      list.readExternal(recentNode);
       readList(list);
       for (String name : list) {
         RunnerAndConfigurationSettings settings = myConfigurations.get(name);
@@ -989,12 +978,7 @@ public class RunManagerImpl extends RunManagerEx implements PersistentStateCompo
   @NotNull
   public List<RunnerAndConfigurationSettings> getTempConfigurationsList() {
     List<RunnerAndConfigurationSettings> configurations =
-      ContainerUtil.filter(myConfigurations.values(), new Condition<RunnerAndConfigurationSettings>() {
-      @Override
-      public boolean value(RunnerAndConfigurationSettings settings) {
-        return settings.isTemporary();
-      }
-      });
+      ContainerUtil.filter(myConfigurations.values(), RunnerAndConfigurationSettings::isTemporary);
     return Collections.unmodifiableList(configurations);
   }
 
@@ -1088,35 +1072,39 @@ public class RunManagerImpl extends RunManagerEx implements PersistentStateCompo
     Icon icon = myIdToIcon.get(uniqueID);
     if (icon == null) {
       icon = IconDeferrer.getInstance().deferAutoUpdatable(settings.getConfiguration().getIcon(), myProject.hashCode() ^ settings.hashCode(),
-                                              new Function<Integer, Icon>() {
-                                                @Override
-                                                public Icon fun(Integer param) {
-                                                  if (myProject.isDisposed()) return null;
+                                                           param -> {
+                                                             if (myProject.isDisposed()) return null;
 
-                                                  myIconCalcTime.remove(uniqueID);
-                                                  long startTime = System.currentTimeMillis();
+                                                             myIconCalcTime.remove(uniqueID);
+                                                             long startTime = System.currentTimeMillis();
 
-                                                  Icon icon;
-                                                  if (DumbService.isDumb(myProject)) {
-                                                    icon =
-                                                      IconLoader.getDisabledIcon(ProgramRunnerUtil.getRawIcon(settings));
-                                                    if (settings.isTemporary()) {
-                                                      icon = ProgramRunnerUtil.getTemporaryIcon(icon);
-                                                    }
-                                                  }
-                                                  else {
-                                                    try {
-                                                      settings.checkSettings();
-                                                      icon = ProgramRunnerUtil.getConfigurationIcon(settings, false);
-                                                    }
-                                                    catch (RuntimeConfigurationException ignored) {
-                                                      icon = ProgramRunnerUtil.getConfigurationIcon(settings, true);
-                                                    }
-                                                  }
-                                                  myIconCalcTime.put(uniqueID, System.currentTimeMillis() - startTime);
-                                                  return icon;
-                                                }
-                                              });
+                                                             Icon icon1;
+                                                             if (DumbService.isDumb(myProject) && !Registry.is("dumb.aware.run.configurations")) {
+                                                               icon1 =
+                                                                 IconLoader.getDisabledIcon(ProgramRunnerUtil.getRawIcon(settings));
+                                                               if (settings.isTemporary()) {
+                                                                 icon1 = ProgramRunnerUtil.getTemporaryIcon(icon1);
+                                                               }
+                                                             }
+                                                             else {
+                                                               try {
+                                                                 DumbService.getInstance(myProject).setAlternativeResolveEnabled(true);
+                                                                 settings.checkSettings();
+                                                                 icon1 = ProgramRunnerUtil.getConfigurationIcon(settings, false);
+                                                               }
+                                                               catch (IndexNotReadyException e) {
+                                                                 icon1 = ProgramRunnerUtil.getConfigurationIcon(settings, !Registry.is("dumb.aware.run.configurations"));
+                                                               }
+                                                               catch (RuntimeConfigurationException ignored) {
+                                                                 icon1 = ProgramRunnerUtil.getConfigurationIcon(settings, true);
+                                                               }
+                                                               finally {
+                                                                 DumbService.getInstance(myProject).setAlternativeResolveEnabled(false);
+                                                               }
+                                                             }
+                                                             myIconCalcTime.put(uniqueID, System.currentTimeMillis() - startTime);
+                                                             return icon1;
+                                                           });
 
       myIdToIcon.put(uniqueID, icon);
       myIconCheckTimes.put(uniqueID, System.currentTimeMillis());
@@ -1125,12 +1113,27 @@ public class RunManagerImpl extends RunManagerEx implements PersistentStateCompo
     return icon;
   }
 
+  public RunnerAndConfigurationSettings getConfigurationById(@NotNull final String id) {
+    return myConfigurations.get(id);
+  }
+
   @Override
   @Nullable
   public RunnerAndConfigurationSettings findConfigurationByName(@Nullable String name) {
     if (name == null) return null;
     for (RunnerAndConfigurationSettings each : myConfigurations.values()) {
       if (name.equals(each.getName())) return each;
+    }
+    return null;
+  }
+
+  @Nullable
+  public RunnerAndConfigurationSettings findConfigurationByTypeAndName(@NotNull String typeId, @NotNull String name) {
+    for (RunnerAndConfigurationSettings settings : getSortedConfigurations()) {
+      ConfigurationType t = settings.getType();
+      if (t != null && typeId.equals(t.getId()) && name.equals(settings.getName())) {
+        return settings;
+      }
     }
     return null;
   }
@@ -1229,7 +1232,7 @@ public class RunManagerImpl extends RunManagerEx implements PersistentStateCompo
         }
       }
     }
-    myConfigurationToBeforeTasksMap.put(runConfiguration, result.isEmpty() ? Collections.<BeforeRunTask>emptyList() : result);
+    myConfigurationToBeforeTasksMap.put(runConfiguration, ContainerUtil.notNullize(result));
     fireBeforeRunTasksUpdated();
   }
 
@@ -1263,8 +1266,16 @@ public class RunManagerImpl extends RunManagerEx implements PersistentStateCompo
     fireRunConfigurationsRemoved(removed);
   }
 
+  public void fireBeginUpdate() {
+    myDispatcher.getMulticaster().beginUpdate();
+  }
+
+  public void fireEndUpdate() {
+    myDispatcher.getMulticaster().endUpdate();
+  }
+  
   public void fireRunConfigurationChanged(@NotNull RunnerAndConfigurationSettings settings) {
-    myDispatcher.getMulticaster().runConfigurationChanged(settings);
+    myDispatcher.getMulticaster().runConfigurationChanged(settings, null);
   }
 
   private void fireRunConfigurationsRemoved(@Nullable List<RunnerAndConfigurationSettings> removed) {

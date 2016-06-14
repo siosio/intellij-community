@@ -21,15 +21,12 @@ import jetbrains.buildServer.messages.serviceMessages.TestIgnored;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-/**
- * @author Sergey Simonchik
- */
 public class TestIgnoredEvent extends TreeNodeEvent {
   private final String myIgnoreComment;
   private final String myStacktrace;
 
   public TestIgnoredEvent(@NotNull String testName, @NotNull String ignoreComment, @Nullable String stacktrace) {
-    super(testName, -1);
+    super(testName, null);
     myIgnoreComment = ignoreComment;
     myStacktrace = stacktrace;
   }

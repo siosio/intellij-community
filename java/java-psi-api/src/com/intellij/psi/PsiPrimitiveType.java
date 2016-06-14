@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.util.PsiUtil;
 import gnu.trove.THashMap;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -36,17 +35,28 @@ public class PsiPrimitiveType extends PsiType.Stub {
 
   private final String myName;
 
-  PsiPrimitiveType(@NonNls @NotNull String name, @NonNls String boxedName) {
-    this(name, PsiAnnotation.EMPTY_ARRAY);
+  PsiPrimitiveType(@NotNull String name, String boxedName) {
+    this(name, TypeAnnotationProvider.EMPTY);
     if (boxedName != null) {
       ourQNameToUnboxed.put(boxedName, this);
       ourUnboxedToQName.put(this, boxedName);
     }
   }
 
-  public PsiPrimitiveType(@NonNls @NotNull String name, @NotNull PsiAnnotation[] annotations) {
+  public PsiPrimitiveType(@NotNull String name, @NotNull PsiAnnotation[] annotations) {
     super(annotations);
     myName = name;
+  }
+
+  public PsiPrimitiveType(@NotNull String name, @NotNull TypeAnnotationProvider provider) {
+    super(provider);
+    myName = name;
+  }
+
+  @NotNull
+  @Override
+  public PsiPrimitiveType annotate(@NotNull TypeAnnotationProvider provider) {
+    return (PsiPrimitiveType)super.annotate(provider);
   }
 
   @NotNull
@@ -68,8 +78,8 @@ public class PsiPrimitiveType extends PsiType.Stub {
   }
 
   private String getText(boolean qualified, boolean annotated) {
-    PsiAnnotation[] annotations = getAnnotations();
-    if (!annotated || annotations.length == 0) return myName;
+    PsiAnnotation[] annotations = annotated ? getAnnotations() : PsiAnnotation.EMPTY_ARRAY; ;
+    if (annotations.length == 0) return myName;
 
     StringBuilder sb = new StringBuilder();
     PsiNameHelper.appendAnnotations(sb, annotations, qualified);
@@ -115,19 +125,18 @@ public class PsiPrimitiveType extends PsiType.Stub {
   @Nullable
   public static PsiPrimitiveType getUnboxedType(PsiType type) {
     if (!(type instanceof PsiClassType)) return null;
+
+    assert type.isValid() : type;
     LanguageLevel languageLevel = ((PsiClassType)type).getLanguageLevel();
     if (!languageLevel.isAtLeast(LanguageLevel.JDK_1_5)) return null;
 
-    assert type.isValid() : type;
     PsiClass psiClass = ((PsiClassType)type).resolve();
     if (psiClass == null) return null;
 
     PsiPrimitiveType unboxed = ourQNameToUnboxed.get(psiClass.getQualifiedName());
-    PsiAnnotation[] annotations = type.getAnnotations();
-    if (unboxed != null && annotations.length > 0) {
-      unboxed = new PsiPrimitiveType(unboxed.myName, annotations);
-    }
-    return unboxed;
+    if (unboxed == null) return null;
+
+    return unboxed.annotate(type.getAnnotationProvider());
   }
 
   public String getBoxedTypeName() {
@@ -142,29 +151,30 @@ public class PsiPrimitiveType extends PsiType.Stub {
    *         it was not possible to resolve the reference to the class.
    */
   @Nullable
-  public PsiClassType getBoxedType(PsiElement context) {
-    LanguageLevel languageLevel = PsiUtil.getLanguageLevel(context);
+  public PsiClassType getBoxedType(@NotNull PsiElement context) {
+    PsiFile file = context.getContainingFile();
+    LanguageLevel languageLevel = PsiUtil.getLanguageLevel(file);
     if (!languageLevel.isAtLeast(LanguageLevel.JDK_1_5)) return null;
 
     String boxedQName = getBoxedTypeName();
-    //[ven]previous call returns null for NULL, VOID
     if (boxedQName == null) return null;
-    PsiClass aClass = JavaPsiFacade.getInstance(context.getProject()).findClass(boxedQName, context.getResolveScope());
+
+    JavaPsiFacade facade = JavaPsiFacade.getInstance(file.getProject());
+    PsiClass aClass = facade.findClass(boxedQName, file.getResolveScope());
     if (aClass == null) return null;
 
-    PsiElementFactory factory = JavaPsiFacade.getInstance(context.getProject()).getElementFactory();
-    return factory.createType(aClass, PsiSubstitutor.EMPTY, languageLevel, getAnnotations());
+    PsiElementFactory factory = facade.getElementFactory();
+    return factory.createType(aClass, PsiSubstitutor.EMPTY, languageLevel).annotate(getAnnotationProvider());
   }
 
   @Nullable
-  public PsiClassType getBoxedType(final PsiManager manager, final GlobalSearchScope resolveScope) {
-    final String boxedQName = getBoxedTypeName();
-
-    //[ven]previous call returns null for NULL, VOID
+  public PsiClassType getBoxedType(@NotNull PsiManager manager, @NotNull GlobalSearchScope resolveScope) {
+    String boxedQName = getBoxedTypeName();
     if (boxedQName == null) return null;
 
-    final PsiClass aClass = JavaPsiFacade.getInstance(manager.getProject()).findClass(boxedQName, resolveScope);
+    PsiClass aClass = JavaPsiFacade.getInstance(manager.getProject()).findClass(boxedQName, resolveScope);
     if (aClass == null) return null;
+
     return JavaPsiFacade.getInstance(manager.getProject()).getElementFactory().createType(aClass);
   }
 

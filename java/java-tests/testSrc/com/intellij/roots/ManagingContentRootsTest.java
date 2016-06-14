@@ -43,7 +43,7 @@ public class ManagingContentRootsTest extends IdeaTestCase {
   }
 
   public void testCreationOfContentRootWithFile() throws IOException {
-    VirtualFile root = dir.createChildDirectory(null, "root");
+    VirtualFile root = createChildDirectory(dir, "root");
     String url = root.getUrl();
 
     PsiTestUtil.addContentRoot(myModule, root);
@@ -51,29 +51,29 @@ public class ManagingContentRootsTest extends IdeaTestCase {
 
     assertEquals(root, findContentEntry(url).getFile());
 
-    root.delete(null);
+    delete(root);
     assertNotNull(findContentEntry(url));
 
-    root = dir.createChildDirectory(null, "root");
+    root = createChildDirectory(dir, "root");
     assertEquals(root, findContentEntry(url).getFile());
   }
 
   public void testCreationOfContentRootWithUrl() throws IOException {
-    VirtualFile root = dir.createChildDirectory(null, "root");
+    VirtualFile root = createChildDirectory(dir, "root");
     String url = root.getUrl();
     String path = root.getPath();
-    root.delete(null);
+    delete(root);
 
     addContentRoot(path);
 
     assertNotNull(findContentEntry(url));
 
-    root = dir.createChildDirectory(null, "root");
+    root = createChildDirectory(dir, "root");
     assertEquals(root, findContentEntry(url).getFile());
   }
 
   public void testCreationOfContentRootWithUrlWhenFileExists() throws IOException {
-    VirtualFile root = dir.createChildDirectory(null, "root");
+    VirtualFile root = createChildDirectory(dir, "root");
     addContentRoot(root.getPath());
     assertEquals(root, findContentEntry(root.getUrl()).getFile());
   }
@@ -102,9 +102,7 @@ public class ManagingContentRootsTest extends IdeaTestCase {
   }
 
   private void addContentRoot(final String path) {
-    ApplicationManager.getApplication().runWriteAction(() -> {
-      ModuleRootModificationUtil.addContentRoot(getModule(), path);
-    });
+    ApplicationManager.getApplication().runWriteAction(() -> ModuleRootModificationUtil.addContentRoot(getModule(), path));
   }
 
   private ModuleRootManager getRootManager() {

@@ -24,6 +24,7 @@ import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowAnchor;
 import com.intellij.openapi.wm.ToolWindowId;
 import com.intellij.openapi.wm.ToolWindowManager;
+import com.intellij.openapi.wm.impl.content.ToolWindowContentUi;
 import com.intellij.ui.content.Content;
 import com.intellij.ui.content.ContentManager;
 
@@ -40,27 +41,28 @@ public class DependenciesToolWindow {
 
   public DependenciesToolWindow(final Project project) {
     myProject = project;
-    StartupManager.getInstance(project).runWhenProjectIsInitialized(new Runnable() {
-      @Override
-      public void run() {
-        final ToolWindowManager toolWindowManager = ToolWindowManager.getInstance(myProject);
-        if (toolWindowManager == null) return;
-        ToolWindow toolWindow = toolWindowManager.registerToolWindow(ToolWindowId.DEPENDENCIES,
-                                                                     true,
-                                                                     ToolWindowAnchor.BOTTOM,
-                                                                     project);
-        myContentManager = toolWindow.getContentManager();
+    StartupManager.getInstance(project).runWhenProjectIsInitialized(() -> {
+      final ToolWindowManager toolWindowManager = ToolWindowManager.getInstance(myProject);
+      if (toolWindowManager == null) return;
+      ToolWindow toolWindow = toolWindowManager.registerToolWindow(ToolWindowId.DEPENDENCIES,
+                                                                   true,
+                                                                   ToolWindowAnchor.BOTTOM,
+                                                                   project);
+      toolWindow.getComponent().putClientProperty(ToolWindowContentUi.HIDE_ID_LABEL, "true");
+      myContentManager = toolWindow.getContentManager();
 
-        toolWindow.setIcon(AllIcons.Toolwindows.ToolWindowInspection);
-        new ContentManagerWatcher(toolWindow, myContentManager);
-      }
+      toolWindow.setIcon(AllIcons.Toolwindows.ToolWindowInspection);
+      new ContentManagerWatcher(toolWindow, myContentManager);
     });
   }
 
-  public void addContent(Content content) {
-    myContentManager.addContent(content);
-    myContentManager.setSelectedContent(content);
-    ToolWindowManager.getInstance(myProject).getToolWindow(ToolWindowId.DEPENDENCIES).activate(null);
+  public void addContent(final Content content) {
+    final Runnable runnable = () -> {
+      myContentManager.addContent(content);
+      myContentManager.setSelectedContent(content);
+      ToolWindowManager.getInstance(myProject).getToolWindow(ToolWindowId.DEPENDENCIES).activate(null);
+    };
+    StartupManager.getInstance(myProject).runWhenProjectIsInitialized(runnable);
   }
 
   public void closeContent(Content content) {

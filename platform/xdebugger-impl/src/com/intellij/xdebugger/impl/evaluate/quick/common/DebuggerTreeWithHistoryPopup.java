@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,9 @@ package com.intellij.xdebugger.impl.evaluate.quick.common;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.JBPopup;
+import com.intellij.openapi.ui.popup.JBPopupAdapter;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
+import com.intellij.openapi.ui.popup.LightweightWindowEvent;
 import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.ScreenUtil;
@@ -30,6 +32,7 @@ import com.intellij.util.BooleanFunction;
 import com.intellij.util.ui.tree.TreeModelAdapter;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import javax.swing.event.TreeModelEvent;
@@ -46,16 +49,23 @@ class DebuggerTreeWithHistoryPopup<D> extends DebuggerTreeWithHistoryContainer<D
   private JBPopup myPopup;
   private final Editor myEditor;
   private final Point myPoint;
+  @Nullable private final Runnable myHideRunnable;
 
-  private DebuggerTreeWithHistoryPopup(@NotNull D initialItem, @NotNull DebuggerTreeCreator<D> creator, @NotNull Editor editor, @NotNull Point point, @NotNull Project project) {
+  private DebuggerTreeWithHistoryPopup(@NotNull D initialItem,
+                                       @NotNull DebuggerTreeCreator<D> creator,
+                                       @NotNull Editor editor,
+                                       @NotNull Point point,
+                                       @NotNull Project project,
+                                       @Nullable Runnable hideRunnable) {
     super(initialItem, creator, project);
     myEditor = editor;
     myPoint = point;
+    myHideRunnable = hideRunnable;
   }
 
   public static <D> void showTreePopup(@NotNull DebuggerTreeCreator<D> creator, @NotNull D initialItem, @NotNull Editor editor,
-                                       @NotNull Point point, @NotNull Project project) {
-    new DebuggerTreeWithHistoryPopup<D>(initialItem, creator, editor, point, project).updateTree(initialItem);
+                                       @NotNull Point point, @NotNull Project project, Runnable hideRunnable) {
+    new DebuggerTreeWithHistoryPopup<>(initialItem, creator, editor, point, project, hideRunnable).updateTree(initialItem);
   }
 
   private TreeModelListener createTreeListener(final Tree tree) {
@@ -80,30 +90,32 @@ class DebuggerTreeWithHistoryPopup<D> extends DebuggerTreeWithHistoryContainer<D
       .setMovable(true)
       .setDimensionServiceKey(myProject, DIMENSION_SERVICE_KEY, false)
       .setMayBeParent(true)
-      .setKeyEventHandler(new BooleanFunction<KeyEvent>() {
+      .setKeyEventHandler(event -> {
+        if (AbstractPopup.isCloseRequest(event)) {
+          // Do not process a close request if the tree shows a speed search popup
+          SpeedSearchSupply supply = SpeedSearchSupply.getSupply(tree);
+          return supply != null && StringUtil.isEmpty(supply.getEnteredPrefix());
+        }
+        return false;
+      })
+      .addListener(new JBPopupAdapter() {
         @Override
-        public boolean fun(KeyEvent event) {
-          if (AbstractPopup.isCloseRequest(event)) {
-            // Do not process a close request if the tree shows a speed search popup
-            SpeedSearchSupply supply = SpeedSearchSupply.getSupply(tree);
-            return supply != null && StringUtil.isEmpty(supply.getEnteredPrefix());
+        public void onClosed(LightweightWindowEvent event) {
+          if (myHideRunnable != null) {
+            myHideRunnable.run();
           }
-          return false;
         }
       })
-      .setCancelCallback(new Computable<Boolean>() {
-        @Override
-        public Boolean compute() {
-          Window parent = SwingUtilities.getWindowAncestor(tree);
-          if (parent != null) {
-            for (Window child : parent.getOwnedWindows()) {
-              if (child.isShowing()) {
-                return false;
-              }
+      .setCancelCallback(() -> {
+        Window parent = SwingUtilities.getWindowAncestor(tree);
+        if (parent != null) {
+          for (Window child : parent.getOwnedWindows()) {
+            if (child.isShowing()) {
+              return false;
             }
           }
-          return true;
         }
+        return true;
       })
       .createPopup();
 

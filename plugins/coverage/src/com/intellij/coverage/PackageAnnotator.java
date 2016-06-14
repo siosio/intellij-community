@@ -30,7 +30,10 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiPackage;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.rt.coverage.data.ClassData;
 import com.intellij.rt.coverage.data.LineCoverage;
@@ -150,11 +153,7 @@ public class PackageAnnotator {
     if (!filtered) return;
 
     final GlobalSearchScope scope = suite.getSearchScope(myProject);
-    final Module[] modules = myCoverageManager.doInReadActionIfProjectOpen(new Computable<Module[]>() {
-      public Module[] compute() {
-        return ModuleManager.getInstance(myProject).getModules();
-      }
-    });
+    final Module[] modules = myCoverageManager.doInReadActionIfProjectOpen(() -> ModuleManager.getInstance(myProject).getModules());
 
     if (modules == null) return;
 
@@ -163,12 +162,8 @@ public class PackageAnnotator {
     for (final Module module : modules) {
       if (!scope.isSearchInModuleContent(module)) continue;
       final String rootPackageVMName = qualifiedName.replaceAll("\\.", "/");
-      final VirtualFile output = myCoverageManager.doInReadActionIfProjectOpen(new Computable<VirtualFile>() {
-        @Nullable
-        public VirtualFile compute() {
-          return CompilerModuleExtension.getInstance(module).getCompilerOutputPath();
-        }
-      });
+      final VirtualFile output = myCoverageManager.doInReadActionIfProjectOpen(
+        () -> CompilerModuleExtension.getInstance(module).getCompilerOutputPath());
 
 
       if (output != null) {
@@ -181,12 +176,8 @@ public class PackageAnnotator {
       }
 
       if (suite.isTrackTestFolders()) {
-        final VirtualFile testPackageRoot = myCoverageManager.doInReadActionIfProjectOpen(new Computable<VirtualFile>() {
-          @Nullable
-          public VirtualFile compute() {
-            return CompilerModuleExtension.getInstance(module).getCompilerOutputPathForTests();
-          }
-        });
+        final VirtualFile testPackageRoot = myCoverageManager.doInReadActionIfProjectOpen(
+          () -> CompilerModuleExtension.getInstance(module).getCompilerOutputPathForTests());
 
         if (testPackageRoot != null) {
           final File outputRoot = findRelativeFile(rootPackageVMName, testPackageRoot);
@@ -310,41 +301,41 @@ public class PackageAnnotator {
           final String toplevelClassSrcFQName = getSourceToplevelFQName(classFqVMName);
           final Ref<VirtualFile> containingFileRef = new Ref<VirtualFile>();
           final Ref<PsiClass> psiClassRef = new Ref<PsiClass>();
-          final Boolean isInSource = DumbService.getInstance(myProject).runReadActionInSmartMode(new Computable<Boolean>() {
-            public Boolean compute() {
-              if (myProject.isDisposed()) return null;
-              final PsiClass aClass =
-                JavaPsiFacade.getInstance(myManager.getProject()).findClass(toplevelClassSrcFQName, GlobalSearchScope.moduleScope(module));
-              if (aClass == null || !aClass.isValid()) return Boolean.FALSE;
-              psiClassRef.set(aClass);
-              containingFileRef.set(aClass.getNavigationElement().getContainingFile().getVirtualFile());
-              if (containingFileRef.isNull()) {
-                LOG.info("No virtual file found for: " + aClass);
-                return null;
-              }
-              final ModuleFileIndex fileIndex = ModuleRootManager.getInstance(module).getFileIndex();
-              return fileIndex.isUnderSourceRootOfType(containingFileRef.get(), JavaModuleSourceRootTypes.SOURCES)
-                     && (trackTestFolders || !fileIndex.isInTestSourceContent(containingFileRef.get()));
+          final CoverageSuitesBundle suitesBundle = myCoverageManager.getCurrentSuitesBundle();
+          if (suitesBundle == null) continue;
+          final Boolean isInSource = DumbService.getInstance(myProject).runReadActionInSmartMode(() -> {
+            if (myProject.isDisposed()) return null;
+            final PsiClass aClass =
+              JavaPsiFacade.getInstance(myManager.getProject()).findClass(toplevelClassSrcFQName, GlobalSearchScope.moduleScope(module));
+            if (aClass == null || !aClass.isValid()) return Boolean.FALSE;
+            psiClassRef.set(aClass);
+            containingFileRef.set(aClass.getNavigationElement().getContainingFile().getVirtualFile());
+            if (containingFileRef.isNull()) {
+              LOG.info("No virtual file found for: " + aClass);
+              return null;
             }
+            final ModuleFileIndex fileIndex = ModuleRootManager.getInstance(module).getFileIndex();
+            return fileIndex.isUnderSourceRootOfType(containingFileRef.get(), JavaModuleSourceRootTypes.SOURCES)
+                   && (trackTestFolders || !fileIndex.isInTestSourceContent(containingFileRef.get()));
           });
           PackageCoverageInfo coverageInfoForClass = null;
           String classCoverageKey = classFqVMName.replace('/', '.');
           boolean ignoreClass = false;
+          boolean keepWithoutSource = false;
           for (JavaCoverageEngineExtension extension : JavaCoverageEngineExtension.EP_NAME.getExtensions()) {
-            if (extension.ignoreCoverageForClass(myCoverageManager.getCurrentSuitesBundle(), child)) {
+            if (extension.ignoreCoverageForClass(suitesBundle, child)) {
               ignoreClass = true;
               break;
             }
-            if (extension.keepCoverageInfoForClassWithoutSource(myCoverageManager.getCurrentSuitesBundle(), child)) {
-              coverageInfoForClass = classWithoutSourceCoverageInfo;
-              break;
+            if (extension.keepCoverageInfoForClassWithoutSource(suitesBundle, child)) {
+              keepWithoutSource = true;
             }
           }
           if (ignoreClass) {
             continue;
           }
 
-          if (coverageInfoForClass == null && isInSource != null && isInSource.booleanValue()) {
+          if (isInSource != null && isInSource.booleanValue()) {
             for (DirCoverageInfo dirCoverageInfo : dirs) {
               if (dirCoverageInfo.sourceRoot != null && VfsUtil.isAncestor(dirCoverageInfo.sourceRoot, containingFileRef.get(), false)) {
                 coverageInfoForClass = dirCoverageInfo;
@@ -352,6 +343,9 @@ public class PackageAnnotator {
                 break;
               }
             }
+          }
+          if (coverageInfoForClass == null && keepWithoutSource) {
+            coverageInfoForClass = classWithoutSourceCoverageInfo;
           }
           if (coverageInfoForClass != null) {
             collectClassCoverageInformation(child, psiClassRef.get(), coverageInfoForClass, projectInfo, toplevelClassCoverage,
@@ -518,7 +512,7 @@ public class PackageAnnotator {
   private static String getSourceToplevelFQName(String classFQVMName) {
     final int index = classFQVMName.indexOf('$');
     if (index > 0) classFQVMName = classFQVMName.substring(0, index);
-    if (classFQVMName.startsWith("/")) classFQVMName = classFQVMName.substring(1);
+    classFQVMName = StringUtil.trimStart(classFQVMName, "/");
     return classFQVMName.replaceAll("/", ".");
   }
 
@@ -529,14 +523,12 @@ public class PackageAnnotator {
                                              @Nullable PsiClass psiClass,
                                              final ClassCoverageInfo classCoverageInfo,
                                              final PackageCoverageInfo packageCoverageInfo) {
-    final byte[] content = myCoverageManager.doInReadActionIfProjectOpen(new Computable<byte[]>() {
-      public byte[] compute() {
-        try {
-          return FileUtil.loadFileBytes(classFile);
-        }
-        catch (IOException e) {
-          return null;
-        }
+    final byte[] content = myCoverageManager.doInReadActionIfProjectOpen(() -> {
+      try {
+        return FileUtil.loadFileBytes(classFile);
+      }
+      catch (IOException e) {
+        return null;
       }
     });
     final CoverageSuitesBundle coverageSuite = CoverageDataManager.getInstance(myProject).getCurrentSuitesBundle();

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,6 +37,7 @@ import com.intellij.testFramework.fixtures.TempDirTestFixture;
 import com.intellij.usageView.UsageInfo;
 import com.intellij.util.Processor;
 import com.intellij.util.containers.IntArrayList;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -133,7 +134,7 @@ public class FindUsagesTest extends PsiTestCase{
     try {
       new WriteCommandAction(getProject()) {
         @Override
-        protected void run(Result result) throws Throwable {
+        protected void run(@NotNull Result result) throws Throwable {
           final ModifiableModuleModel moduleModel = ModuleManager.getInstance(getProject()).getModifiableModel();
           moduleModel.newModule("independent/independent.iml", StdModuleTypes.JAVA.getId());
           moduleModel.commit();
@@ -153,18 +154,15 @@ public class FindUsagesTest extends PsiTestCase{
       PsiClass bar = myJavaFacade.findClass("com.Foo.Bar", scope);
 
       final int[] count = {0};
-      Processor<UsageInfo> processor = new Processor<UsageInfo>() {
-        @Override
-        public boolean process(UsageInfo usageInfo) {
-          int navigationOffset = usageInfo.getNavigationOffset();
-          assertTrue(navigationOffset > 0);
-          String textAfter = usageInfo.getFile().getText().substring(navigationOffset);
-          assertTrue(textAfter, textAfter.startsWith("Foo") || textAfter.startsWith("Bar") ||
-                                textAfter.startsWith("com.Foo.Bar") // sorry, can't get references with dollar-dot mismatch to work now
-          );
-          count[0]++;
-          return true;
-        }
+      Processor<UsageInfo> processor = usageInfo -> {
+        int navigationOffset = usageInfo.getNavigationOffset();
+        assertTrue(navigationOffset > 0);
+        String textAfter = usageInfo.getFile().getText().substring(navigationOffset);
+        assertTrue(textAfter, textAfter.startsWith("Foo") || textAfter.startsWith("Bar") ||
+                              textAfter.startsWith("com.Foo.Bar") // sorry, can't get references with dollar-dot mismatch to work now
+        );
+        count[0]++;
+        return true;
       };
       JavaFindUsagesHandler handler = new JavaFindUsagesHandler(bar, JavaFindUsagesHandlerFactory.getInstance(getProject()));
 

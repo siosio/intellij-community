@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@ package com.intellij.codeInsight;
 
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer;
 import com.intellij.injected.editor.EditorWindow;
-import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.IdeActions;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.Result;
@@ -39,7 +38,6 @@ import com.intellij.openapi.fileTypes.FileTypeManager;
 import com.intellij.openapi.roots.ContentEntry;
 import com.intellij.openapi.roots.ModifiableRootModel;
 import com.intellij.openapi.roots.ModuleRootManager;
-import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.*;
@@ -54,7 +52,6 @@ import com.intellij.testFramework.*;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -107,7 +104,7 @@ public abstract class CodeInsightTestCase extends PsiTestCase {
     return new CodeInsightTestData();
   }
 
-  protected void configureByFile(@NonNls String filePath) throws Exception {
+  protected void configureByFile(String filePath) throws Exception {
     configureByFile(filePath, null);
   }
 
@@ -118,12 +115,7 @@ public abstract class CodeInsightTestCase extends PsiTestCase {
     if (files.length == 0) return null;
     final VirtualFile[] vFiles = new VirtualFile[files.length];
     for (int i = 0; i < files.length; i++) {
-      String path = files[i];
-      final String fullPath = FileUtil.toSystemIndependentName(getTestDataPath() + path);
-      allowRootAccess(fullPath);
-      VirtualFile vFile = LocalFileSystem.getInstance().findFileByPath(fullPath);
-      vFiles[i] = vFile;
-      assertNotNull("file " + fullPath + " not found", vFile);
+      vFiles[i] = findVirtualFile(files[i]);
     }
 
     File projectFile = projectRoot == null ? null : new File(getTestDataPath() + projectRoot);
@@ -132,37 +124,26 @@ public abstract class CodeInsightTestCase extends PsiTestCase {
   }
 
   private void allowRootAccess(final String filePath) {
-    VfsRootAccess.allowRootAccess(filePath);
-    Disposer.register(myTestRootDisposable, new Disposable() {
-      @Override
-      public void dispose() {
-        VfsRootAccess.disallowRootAccess(filePath);
-      }
-    });
+    VfsRootAccess.allowRootAccess(myTestRootDisposable, filePath);
   }
 
-  protected VirtualFile configureByFile(@NonNls String filePath, @Nullable String projectRoot) throws Exception {
-    String fullPath = getTestDataPath() + filePath;
-    allowRootAccess(fullPath);
-
-    final VirtualFile vFile = LocalFileSystem.getInstance().findFileByPath(fullPath.replace(File.separatorChar, '/'));
-    assertNotNull("file " + fullPath + " not found", vFile);
-
+  protected VirtualFile configureByFile(String filePath, @Nullable String projectRoot) throws Exception {
+    VirtualFile vFile = findVirtualFile(filePath);
     File projectFile = projectRoot == null ? null : new File(getTestDataPath() + projectRoot);
 
     return configureByFile(vFile, projectFile);
   }
 
-  protected PsiFile configureByText(@NotNull FileType fileType, @NonNls @NotNull final String text) {
+  protected PsiFile configureByText(@NotNull FileType fileType, @NotNull final String text) {
     return configureByText(fileType, text, null);
   }
 
-  protected PsiFile configureByText(@NotNull final FileType fileType, @NonNls @NotNull final String text, @Nullable String _extension) {
+  protected PsiFile configureByText(@NotNull final FileType fileType, @NotNull final String text, @Nullable String _extension) {
     try {
       final String extension = _extension == null ? fileType.getDefaultExtension():_extension;
 
       File dir = createTempDirectory();
-      final File tempFile = FileUtil.createTempFile(dir, "aaa", "." + extension, true);
+      final File tempFile = FileUtil.createTempFile(dir, "tempFile", "." + extension, true);
       final FileTypeManager fileTypeManager = FileTypeManager.getInstance();
       if (fileTypeManager.getFileTypeByExtension(extension) != fileType) {
         new WriteCommandAction(getProject()) {
@@ -211,20 +192,17 @@ public abstract class CodeInsightTestCase extends PsiTestCase {
     final EditorInfo editorInfo = new EditorInfo(document.getText());
 
     final String newFileText = editorInfo.getNewFileText();
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      @Override
-      public void run() {
-        if (!document.getText().equals(newFileText)) {
-          document.setText(newFileText);
-        }
-
-        PsiFile file = myPsiManager.findFile(virtualFile);
-        if (myFile == null) myFile = file;
-
-        if (myEditor == null) myEditor = editor;
-
-        editorInfo.applyToEditor(editor);
+    ApplicationManager.getApplication().runWriteAction(() -> {
+      if (!document.getText().equals(newFileText)) {
+        document.setText(newFileText);
       }
+
+      PsiFile file = myPsiManager.findFile(virtualFile);
+      if (myFile == null) myFile = file;
+
+      if (myEditor == null) myEditor = editor;
+
+      editorInfo.applyToEditor(editor);
     });
 
 
@@ -238,60 +216,52 @@ public abstract class CodeInsightTestCase extends PsiTestCase {
     final File toDirIO = createTempDirectory();
     final VirtualFile toDir = getVirtualFile(toDirIO);
 
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      @Override
-      public void run() {
-        try {
-          final ModuleRootManager rootManager = ModuleRootManager.getInstance(myModule);
-          final ModifiableRootModel rootModel = rootManager.getModifiableModel();
-          if (clearModelBeforeConfiguring()) {
-            rootModel.clear();
-          }
-
-          // auxiliary files should be copied first
-          VirtualFile[] reversed = ArrayUtil.reverseArray(vFiles);
-          Map<VirtualFile, EditorInfo> editorInfos;
-          if (rawProjectRoot != null) {
-            final File projectRoot = rawProjectRoot.getCanonicalFile();
-            FileUtil.copyDir(projectRoot, toDirIO);
-            VirtualFile fromDir = getVirtualFile(projectRoot);
-            editorInfos =
-              copyFilesFillingEditorInfos(fromDir, toDir, ContainerUtil.map2Array(reversed, String.class, new Function<VirtualFile, String>() {
-                @Override
-                public String fun(final VirtualFile s) {
-                  return s.getPath().substring(projectRoot.getPath().length());
-                }
-              }));
-
-            toDir.refresh(false, true);
-          }
-          else {
-            editorInfos = new LinkedHashMap<VirtualFile, EditorInfo>();
-            for (final VirtualFile vFile : reversed) {
-              VirtualFile parent = vFile.getParent();
-              assert parent.isDirectory() : parent;
-              editorInfos.putAll(copyFilesFillingEditorInfos(parent, toDir, vFile.getName()));
-            }
-          }
-
-          boolean sourceRootAdded = false;
-          if (isAddDirToContentRoot()) {
-            final ContentEntry contentEntry = rootModel.addContentEntry(toDir);
-            if (isAddDirToSource()) {
-              sourceRootAdded = true;
-              contentEntry.addSourceFolder(toDir, isAddDirToTests());
-            }
-          }
-          doCommitModel(rootModel);
-          if (sourceRootAdded) {
-            sourceRootAdded(toDir);
-          }
-
-          openEditorsAndActivateLast(editorInfos);
+    ApplicationManager.getApplication().runWriteAction(() -> {
+      try {
+        final ModuleRootManager rootManager = ModuleRootManager.getInstance(myModule);
+        final ModifiableRootModel rootModel = rootManager.getModifiableModel();
+        if (clearModelBeforeConfiguring()) {
+          rootModel.clear();
         }
-        catch (IOException e) {
-          LOG.error(e);
+
+        // auxiliary files should be copied first
+        VirtualFile[] reversed = ArrayUtil.reverseArray(vFiles);
+        Map<VirtualFile, EditorInfo> editorInfos;
+        if (rawProjectRoot != null) {
+          final File projectRoot = rawProjectRoot.getCanonicalFile();
+          FileUtil.copyDir(projectRoot, toDirIO);
+          VirtualFile fromDir = getVirtualFile(projectRoot);
+          editorInfos =
+            copyFilesFillingEditorInfos(fromDir, toDir, ContainerUtil.map2Array(reversed, String.class, s -> s.getPath().substring(projectRoot.getPath().length())));
+
+          toDir.refresh(false, true);
         }
+        else {
+          editorInfos = new LinkedHashMap<>();
+          for (final VirtualFile vFile : reversed) {
+            VirtualFile parent = vFile.getParent();
+            assert parent.isDirectory() : parent;
+            editorInfos.putAll(copyFilesFillingEditorInfos(parent, toDir, vFile.getName()));
+          }
+        }
+
+        boolean sourceRootAdded = false;
+        if (isAddDirToContentRoot()) {
+          final ContentEntry contentEntry = rootModel.addContentEntry(toDir);
+          if (isAddDirToSource()) {
+            sourceRootAdded = true;
+            contentEntry.addSourceFolder(toDir, isAddDirToTests());
+          }
+        }
+        doCommitModel(rootModel);
+        if (sourceRootAdded) {
+          sourceRootAdded(toDir);
+        }
+
+        openEditorsAndActivateLast(editorInfos);
+      }
+      catch (IOException e) {
+        LOG.error(e);
       }
     });
 
@@ -322,14 +292,12 @@ public abstract class CodeInsightTestCase extends PsiTestCase {
   protected Map<VirtualFile, EditorInfo> copyFilesFillingEditorInfos(@NotNull VirtualFile fromDir,
                                                                      @NotNull VirtualFile toDir,
                                                                      @NotNull String... relativePaths) throws IOException {
-    Map<VirtualFile, EditorInfo> editorInfos = new LinkedHashMap<VirtualFile, EditorInfo>();
+    Map<VirtualFile, EditorInfo> editorInfos = new LinkedHashMap<>();
 
-    List<OutputStream> streamsToClose = new ArrayList<OutputStream>();
+    List<OutputStream> streamsToClose = new ArrayList<>();
 
     for (String relativePath : relativePaths) {
-      if (relativePath.startsWith("/")) {
-        relativePath = relativePath.substring(1);
-      }
+      relativePath = StringUtil.trimStart(relativePath, "/");
       final VirtualFile fromFile = fromDir.findFileByRelativePath(relativePath);
       assertNotNull(fromDir.getPath() + "/" + relativePath, fromFile);
       VirtualFile toFile = toDir.findFileByRelativePath(relativePath);
@@ -373,21 +341,18 @@ public abstract class CodeInsightTestCase extends PsiTestCase {
 
   @NotNull
   protected final List<Editor> openEditors(@NotNull final Map<VirtualFile, EditorInfo> editorInfos) {
-    return ContainerUtil.map(editorInfos.keySet(), new Function<VirtualFile, Editor>() {
-      @Override
-      public Editor fun(final VirtualFile newVFile) {
-        PsiFile file = myPsiManager.findFile(newVFile);
-        if (myFile == null) myFile = file;
+    return ContainerUtil.map(editorInfos.keySet(), newVFile -> {
+      PsiFile file = myPsiManager.findFile(newVFile);
+      if (myFile == null) myFile = file;
 
-        Editor editor = createEditor(newVFile);
-        if (myEditor == null) myEditor = editor;
+      Editor editor = createEditor(newVFile);
+      if (myEditor == null) myEditor = editor;
 
-        EditorInfo editorInfo = editorInfos.get(newVFile);
-        if (editorInfo != null) {
-          editorInfo.applyToEditor(editor);
-        }
-        return editor;
+      EditorInfo editorInfo = editorInfos.get(newVFile);
+      if (editorInfo != null) {
+        editorInfo.applyToEditor(editor);
       }
+      return editor;
     });
   }
 
@@ -450,11 +415,11 @@ public abstract class CodeInsightTestCase extends PsiTestCase {
     myEditor.getSelectionModel().setSelection(selectionStart, selectionEnd);
   }
 
-  protected void checkResultByFile(@NonNls @NotNull String filePath) throws Exception {
+  protected void checkResultByFile(@NotNull String filePath) throws Exception {
     checkResultByFile(filePath, false);
   }
 
-  protected void checkResultByFile(@NonNls @NotNull final String filePath, final boolean stripTrailingSpaces) throws Exception {
+  protected void checkResultByFile(@NotNull final String filePath, final boolean stripTrailingSpaces) throws Exception {
     new WriteCommandAction<Document>(getProject()) {
       @SuppressWarnings("ConstantConditions")
       @Override
@@ -466,11 +431,7 @@ public abstract class CodeInsightTestCase extends PsiTestCase {
 
         PsiDocumentManager.getInstance(myProject).commitAllDocuments();
 
-        String fullPath = getTestDataPath() + filePath;
-        allowRootAccess(fullPath);
-
-        final VirtualFile vFile = LocalFileSystem.getInstance().findFileByPath(fullPath.replace(File.separatorChar, '/'));
-        assertNotNull("Cannot find file " + fullPath, vFile);
+        VirtualFile vFile = findVirtualFile(filePath);
         String ft;
         try {
           ft = VfsUtilCore.loadText(vFile);
@@ -494,8 +455,8 @@ public abstract class CodeInsightTestCase extends PsiTestCase {
 
         if (myEditor instanceof EditorWindow) {
           myEditor = ((EditorWindow)myEditor).getDelegate();
-          myFile = PsiDocumentManager.getInstance(getProject()).getPsiFile(myEditor.getDocument());
         }
+        myFile = PsiDocumentManager.getInstance(getProject()).getPsiFile(myEditor.getDocument());
 
         String text = myFile.getText();
         text = StringUtil.convertLineSeparators(text);
@@ -540,13 +501,16 @@ public abstract class CodeInsightTestCase extends PsiTestCase {
     }
   }
 
-  protected VirtualFile getVirtualFile(@NonNls @NotNull String filePath) {
-    String fullPath = getTestDataPath() + filePath;
-    allowRootAccess(fullPath);
+  @NotNull
+  protected VirtualFile getVirtualFile(@NotNull String filePath) {
+    return findVirtualFile(filePath);
+  }
 
-    final VirtualFile vFile = LocalFileSystem.getInstance().findFileByPath(fullPath.replace(File.separatorChar, '/'));
-    assertNotNull("file " + fullPath + " not found", vFile);
-    return vFile;
+  @NotNull
+  private VirtualFile findVirtualFile(@NotNull String filePath) {
+    String absolutePath = getTestDataPath() + filePath;
+    allowRootAccess(absolutePath);
+    return VfsTestUtil.findFileByCaseSensitivePath(absolutePath);
   }
 
   @NotNull
@@ -568,10 +532,16 @@ public abstract class CodeInsightTestCase extends PsiTestCase {
     undoManager.undo(textEditor);
   }
 
+  protected void caretLeft() {
+    caretLeft(getEditor());
+  }
+  protected void caretLeft(@NotNull Editor editor) {
+    LightPlatformCodeInsightTestCase.executeAction(IdeActions.ACTION_EDITOR_MOVE_CARET_LEFT, editor, getProject());
+  }
   protected void caretRight() {
     caretRight(getEditor());
   }
-  protected void caretRight(Editor editor) {
+  protected void caretRight(@NotNull Editor editor) {
     LightPlatformCodeInsightTestCase.executeAction(IdeActions.ACTION_EDITOR_MOVE_CARET_RIGHT, editor, getProject());
   }
   protected void caretUp() {
@@ -582,7 +552,7 @@ public abstract class CodeInsightTestCase extends PsiTestCase {
     LightPlatformCodeInsightTestCase.deleteLine(myEditor,getProject());
   }
 
-  protected void type(@NonNls @NotNull String s) {
+  protected void type(@NotNull String s) {
     for (char c : s.toCharArray()) {
       type(c);
     }
@@ -609,14 +579,14 @@ public abstract class CodeInsightTestCase extends PsiTestCase {
   }
 
   @NotNull
-  protected PsiClass findClass(@NotNull @NonNls final String name) {
+  protected PsiClass findClass(@NotNull final String name) {
     final PsiClass aClass = myJavaFacade.findClass(name, ProjectScope.getProjectScope(getProject()));
     assertNotNull("Class " + name + " not found", aClass);
     return aClass;
   }
 
   @NotNull
-  protected PsiPackage findPackage(@NotNull @NonNls final String name) {
+  protected PsiPackage findPackage(@NotNull final String name) {
     final PsiPackage aPackage = myJavaFacade.findPackage(name);
     assertNotNull("Package " + name + " not found", aPackage);
     return aPackage;

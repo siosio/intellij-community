@@ -101,9 +101,9 @@ public class CucumberJvmSMFormatter implements Formatter, Reporter {
   @Override
   public void scenario(Scenario scenario) {
     closeScenario();
+    outCommand(String.format(TEMPLATE_SCENARIO_STARTED, getCurrentTime()));
     if (isRealScenario(scenario)) {
       scenarioCount++;
-      outCommand(String.format(TEMPLATE_SCENARIO_STARTED, getCurrentTime()));
       closeScenarioOutline();
       currentSteps.clear();
     }
@@ -120,7 +120,6 @@ public class CucumberJvmSMFormatter implements Formatter, Reporter {
   @Override
   public void scenarioOutline(ScenarioOutline outline) {
     scenarioCount++;
-    outCommand(String.format(TEMPLATE_SCENARIO_STARTED, getCurrentTime()));
     queue.clear();
     currentSteps.clear();
 
@@ -201,7 +200,8 @@ public class CucumberJvmSMFormatter implements Formatter, Reporter {
     }
 
     final String currentTime = getCurrentTime();
-    outCommand(String.format(TEMPLATE_TEST_FINISHED, currentTime, result.getDuration() / MILLION, stepFullName), true);
+    final Long duration = result.getDuration();
+    outCommand(String.format(TEMPLATE_TEST_FINISHED, currentTime, (duration == null ? 0 : duration.longValue()) / MILLION, stepFullName), true);
   }
 
   private void closeScenario() {
@@ -218,6 +218,7 @@ public class CucumberJvmSMFormatter implements Formatter, Reporter {
       outCommand(String.format(TEMPLATE_SCENARIO_FINISHED, getCurrentTime()), true);
       outCommand(String.format(TEMPLATE_TEST_SUITE_FINISHED, getCurrentTime(), getName(currentScenario)));
     }
+    scenarioPassed = true;
     currentScenario = null;
   }
 
@@ -273,7 +274,6 @@ public class CucumberJvmSMFormatter implements Formatter, Reporter {
 
   @Override
   public void after(Match match, Result result) {
-    outCommand("after\n");
   }
 
   @Override
@@ -302,7 +302,6 @@ public class CucumberJvmSMFormatter implements Formatter, Reporter {
 
   @Override
   public void before(Match match, Result result) {
-    outCommand("before\n");
   }
 
   private static String getCurrentTime() {

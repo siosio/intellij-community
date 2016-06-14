@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ import com.intellij.openapi.editor.*;
 import com.intellij.openapi.editor.colors.EditorColors;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.editor.ex.EditorEx;
+import com.intellij.openapi.editor.ex.util.EditorUtil;
 import com.intellij.openapi.editor.highlighter.HighlighterIterator;
 import com.intellij.openapi.editor.impl.EditorImpl;
 import com.intellij.openapi.editor.markup.CustomHighlighterRenderer;
@@ -60,15 +61,12 @@ public class IndentsPass extends TextEditorHighlightingPass implements DumbAware
 
   private final EditorEx myEditor;
   private final PsiFile  myFile;
-  public static final Comparator<TextRange> RANGE_COMPARATOR = new Comparator<TextRange>() {
-    @Override
-    public int compare(TextRange o1, TextRange o2) {
-      if (o1.getStartOffset() == o2.getStartOffset()) {
-        return o1.getEndOffset() - o2.getEndOffset();
-      }
-
-      return o1.getStartOffset() - o2.getStartOffset();
+  public static final Comparator<TextRange> RANGE_COMPARATOR = (o1, o2) -> {
+    if (o1.getStartOffset() == o2.getStartOffset()) {
+      return o1.getEndOffset() - o2.getEndOffset();
     }
+
+    return o1.getStartOffset() - o2.getStartOffset();
   };
 
   private static final CustomHighlighterRenderer RENDERER = new CustomHighlighterRenderer() {
@@ -165,7 +163,7 @@ public class IndentsPass extends TextEditorHighlightingPass implements DumbAware
       //     1. Show only active indent if it crosses soft wrap-introduced text;
       //     2. Show indent as is if it doesn't intersect with soft wrap-introduced text;
       if (selected) {
-        g.drawLine(start.x + 2, start.y, start.x + 2, maxY);
+        g.drawLine(start.x + 2, start.y, start.x + 2, maxY - 1);
       }
       else {
         int y = start.y;
@@ -180,7 +178,7 @@ public class IndentsPass extends TextEditorHighlightingPass implements DumbAware
           }
           if (!softWraps.isEmpty() && softWraps.get(0).getIndentInColumns() < indentColumn) {
             if (y < newY || i > startLine + lineShift) { // There is a possible case that soft wrap is located on indent start line.
-              g.drawLine(start.x + 2, y, start.x + 2, newY + lineHeight);
+              g.drawLine(start.x + 2, y, start.x + 2, newY + lineHeight - 1);
             }
             newY += logicalLineHeight;
             y = newY;
@@ -196,7 +194,7 @@ public class IndentsPass extends TextEditorHighlightingPass implements DumbAware
         }
 
         if (y < maxY) {
-          g.drawLine(start.x + 2, y, start.x + 2, maxY);
+          g.drawLine(start.x + 2, y, start.x + 2, maxY - 1);
         }
       }
     }
@@ -277,12 +275,9 @@ public class IndentsPass extends TextEditorHighlightingPass implements DumbAware
 
     final int startRangeIndex = curRange;
     assert myDocument != null;
-    DocumentUtil.executeInBulk(myDocument, myRanges.size() > 10000, new Runnable() {
-      @Override
-      public void run() {
-        for (int i = startRangeIndex; i < myRanges.size(); i++) {
-          newHighlighters.add(createHighlighter(mm, myRanges.get(i)));
-        }
+    DocumentUtil.executeInBulk(myDocument, myRanges.size() > 10000, () -> {
+      for (int i = startRangeIndex; i < myRanges.size(); i++) {
+        newHighlighters.add(createHighlighter(mm, myRanges.get(i)));
       }
     });
 
@@ -383,17 +378,33 @@ public class IndentsPass extends TextEditorHighlightingPass implements DumbAware
     void calculate() {
       assert myDocument != null;
       final FileType fileType = myFile.getFileType();
+      int tabSize = EditorUtil.getTabSize(myEditor);
 
       for (int line = 0; line < lineIndents.length; line++) {
         ProgressManager.checkCanceled();
         int lineStart = myDocument.getLineStartOffset(line);
         int lineEnd = myDocument.getLineEndOffset(line);
-        final int nonWhitespaceOffset = CharArrayUtil.shiftForward(myChars, lineStart, lineEnd, " \t");
-        if (nonWhitespaceOffset == lineEnd || isComment(nonWhitespaceOffset)) { // treating commented lines in the same way as empty lines
+        int offset = lineStart;
+        int column = 0;
+        outer:
+        while(offset < lineEnd) {
+          switch (myChars.charAt(offset)) {
+            case ' ':
+              column++;
+              break;
+            case '\t':
+              column = ((column / tabSize) + 1) * tabSize;
+              break;
+            default:
+              break outer;
+          }
+          offset++;
+        }
+        if (offset == lineEnd || isComment(offset)) { // treating commented lines in the same way as empty lines
           lineIndents[line] = -1; // Blank line marker
         }
         else {
-          lineIndents[line] = ((EditorImpl)myEditor).calcColumnNumber(nonWhitespaceOffset, line, true, myChars);
+          lineIndents[line] = column;
         }
       }
 

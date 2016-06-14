@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,6 +43,7 @@ import org.jetbrains.plugins.groovy.lang.psi.impl.GrMapType;
 import org.jetbrains.plugins.groovy.lang.psi.impl.GrTupleType;
 import org.jetbrains.plugins.groovy.lang.psi.impl.PsiImplUtil;
 import org.jetbrains.plugins.groovy.lang.psi.impl.statements.expressions.GrExpressionImpl;
+import org.jetbrains.plugins.groovy.lang.psi.impl.statements.expressions.TypesUtil;
 import org.jetbrains.plugins.groovy.lang.psi.util.GroovyCommonClassNames;
 import org.jetbrains.plugins.groovy.lang.psi.util.PsiUtil;
 
@@ -54,8 +55,8 @@ public class GrListOrMapImpl extends GrExpressionImpl implements GrListOrMap {
   private static final Function<GrListOrMapImpl, PsiType> TYPES_CALCULATOR = new MyTypesCalculator();
 
   private final PsiReference myLiteralReference = new LiteralConstructorReference(this);
-  private volatile GrExpression[] myInitializers = null;
-  private volatile GrNamedArgument[] myNamedArguments = null;
+  private volatile GrExpression[] myInitializers;
+  private volatile GrNamedArgument[] myNamedArguments;
 
   public GrListOrMapImpl(@NotNull ASTNode node) {
     super(node);
@@ -192,7 +193,6 @@ public class GrListOrMapImpl extends GrExpressionImpl implements GrListOrMap {
           GlobalSearchScope scope = listOrMap.getResolveScope();
           JavaPsiFacade facade = JavaPsiFacade.getInstance(listOrMap.getProject());
           PsiClass hashMap = facade.findClass(GroovyCommonClassNames.JAVA_UTIL_LINKED_HASH_MAP, scope);
-          if (hashMap == null) hashMap = facade.findClass(CommonClassNames.JAVA_UTIL_MAP, scope);
           if (hashMap != null) {
             PsiSubstitutor mapSubstitutor = PsiSubstitutor.EMPTY.
               put(hashMap.getTypeParameters()[0], com.intellij.psi.util.PsiUtil.substituteTypeParameter(lType,  CommonClassNames.JAVA_UTIL_MAP, 0, false)).
@@ -228,17 +228,8 @@ public class GrListOrMapImpl extends GrExpressionImpl implements GrListOrMap {
         @NotNull
         @Override
         protected PsiType[] inferComponents() {
-          return ContainerUtil.map(initializers, new Function<GrExpression, PsiType>() {
-            @Override
-            public PsiType fun(final GrExpression expression) {
-              return RecursionManager.doPreventingRecursion(expression, false, new Computable<PsiType>() {
-                @Override
-                public PsiType compute() {
-                  return expression.getType();
-                }
-              });
-            }
-          }, new PsiType[initializers.length]);
+          return ContainerUtil.map(initializers, expression -> RecursionManager.doPreventingRecursion(expression, false,
+                                                                                                      () -> TypesUtil.boxPrimitiveType(expression.getType(), expression.getManager(), myScope)), new PsiType[initializers.length]);
         }
 
         @Override

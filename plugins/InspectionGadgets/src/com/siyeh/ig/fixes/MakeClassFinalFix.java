@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 package com.siyeh.ig.fixes;
 
 import com.intellij.codeInspection.ProblemDescriptor;
-import com.intellij.openapi.application.AccessToken;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiElement;
@@ -34,7 +34,6 @@ import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.InspectionGadgetsFix;
 import org.jetbrains.annotations.NotNull;
 
-import static com.intellij.openapi.application.WriteAction.start;
 import static com.intellij.psi.PsiModifier.ABSTRACT;
 import static com.intellij.psi.PsiModifier.FINAL;
 
@@ -83,30 +82,19 @@ public class MakeClassFinalFix extends InspectionGadgetsFix {
     }
     final MultiMap<PsiElement, String> conflicts = new MultiMap();
     final Query<PsiClass> search = ClassInheritorsSearch.search(containingClass);
-    search.forEach(new Processor<PsiClass>() {
-      @Override
-      public boolean process(PsiClass aClass) {
-        conflicts.putValue(containingClass, InspectionGadgetsBundle
-          .message("0.will.no.longer.be.overridable.by.1", RefactoringUIUtil.getDescription(containingClass, false),
-                   RefactoringUIUtil.getDescription(aClass, false)));
-        return true;
-      }
+    search.forEach(aClass -> {
+      conflicts.putValue(containingClass, InspectionGadgetsBundle
+        .message("0.will.no.longer.be.overridable.by.1", RefactoringUIUtil.getDescription(containingClass, false),
+                 RefactoringUIUtil.getDescription(aClass, false)));
+      return true;
     });
     final boolean conflictsDialogOK;
     if (!conflicts.isEmpty()) {
-      final ConflictsDialog conflictsDialog = new ConflictsDialog(element.getProject(), conflicts, new Runnable() {
-        @Override
-        public void run() {
-          final AccessToken token = start();
-          try {
-            modifierList.setModifierProperty(FINAL, true);
-            modifierList.setModifierProperty(ABSTRACT, false);
-          }
-          finally {
-            token.finish();
-          }
-        }
-      });
+      final ConflictsDialog conflictsDialog = new ConflictsDialog(element.getProject(), conflicts,
+                                                                  () -> ApplicationManager.getApplication().runWriteAction(() -> {
+                                                                    modifierList.setModifierProperty(FINAL, true);
+                                                                    modifierList.setModifierProperty(ABSTRACT, false);
+                                                                  }));
       conflictsDialogOK = conflictsDialog.showAndGet();
     } else {
       conflictsDialogOK = true;

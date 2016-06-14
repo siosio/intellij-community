@@ -18,6 +18,7 @@ package com.intellij.codeInsight.completion;
 import com.intellij.codeInsight.AutoPopupController;
 import com.intellij.codeInsight.ExpectedTypeInfo;
 import com.intellij.codeInsight.ExpectedTypesProvider;
+import com.intellij.codeInsight.lookup.Lookup;
 import com.intellij.codeInsight.lookup.LookupElement;
 import com.intellij.codeInsight.lookup.PsiTypeLookupItem;
 import com.intellij.openapi.editor.Editor;
@@ -35,7 +36,6 @@ import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
 import org.jetbrains.annotations.NotNull;
 
-import static com.intellij.patterns.PsiJavaPatterns.psiElement;
 import static com.intellij.psi.codeStyle.JavaCodeStyleSettings.*;
 
 /**
@@ -66,18 +66,14 @@ class JavaClassNameInsertHandler implements InsertHandler<JavaPsiClassReferenceE
     final Editor editor = context.getEditor();
     final char c = context.getCompletionChar();
     if (c == '#') {
-      context.setLaterRunnable(new Runnable() {
-        @Override
-        public void run() {
-          new CodeCompletionHandlerBase(CompletionType.BASIC).invokeCompletion(project, editor);
-        }
-      });
+      context.setLaterRunnable(() -> new CodeCompletionHandlerBase(CompletionType.BASIC).invokeCompletion(project, editor));
     } else if (c == '.' && PsiTreeUtil.getParentOfType(position, PsiParameterList.class) == null) {
       AutoPopupController.getInstance(context.getProject()).autoPopupMemberLookup(context.getEditor(), null);
     }
 
-    if (PsiTreeUtil.getParentOfType(position, PsiDocComment.class, false) != null && shouldInsertFqnInJavadoc(item, file, project)) {
-      AllClassesGetter.INSERT_FQN.handleInsert(context, item);
+    String qname = psiClass.getQualifiedName();
+    if (qname != null && PsiTreeUtil.getParentOfType(position, PsiDocComment.class, false) != null && shouldInsertFqnInJavadoc(item, file, project)) {
+      context.getDocument().replaceString(context.getStartOffset(), context.getTailOffset(), qname);
       return;
     }
 
@@ -108,8 +104,17 @@ class JavaClassNameInsertHandler implements InsertHandler<JavaPsiClassReferenceE
         fillTypeArgs |= psiClass.hasTypeParameters() && PsiUtil.getLanguageLevel(file).isAtLeast(LanguageLevel.JDK_1_5);
       }
     }
-    else if (insertingAnnotationWithParameters(context, item)) {
-      JavaCompletionUtil.insertParentheses(context, item, false, true);
+    else if (insertingAnnotation(context, item)) {
+      if (shouldHaveAnnotationParameters(psiClass)) {
+        JavaCompletionUtil.insertParentheses(context, item, false, true);
+      }
+      if (context.getCompletionChar() == Lookup.NORMAL_SELECT_CHAR || context.getCompletionChar() == Lookup.COMPLETE_STATEMENT_SELECT_CHAR) {
+        CharSequence text = context.getDocument().getCharsSequence();
+        int tail = context.getTailOffset();
+        if (text.length() > tail && Character.isLetter(text.charAt(tail))) {
+          context.getDocument().insertString(tail, " ");
+        }
+      }
     }
 
     if (fillTypeArgs && context.getCompletionChar() != '(') {
@@ -164,15 +169,13 @@ class JavaClassNameInsertHandler implements InsertHandler<JavaPsiClassReferenceE
     return false;
   }
 
-  private static boolean insertingAnnotationWithParameters(InsertionContext context, LookupElement item) {
+  private static boolean insertingAnnotation(InsertionContext context, LookupElement item) {
     final Object obj = item.getObject();
     if (!(obj instanceof PsiClass) || !((PsiClass)obj).isAnnotationType()) return false;
 
     PsiElement leaf = context.getFile().findElementAt(context.getStartOffset());
-    if (psiElement(PsiIdentifier.class).withParents(PsiJavaCodeReferenceElement.class, PsiAnnotation.class).accepts(leaf)) {
-      return shouldHaveAnnotationParameters((PsiClass)obj);
-    }
-    return false;
+    PsiAnnotation anno = PsiTreeUtil.getParentOfType(leaf, PsiAnnotation.class);
+    return anno != null && PsiTreeUtil.isAncestor(anno.getNameReferenceElement(), leaf, false);
   }
 
   static boolean shouldHaveAnnotationParameters(PsiClass annoClass) {

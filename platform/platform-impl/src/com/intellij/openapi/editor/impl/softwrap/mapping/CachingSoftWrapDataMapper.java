@@ -22,6 +22,7 @@ import com.intellij.openapi.editor.*;
 import com.intellij.openapi.editor.ex.DocumentEx;
 import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.editor.ex.FoldingModelEx;
+import com.intellij.openapi.editor.impl.EditorImpl;
 import com.intellij.openapi.editor.impl.SoftWrapModelImpl;
 import com.intellij.openapi.editor.impl.TextChangeImpl;
 import com.intellij.openapi.editor.impl.softwrap.SoftWrapImpl;
@@ -31,7 +32,10 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
 
 /**
  * Every document that is exposed to end-user via IJ editor has a number of various dimensions ({@link LogicalPosition logical}
@@ -134,23 +138,20 @@ public class CachingSoftWrapDataMapper implements SoftWrapAwareDocumentParsingLi
                                                                                                      newSoftWrap.getEnd() - lengthDiff),
                                                                                   newSoftWrap.getIndentInColumns(),
                                                                                   newSoftWrap.getIndentInPixels()),
-                                    new Comparator<SoftWrapImpl>() {
-                                      @Override
-                                      public int compare(SoftWrapImpl o1, SoftWrapImpl o2) {
-                                        int offsetDiff = o1.getStart() - o2.getStart();
-                                        if (offsetDiff != 0) {
-                                          return offsetDiff;
-                                        }
-                                        int textDiff = o1.getText().toString().compareTo(o2.getText().toString());
-                                        if (textDiff != 0) {
-                                          return textDiff;
-                                        }
-                                        int colIndentDiff = o1.getIndentInColumns() - o2.getIndentInColumns();
-                                        if (colIndentDiff != 0) {
-                                          return colIndentDiff;
-                                        }
-                                        return o1.getIndentInPixels() - o2.getIndentInPixels();
+                                    (o1, o2) -> {
+                                      int offsetDiff = o1.getStart() - o2.getStart();
+                                      if (offsetDiff != 0) {
+                                        return offsetDiff;
                                       }
+                                      int textDiff = o1.getText().toString().compareTo(o2.getText().toString());
+                                      if (textDiff != 0) {
+                                        return textDiff;
+                                      }
+                                      int colIndentDiff = o1.getIndentInColumns() - o2.getIndentInColumns();
+                                      if (colIndentDiff != 0) {
+                                        return colIndentDiff;
+                                      }
+                                      return o1.getIndentInPixels() - o2.getIndentInPixels();
                                     }) >= 0;
   }
 
@@ -331,6 +332,7 @@ public class CachingSoftWrapDataMapper implements SoftWrapAwareDocumentParsingLi
 
   @Override
   public void onVisualLineStart(@NotNull EditorPosition position) {
+    if (isNewRendering()) return;
     CacheEntry cacheEntry = getCacheEntryForVisualLine(position.visualLine, true);
     if (cacheEntry == null) {
       return;
@@ -340,6 +342,7 @@ public class CachingSoftWrapDataMapper implements SoftWrapAwareDocumentParsingLi
 
   @Override
   public void onVisualLineEnd(@NotNull EditorPosition position) {
+    if (isNewRendering()) return;
     CacheEntry cacheEntry = getCacheEntryForVisualLine(position.visualLine, false);
     if (cacheEntry == null) {
       return;
@@ -349,6 +352,7 @@ public class CachingSoftWrapDataMapper implements SoftWrapAwareDocumentParsingLi
 
   @Override
   public void onCollapsedFoldRegion(@NotNull FoldRegion foldRegion, int widthInColumns, int visualLine) {
+    if (isNewRendering()) return;
     CacheEntry cacheEntry = getCacheEntryForVisualLine(visualLine, false);
     if (cacheEntry == null) {
       return;
@@ -358,6 +362,7 @@ public class CachingSoftWrapDataMapper implements SoftWrapAwareDocumentParsingLi
 
   @Override
   public void beforeSoftWrapLineFeed(@NotNull EditorPosition position) {
+    if (isNewRendering()) return;
     CacheEntry cacheEntry = getCacheEntryForVisualLine(position.visualLine, false);
     if (cacheEntry == null) {
       return;
@@ -367,6 +372,7 @@ public class CachingSoftWrapDataMapper implements SoftWrapAwareDocumentParsingLi
 
   @Override
   public void afterSoftWrapLineFeed(@NotNull EditorPosition position) {
+    if (isNewRendering()) return; 
     CacheEntry cacheEntry = getCacheEntryForVisualLine(position.visualLine, true);
     if (cacheEntry == null) {
       return;
@@ -376,6 +382,7 @@ public class CachingSoftWrapDataMapper implements SoftWrapAwareDocumentParsingLi
 
   @Override
   public void revertToOffset(final int offset, int visualLine) {
+    if (isNewRendering()) return;
     final CacheEntry entry = getCacheEntryForVisualLine(visualLine, false);
     if (entry != null) {
       entry.removeAllDataAtOrAfter(offset);
@@ -386,6 +393,7 @@ public class CachingSoftWrapDataMapper implements SoftWrapAwareDocumentParsingLi
 
   @Override
   public void onTabulation(@NotNull EditorPosition position, int widthInColumns) {
+    if (isNewRendering()) return;
     CacheEntry cacheEntry = getCacheEntryForVisualLine(position.visualLine, false);
     if (cacheEntry == null) {
       return;
@@ -466,17 +474,19 @@ public class CachingSoftWrapDataMapper implements SoftWrapAwareDocumentParsingLi
   @Override
   public void onCacheUpdateStart(@NotNull IncrementalCacheUpdateEvent event) {
     int startOffset = event.getStartOffset();
-    
-    int startIndex = MappingUtil.getCacheEntryIndexForOffset(startOffset, myEditor.getDocument(), myCache);
-    if (startIndex < 0) {
-      startIndex = - startIndex - 1;
-    }
-    
-    myAffectedByUpdateCacheEntries.clear();
-    if (startIndex < myCache.size()) {
-      List<CacheEntry> affectedEntries = myCache.subList(startIndex, myCache.size());
-      myAffectedByUpdateCacheEntries.addAll(affectedEntries);
-      affectedEntries.clear();
+
+    if (!isNewRendering()) {
+      int startIndex = MappingUtil.getCacheEntryIndexForOffset(startOffset, myEditor.getDocument(), myCache);
+      if (startIndex < 0) {
+        startIndex = - startIndex - 1;
+      }
+
+      myAffectedByUpdateCacheEntries.clear();
+      if (startIndex < myCache.size()) {
+        List<CacheEntry> affectedEntries = myCache.subList(startIndex, myCache.size());
+        myAffectedByUpdateCacheEntries.addAll(affectedEntries);
+        affectedEntries.clear();
+      }
     }
 
     myAffectedByUpdateSoftWraps.clear();
@@ -544,6 +554,7 @@ public class CachingSoftWrapDataMapper implements SoftWrapAwareDocumentParsingLi
    * Determines which cache entries were not affected by recalculation, and 'shifts' them according to recalculation results.
    */
   private void applyStateChange(@NotNull IncrementalCacheUpdateEvent event, int softWrappedLinesDiff) {
+    if (isNewRendering()) return;
     CacheEntry lastEntry = myCache.isEmpty() ? null : myCache.get(myCache.size() - 1);
     int lengthDiff = event.getLengthDiff();
     int recalcEndOffsetTranslated = event.getActualEndOffset() - lengthDiff;
@@ -695,8 +706,13 @@ public class CachingSoftWrapDataMapper implements SoftWrapAwareDocumentParsingLi
   }
 
   void removeLastCacheEntry() {
+    if (isNewRendering()) return;
     LOG.assertTrue(!myCache.isEmpty());
     myCache.remove(myCache.size() - 1);
+  }
+  
+  private boolean isNewRendering() {
+    return myEditor instanceof EditorImpl && ((EditorImpl)myEditor).myUseNewRendering;
   }
 
   @TestOnly

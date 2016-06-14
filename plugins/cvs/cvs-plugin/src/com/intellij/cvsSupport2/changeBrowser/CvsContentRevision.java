@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,13 +29,14 @@ import com.intellij.cvsSupport2.cvsExecution.CvsOperationExecutorCallback;
 import com.intellij.cvsSupport2.cvshandlers.CommandCvsHandler;
 import com.intellij.cvsSupport2.cvsoperations.cvsContent.GetFileContentOperation;
 import com.intellij.cvsSupport2.cvsoperations.dateOrRevision.RevisionOrDate;
+import com.intellij.cvsSupport2.history.CvsRevisionNumber;
 import com.intellij.openapi.cvsIntegration.CvsResult;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vcs.actions.VcsContextFactory;
-import com.intellij.openapi.vcs.changes.ContentRevision;
+import com.intellij.openapi.vcs.changes.ByteBackedContentRevision;
 import com.intellij.openapi.vcs.history.VcsRevisionNumber;
 import com.intellij.openapi.vfs.CharsetToolkit;
 import org.jetbrains.annotations.NonNls;
@@ -43,16 +44,15 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
-import java.nio.charset.Charset;
 
-public class CvsContentRevision implements ContentRevision {
+public class CvsContentRevision implements ByteBackedContentRevision {
   protected final RevisionOrDate myRevision;
   protected final File myFile;
   private final FilePath myLocalFile;
   private final CvsEnvironment myEnvironment;
   private final Project myProject;
 
-  private String myContent;
+  private byte[] myContent;
 
   public CvsContentRevision(final File file,
                             final File localFile,
@@ -66,46 +66,52 @@ public class CvsContentRevision implements ContentRevision {
     myProject = project;
   }
 
+  @Override
   @Nullable
   public String getContent() throws VcsException {
+    byte[] content = getContentAsBytes();
+    return content == null ? null : CharsetToolkit.bytesToString(content, myLocalFile.getCharset());
+  }
+
+  @Nullable
+  @Override
+  public byte[] getContentAsBytes() throws VcsException {
     if (myContent == null) {
-      byte[] content = loadContent();
-      if (content != null) {
-        final Charset charset = myLocalFile.getCharset();
-        myContent = CharsetToolkit.bytesToString(content, charset);
+      final GetFileContentOperation operation = new GetFileContentOperation(myFile, myEnvironment, myRevision);
+      CvsOperationExecutor executor = new CvsOperationExecutor(myProject);
+      executor.performActionSync(new CommandCvsHandler(CvsBundle.message("operation.name.load.file"),
+                                                       operation),
+                                 CvsOperationExecutorCallback.EMPTY);
+      CvsResult result = executor.getResult();
+      if (result.isCanceled()) {
+        throw new ProcessCanceledException();
       }
+      if (result.hasErrors()) {
+        throw result.composeError();
+      }
+      if (!operation.isLoaded()) {
+        throw new VcsException("Network problem");
+      }
+
+      myContent = operation.getFileBytes();
     }
     return myContent;
   }
 
-  protected byte[] loadContent() throws VcsException {
-    final GetFileContentOperation operation = new GetFileContentOperation(myFile, myEnvironment, myRevision);
-    CvsOperationExecutor executor = new CvsOperationExecutor(myProject);
-    executor.performActionSync(new CommandCvsHandler(CvsBundle.message("operation.name.load.file"),
-                                                     operation),
-                               CvsOperationExecutorCallback.EMPTY);
-    CvsResult result = executor.getResult();
-    if (result.isCanceled()) {
-      throw new ProcessCanceledException();
-    }
-    if (result.hasErrors()) {
-      throw result.composeError();
-    }
-    if (!operation.isLoaded()) {
-      throw new VcsException("Network problem");
-    }
-
-    return operation.getFileBytes();
-  }
-
+  @Override
   @NotNull
   public FilePath getFile() {
     return myLocalFile;
   }
 
+  @Override
   @NotNull
   public VcsRevisionNumber getRevisionNumber() {
-    return myRevision.getCvsRevisionNumber();
+    final CvsRevisionNumber cvsRevisionNumber = myRevision.getCvsRevisionNumber();
+    if (cvsRevisionNumber == null) {
+      return VcsRevisionNumber.NULL;
+    }
+    return cvsRevisionNumber;
   }
 
   @Override @NonNls

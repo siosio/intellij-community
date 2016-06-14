@@ -62,16 +62,16 @@ public class FoldLinesLikeThis extends DumbAwareAction {
     assert editor != null;
     final String selection = getSingleLineSelection(editor);
     assert selection != null;
-    ShowSettingsUtil.getInstance().editConfigurable(editor.getProject(), new ConsoleFoldingConfigurable() {
+    ShowSettingsUtil.getInstance().editConfigurable(editor.getProject(), new ConsoleConfigurable() {
+      @Override
+      protected boolean editFoldingsOnly() {
+        return true;
+      }
+
       @Override
       public void reset() {
         super.reset();
-        UIUtil.invokeLaterIfNeeded(new Runnable() {
-          @Override
-          public void run() {
-            addRule(selection);
-          }
-        });
+        UIUtil.invokeLaterIfNeeded(() -> addRule(selection));
       }
     });
     final ConsoleView consoleView = e.getData(LangDataKeys.CONSOLE_VIEW);

@@ -20,12 +20,12 @@ import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.util.Key;
 import com.intellij.psi.Weigher;
 import com.intellij.util.Consumer;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.Collection;
-import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * For completion FAQ, see {@link CompletionContributor}.
@@ -103,21 +103,15 @@ public abstract class CompletionService {
    * The main method that is invoked to collect all the completion variants
    * @param parameters Parameters specifying current completion environment
    * @param consumer This consumer will directly add lookup elements to the lookup
-   * @return all suitable lookup elements
    */
-  @NotNull
-  public LookupElement[] performCompletion(final CompletionParameters parameters, final Consumer<CompletionResult> consumer) {
-    final Collection<LookupElement> lookupSet = new LinkedHashSet<LookupElement>();
+  public void performCompletion(final CompletionParameters parameters, final Consumer<CompletionResult> consumer) {
+    final Set<LookupElement> lookupSet = ContainerUtil.newConcurrentSet();
 
-    getVariantsFromContributors(parameters, null, new Consumer<CompletionResult>() {
-      @Override
-      public void consume(final CompletionResult result) {
-        if (lookupSet.add(result.getLookupElement())) {
-          consumer.consume(result);
-        }
+    getVariantsFromContributors(parameters, null, result -> {
+      if (lookupSet.add(result.getLookupElement())) {
+        consumer.consume(result);
       }
     });
-    return lookupSet.toArray(new LookupElement[lookupSet.size()]);
   }
 
   public abstract CompletionSorter defaultSorter(CompletionParameters parameters, PrefixMatcher matcher);

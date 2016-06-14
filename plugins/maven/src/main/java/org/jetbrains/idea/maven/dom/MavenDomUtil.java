@@ -90,9 +90,6 @@ public class MavenDomUtil {
   public static boolean isSettingsFile(PsiFile file) {
     if (!(file instanceof XmlFile)) return false;
 
-    String name = file.getName();
-    if (!name.equals(MavenConstants.SETTINGS_XML)) return false;
-
     XmlTag rootTag = ((XmlFile)file).getRootTag();
     if (rootTag == null || !"settings".equals(rootTag.getName())) return false;
 
@@ -353,10 +350,11 @@ public class MavenDomUtil {
   }
 
   public static boolean isFilteredResourceFile(PsiElement element) {
-    VirtualFile file = getVirtualFile(element);
+    PsiFile psiFile = element.getContainingFile();
+    VirtualFile file = getVirtualFile(psiFile);
     if (file == null) return false;
 
-    MavenProjectsManager manager = MavenProjectsManager.getInstance(element.getProject());
+    MavenProjectsManager manager = MavenProjectsManager.getInstance(psiFile.getProject());
     MavenProject mavenProject = manager.findContainingProject(file);
     if (mavenProject == null) return false;
 

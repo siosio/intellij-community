@@ -15,58 +15,43 @@
  */
 package com.intellij.vcs.log.ui.actions;
 
-import com.intellij.openapi.editor.SpellCheckingEditorCustomizationProvider;
-import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.project.Project;
-import com.intellij.ui.EditorCustomization;
 import com.intellij.ui.IdeBorderFactory;
-import com.intellij.ui.TextFieldWithAutoCompletion;
+import com.intellij.util.textCompletion.TextCompletionProvider;
+import com.intellij.util.textCompletion.TextFieldWithCompletion;
 import com.intellij.util.ui.AsyncProcessIcon;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.KeyEvent;
-import java.util.Collection;
 
 public abstract class TextFieldWithProgress extends JPanel {
-  @NotNull private final TextFieldWithAutoCompletion<String> myTextField;
+  @NotNull private final TextFieldWithCompletion myTextField;
   @NotNull private final AsyncProcessIcon myProgressIcon;
 
-  public TextFieldWithProgress(@NotNull Project project, @NotNull Collection<String> variants) {
+  public TextFieldWithProgress(@NotNull Project project,
+                               @NotNull TextCompletionProvider completionProvider) {
     super(new BorderLayout());
     setBorder(IdeBorderFactory.createEmptyBorder(3));
 
     myProgressIcon = new AsyncProcessIcon("Loading commits");
-    myTextField =
-      new TextFieldWithAutoCompletion<String>(project, new TextFieldWithAutoCompletion.StringsCompletionProvider(variants, null), false,
-                                              null) {
-        @Override
-        public void setBackground(Color bg) {
-          super.setBackground(bg);
-          myProgressIcon.setBackground(bg);
-        }
+    myTextField = new TextFieldWithCompletion(project, completionProvider, "", true, true, false) {
+      @Override
+      public void setBackground(Color bg) {
+        super.setBackground(bg);
+        myProgressIcon.setBackground(bg);
+      }
 
-        @Override
-        protected EditorEx createEditor() {
-          // spell check is not needed
-          EditorEx editor = super.createEditor();
-          EditorCustomization customization = SpellCheckingEditorCustomizationProvider.getInstance().getDisabledCustomization();
-          if (customization != null) {
-            customization.customize(editor);
-          }
-          return editor;
+      @Override
+      protected boolean processKeyBinding(KeyStroke ks, final KeyEvent e, int condition, boolean pressed) {
+        if (e.getKeyCode() == KeyEvent.VK_ENTER) {
+          onOk();
+          return true;
         }
-
-        @Override
-        protected boolean processKeyBinding(KeyStroke ks, final KeyEvent e, int condition, boolean pressed) {
-          if (e.getKeyCode() == KeyEvent.VK_ENTER) {
-            onOk();
-            return true;
-          }
-          return false;
-        }
-      };
+        return false;
+      }
+    };
     myTextField.setBorder(IdeBorderFactory.createEmptyBorder());
 
     myProgressIcon.setOpaque(true);

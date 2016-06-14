@@ -29,11 +29,7 @@ import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.IdeFrame;
 import com.intellij.openapi.wm.WindowManager;
-import com.intellij.ui.BrowserHyperlinkListener;
-import com.intellij.ui.DocumentAdapter;
-import com.intellij.ui.InsertPathAction;
-import com.intellij.ui.ScrollPaneFactory;
-import com.intellij.ui.MessageException;
+import com.intellij.ui.*;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.mac.MacMessages;
 import com.intellij.ui.mac.foundation.MacUtil;
@@ -643,12 +639,7 @@ public class Messages {
                                                final int defaultOptionIndex, final int focusedOptionIndex, Icon icon) {
     return showCheckboxMessageDialog(message, title, new String[]{OK_BUTTON, CANCEL_BUTTON}, checkboxText, checked, defaultOptionIndex,
                                      focusedOptionIndex, icon,
-                                     new PairFunction<Integer, JCheckBox, Integer>() {
-                                       @Override
-                                       public Integer fun(final Integer exitCode, final JCheckBox cb) {
-                                         return exitCode == -1 ? CANCEL : exitCode + (cb.isSelected() ? 1 : 0);
-                                       }
-                                     });
+                                     (exitCode, cb) -> exitCode == -1 ? CANCEL : exitCode + (cb.isSelected() ? 1 : 0));
   }
 
   public static int showCheckboxMessageDialog(String message, @Nls(capitalization = Nls.Capitalization.Title) String title, @NotNull String[] options, String checkboxText, final boolean checked,
@@ -921,7 +912,7 @@ public class Messages {
                                           @Nullable Icon icon,
                                           @Nullable InputValidator validator) {
     if (isApplicationInUnitTestOrHeadless()) {
-      return ourTestInputImplementation.show(message);
+      return ourTestInputImplementation.show(message, validator);
     }
 
     final InputDialog dialog = project != null ? new PasswordInputDialog(project, message, title, icon, validator)
@@ -965,7 +956,7 @@ public class Messages {
                                        @Nullable String initialValue,
                                        @Nullable InputValidator validator) {
     if (isApplicationInUnitTestOrHeadless()) {
-      return ourTestInputImplementation.show(message);
+      return ourTestInputImplementation.show(message, validator);
     }
     else {
       InputDialog dialog = new InputDialog(project, message, title, icon, initialValue, validator);
@@ -983,7 +974,7 @@ public class Messages {
                                        @Nullable InputValidator validator,
                                        @Nullable TextRange selection) {
     if (isApplicationInUnitTestOrHeadless()) {
-      return ourTestInputImplementation.show(message);
+      return ourTestInputImplementation.show(message, validator);
     }
     else {
       InputDialog dialog = new InputDialog(project, message, title, icon, initialValue, validator);
@@ -1013,7 +1004,7 @@ public class Messages {
                                        @Nullable String initialValue,
                                        @Nullable InputValidator validator) {
     if (isApplicationInUnitTestOrHeadless()) {
-      return ourTestInputImplementation.show(message);
+      return ourTestInputImplementation.show(message, validator);
     }
     else {
 
@@ -1036,7 +1027,7 @@ public class Messages {
                                        @Nullable String initialValue,
                                        @Nullable InputValidator validator) {
     if (isApplicationInUnitTestOrHeadless()) {
-      return ourTestInputImplementation.show(message);
+      return ourTestInputImplementation.show(message, validator);
     }
     else {
       InputDialog dialog = new InputDialog(message, title, icon, initialValue, validator);
@@ -1053,7 +1044,7 @@ public class Messages {
                                                 @Nullable Icon icon,
                                                 @Nullable InputValidator validator) {
     if (isApplicationInUnitTestOrHeadless()) {
-      return ourTestInputImplementation.show(message);
+      return ourTestInputImplementation.show(message, validator);
     }
     InputDialog dialog = new MultilineInputDialog(project, message, title, icon, initialValue, validator, new String[]{OK_BUTTON, CANCEL_BUTTON}, 0);
     dialog.show();
@@ -1070,7 +1061,7 @@ public class Messages {
                                                                   @NonNls String initialValue,
                                                                   @Nullable InputValidator validator) {
     if (isApplicationInUnitTestOrHeadless()) {
-      return new Pair<String, Boolean>(ourTestInputImplementation.show(message), checked);
+      return new Pair<String, Boolean>(ourTestInputImplementation.show(message, validator), checked);
     }
     else {
       InputDialogWithCheckbox dialog = new InputDialogWithCheckbox(message, title, checkboxText, checked, checkboxEnabled, icon, initialValue, validator);
@@ -1087,7 +1078,7 @@ public class Messages {
                                                 String initialValue,
                                                 @Nullable InputValidator validator) {
     if (isApplicationInUnitTestOrHeadless()) {
-      return ourTestInputImplementation.show(message);
+      return ourTestInputImplementation.show(message, validator);
     }
     else {
       ChooseDialog dialog = new ChooseDialog(message, title, icon, values, initialValue);
@@ -1225,12 +1216,9 @@ public class Messages {
       builder.setTitle(rawText);
       builder.addOkAction();
       builder.addCancelAction();
-      builder.setOkOperation(new Runnable() {
-        @Override
-        public void run() {
-          textField.setText(lineJoiner.fun(Arrays.asList(StringUtil.splitByLines(textArea.getText()))));
-          builder.getDialogWrapper().close(DialogWrapper.OK_EXIT_CODE);
-        }
+      builder.setOkOperation(() -> {
+        textField.setText(lineJoiner.fun(Arrays.asList(StringUtil.splitByLines(textArea.getText()))));
+        builder.getDialogWrapper().close(DialogWrapper.OK_EXIT_CODE);
       });
       builder.show();
     }
@@ -1442,18 +1430,15 @@ public class Messages {
     @Override
     public void show() {
       if (isMacSheetEmulation()) {
-        setInitialLocationCallback(new Computable<Point>() {
-          @Override
-          public Point compute() {
-            JRootPane rootPane = SwingUtilities.getRootPane(getWindow().getParent());
-            if (rootPane == null) {
-              rootPane = SwingUtilities.getRootPane(getWindow().getOwner());
-            }
-
-            Point p = rootPane.getLocationOnScreen();
-            p.x += (rootPane.getWidth() - getWindow().getWidth()) / 2;
-            return p;
+        setInitialLocationCallback(() -> {
+          JRootPane rootPane = SwingUtilities.getRootPane(getWindow().getParent());
+          if (rootPane == null) {
+            rootPane = SwingUtilities.getRootPane(getWindow().getOwner());
           }
+
+          Point p = rootPane.getLocationOnScreen();
+          p.x += (rootPane.getWidth() - getWindow().getWidth()) / 2;
+          return p;
         });
         animate();
         if (SystemInfo.isJavaVersionAtLeast("1.7")) {
@@ -1519,25 +1504,8 @@ public class Messages {
         panel.add(container, BorderLayout.WEST);
       }
       if (myMessage != null) {
-        final JTextPane messageComponent = createMessageComponent(myMessage);
-
-        final Dimension screenSize = messageComponent.getToolkit().getScreenSize();
-        final Dimension textSize = messageComponent.getPreferredSize();
-        if (myMessage.length() > 100) {
-          final JScrollPane pane = ScrollPaneFactory.createScrollPane(messageComponent);
-          pane.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
-          pane.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
-          pane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
-          final int scrollSize = (int)new JScrollBar(Adjustable.VERTICAL).getPreferredSize().getWidth();
-          final Dimension preferredSize =
-            new Dimension(Math.min(textSize.width, screenSize.width / 2) + scrollSize,
-                          Math.min(textSize.height, screenSize.height / 3) + scrollSize);
-          pane.setPreferredSize(preferredSize);
-          panel.add(pane, BorderLayout.CENTER);
-        }
-        else {
-          panel.add(messageComponent, BorderLayout.CENTER);
-        }
+        JTextPane messageComponent = createMessageComponent(myMessage);
+        panel.add(wrapToScrollPaneIfNeeded(messageComponent, 100, 10), BorderLayout.CENTER);
       }
       return panel;
     }
@@ -1586,22 +1554,25 @@ public class Messages {
 
   @NotNull
   public static JTextPane configureMessagePaneUi(JTextPane messageComponent, String message) {
-    return configureMessagePaneUi(messageComponent, message, true);
+    JTextPane pane = configureMessagePaneUi(messageComponent, message, null);
+    if (UIUtil.HTML_MIME.equals(pane.getContentType())) {
+      pane.addHyperlinkListener(BrowserHyperlinkListener.INSTANCE);
+    }
+    return pane;
   }
 
   @NotNull
-  public static JTextPane configureMessagePaneUi(JTextPane messageComponent,
-                                                 String message,
-                                                 final boolean addBrowserHyperlinkListener) {
-    messageComponent.setFont(UIUtil.getLabelFont());
+  public static JTextPane configureMessagePaneUi(@NotNull JTextPane messageComponent,
+                                                 @Nullable String message,
+                                                 @Nullable UIUtil.FontSize fontSize) {
+    UIUtil.FontSize fixedFontSize = fontSize == null ? UIUtil.FontSize.NORMAL : fontSize;
+    messageComponent.setFont(UIUtil.getLabelFont(fixedFontSize));
     if (BasicHTML.isHTMLString(message)) {
-      final HTMLEditorKit editorKit = new HTMLEditorKit();
-      editorKit.getStyleSheet().addRule(UIUtil.displayPropertiesToCSS(UIUtil.getLabelFont(), UIUtil.getLabelForeground()));
+      HTMLEditorKit editorKit = new HTMLEditorKit();
+      Font font = UIUtil.getLabelFont(fixedFontSize);
+      editorKit.getStyleSheet().addRule(UIUtil.displayPropertiesToCSS(font, UIUtil.getLabelForeground()));
       messageComponent.setEditorKit(editorKit);
       messageComponent.setContentType(UIUtil.HTML_MIME);
-      if (addBrowserHyperlinkListener) {
-        messageComponent.addHyperlinkListener(BrowserHyperlinkListener.INSTANCE);
-      }
     }
     messageComponent.setText(message);
     messageComponent.setEditable(false);
@@ -1619,6 +1590,28 @@ public class Messages {
 
     messageComponent.setForeground(UIUtil.getLabelForeground());
     return messageComponent;
+  }
+
+  @NotNull
+  public static JComponent wrapToScrollPaneIfNeeded(@NotNull JComponent comp, int columns, int lines) {
+    float fontSize = comp.getFont().getSize2D();
+    Dimension maxDim = new Dimension((int)(fontSize * columns), (int)(fontSize * lines));
+    Dimension prefDim = comp.getPreferredSize();
+    if (prefDim.width <= maxDim.width && prefDim.height <= maxDim.height) return comp;
+
+    JScrollPane scrollPane = ScrollPaneFactory.createScrollPane(comp);
+    scrollPane.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
+    scrollPane.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
+    scrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+    int barWidth = UIUtil.getScrollBarWidth();
+    Dimension preferredSize = new Dimension(
+      Math.min(prefDim.width, maxDim.width) + barWidth,
+      Math.min(prefDim.height, maxDim.height) + barWidth);
+    if (prefDim.width > maxDim.width) { //Too wide single-line message should be wrapped
+      preferredSize.height = Math.max(preferredSize.height, (int)(4 * fontSize) + barWidth);
+    }
+    scrollPane.setPreferredSize(preferredSize);
+    return scrollPane;
   }
 
   protected static class TwoStepConfirmationDialog extends MessageDialog {

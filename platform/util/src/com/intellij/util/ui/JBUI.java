@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,51 +15,91 @@
  */
 package com.intellij.util.ui;
 
+import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.util.IconLoader;
+import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.ui.border.CustomLineBorder;
 import com.intellij.util.SystemProperties;
 import com.intellij.util.ui.components.BorderLayoutPanel;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import javax.swing.border.Border;
+import javax.swing.border.CompoundBorder;
+import javax.swing.plaf.UIResource;
 import java.awt.*;
 
 /**
  * @author Konstantin Bulenkov
  */
 public class JBUI {
-  private static boolean IS_HIDPI = calculateHiDPI();
+  private static final Logger LOG = Logger.getInstance("#com.intellij.util.ui.JBUI");
 
-  private static boolean calculateHiDPI() {
+  private static float scaleFactor = 1.0f;
+
+  static {
+    calculateScaleFactor();
+  }
+
+  private static void calculateScaleFactor() {
     if (SystemInfo.isMac) {
-      return false;
-    }
-
-    if (SystemProperties.is("hidpi")) {
-      return true;
+      LOG.info("UI scale factor: 1.0");
+      scaleFactor = 1.0f;
+      return;
     }
 
     if (SystemProperties.has("hidpi") && !SystemProperties.is("hidpi")) {
-      return false;
+      LOG.info("UI scale factor: 1.0");
+      scaleFactor = 1.0f;
+      return;
     }
 
-    if (SystemInfo.isWindows && getSystemDPI() > 144) {
-      return true;
-    }
+    UIUtil.initSystemFontData();
+    Pair<String, Integer> fdata = UIUtil.getSystemFontData();
 
-    return false;
+    int size;
+    if (fdata != null) {
+      size = fdata.getSecond();
+    } else {
+      size = Fonts.label().getSize();
+    }
+    setScaleFactor(size/UIUtil.DEF_SYSTEM_FONT_SIZE);
   }
 
-  private static int getSystemDPI() {
-    try {
-      return Toolkit.getDefaultToolkit().getScreenResolution();
-    } catch (HeadlessException e) {
-      return 96;
+  public static void setScaleFactor(float scale) {
+    if (SystemProperties.has("hidpi") && !SystemProperties.is("hidpi")) {
+      return;
     }
+
+    if (scale < 1.25f) scale = 1.0f;
+    else if (scale < 1.5f) scale = 1.25f;
+    else if (scale < 1.75f) scale = 1.5f;
+    else if (scale < 2f) scale = 1.75f;
+    else scale = 2.0f;
+
+    if (SystemInfo.isLinux && scale == 1.25f) {
+      //Default UI font size for Unity and Gnome is 15. Scaling factor 1.25f works badly on Linux
+      scale = 1f;
+    }
+    if (scaleFactor == scale) {
+      return;
+    }
+    LOG.info("UI scale factor: " + scale);
+
+    scaleFactor = scale;
+    IconLoader.setScale(scale);
   }
 
   public static int scale(int i) {
-    return isHiDPI() ? 2 * i : i;
+    return Math.round(scaleFactor * i);
+  }
+
+  public static int scaleFontSize(int fontSize) {
+    if (scaleFactor == 1.25f) return (int)(fontSize * 1.34f);
+    if (scaleFactor == 1.75f) return (int)(fontSize * 1.67f);
+    return scale(fontSize);
   }
 
   public static JBDimension size(int width, int height) {
@@ -71,7 +111,15 @@ public class JBUI {
   }
 
   public static JBDimension size(Dimension size) {
-    return size instanceof JBDimension ? ((JBDimension)size) : new JBDimension(size.width, size.height);
+    if (size instanceof JBDimension) {
+      final JBDimension jbSize = (JBDimension)size;
+      if (jbSize.originalScale == scale(1f)) {
+        return jbSize;
+      }
+      final JBDimension newSize = new JBDimension((int)(jbSize.width / jbSize.originalScale), (int)(jbSize.height / jbSize.originalScale));
+      return size instanceof UIResource ? newSize.asUIResource() : newSize;
+    }
+    return new JBDimension(size.width, size.height);
   }
 
   public static JBInsets insets(int top, int left, int bottom, int right) {
@@ -115,7 +163,7 @@ public class JBUI {
   }
 
   public static float scale(float f) {
-    return f * scale(1);
+    return f * scaleFactor;
   }
 
   public static JBInsets insets(Insets insets) {
@@ -123,7 +171,7 @@ public class JBUI {
   }
 
   public static boolean isHiDPI() {
-    return IS_HIDPI;
+    return scaleFactor > 1.0f;
   }
 
   public static class Fonts {
@@ -154,27 +202,31 @@ public class JBUI {
     }
 
     public static JBEmptyBorder empty(int topAndBottom, int leftAndRight) {
-      return new JBEmptyBorder(topAndBottom, leftAndRight, topAndBottom, leftAndRight);
+      return empty(topAndBottom, leftAndRight, topAndBottom, leftAndRight);
     }
 
     public static JBEmptyBorder emptyTop(int offset) {
-      return new JBEmptyBorder(offset, 0, 0, 0);
+      return empty(offset, 0, 0, 0);
     }
 
     public static JBEmptyBorder emptyLeft(int offset) {
-      return new JBEmptyBorder(0, offset,  0, 0);
+      return empty(0, offset,  0, 0);
     }
 
     public static JBEmptyBorder emptyBottom(int offset) {
-      return new JBEmptyBorder(0, 0, offset, 0);
+      return empty(0, 0, offset, 0);
     }
 
     public static JBEmptyBorder emptyRight(int offset) {
-      return new JBEmptyBorder(0, 0, 0, offset);
+      return empty(0, 0, 0, offset);
     }
 
     public static JBEmptyBorder empty() {
-      return new JBEmptyBorder(0);
+      return empty(0, 0, 0, 0);
+    }
+
+    public static Border empty(int offsets) {
+      return empty(offsets, offsets, offsets, offsets);
     }
 
     public static Border customLine(Color color, int top, int left, int bottom, int right) {
@@ -183,6 +235,15 @@ public class JBUI {
 
     public static Border customLine(Color color, int thickness) {
       return customLine(color, thickness, thickness, thickness, thickness);
+    }
+
+    public static Border customLine(Color color) {
+      return customLine(color, 1);
+    }
+
+    public static Border merge(@Nullable Border source, @NotNull Border extra, boolean extraIsOutside) {
+      if (source == null) return extra;
+      return new CompoundBorder(extraIsOutside ? extra : source, extraIsOutside? source : extra);
     }
   }
 

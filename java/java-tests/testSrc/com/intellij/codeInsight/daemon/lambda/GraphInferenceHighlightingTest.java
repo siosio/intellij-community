@@ -16,10 +16,18 @@
 package com.intellij.codeInsight.daemon.lambda;
 
 import com.intellij.codeInsight.daemon.LightDaemonAnalyzerTestCase;
+import com.intellij.codeInsight.daemon.impl.HighlightInfo;
+import com.intellij.codeInspection.uncheckedWarnings.UncheckedWarningLocalInspection;
+import com.intellij.lang.annotation.HighlightSeverity;
 import com.intellij.openapi.projectRoots.JavaSdkVersion;
 import com.intellij.openapi.projectRoots.Sdk;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.testFramework.IdeaTestUtil;
 import org.jetbrains.annotations.NonNls;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
 
 public class GraphInferenceHighlightingTest extends LightDaemonAnalyzerTestCase {
   @NonNls static final String BASE_PATH = "/codeInsight/daemonCodeAnalyzer/lambda/graphInference";
@@ -280,6 +288,187 @@ public class GraphInferenceHighlightingTest extends LightDaemonAnalyzerTestCase 
   }
 
   public void testNestedConditionalExpressions() throws Exception {
+    doTest();
+  }
+
+  public void testOuterMethodCallOnRawType() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA143390() throws Exception {
+    doTest();
+  }
+
+  public void testIntersectionWithArray() throws Exception {
+    doTest();
+  }
+
+  public void testIncorporationWithCaptureCalcGlbToGetOneTypeParameterBound() throws Exception {
+    doTest();
+  }
+
+  public void testEnumConstantInference() throws Exception {
+    doTest();
+  }
+
+  public void testReturnConstraintsWithCaptureIncorporationOfFreshVariables() throws Exception {
+    doTest();
+  }
+
+  public void testArrayTypeAssignability() throws Exception {
+    doTest();
+  }
+
+  public void testAcceptFirstPairOfCommonSupertypesDuringUpUpIncorporation() throws Exception {
+    doTest();
+  }
+
+  public void testDiamondWithExactMethodReferenceInside() throws Exception {
+    doTest();
+  }
+
+  public void testRecursiveCallsWithNestedInference() throws Exception {
+    doTest();
+  }
+
+  public void testIncorporationWithRawSubstitutors() throws Exception {
+    doTest();
+  }
+
+  public void testIncorporationOfBoundsAsTypeArguments() throws Exception {
+    doTest();
+  }
+
+  public void testEliminateIntersectionTypeWildcardElimination() throws Exception {
+    doTest();
+  }
+
+  public void testDoNotIgnoreConflictingUpperBounds() throws Exception {
+    doTest();
+  }
+
+  public void testCapturedWildcardWithArrayTypeBound() throws Exception {
+    doTest();
+  }
+
+  public void testPolyConditionalExpressionWithTargetPrimitive() throws Exception {
+    doTest();
+  }
+
+  public void testCaptureConstraint() throws Exception {
+    doTest();
+  }
+
+  public void testPullUncheckedWarningNotionThroughNestedCalls() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA149774() throws Exception {
+    doTest();
+  }
+
+  public void testDisjunctionTypes() throws Exception {
+    doTest();
+  }
+
+  public void testPushErasedStateToArguments() throws Exception {
+    doTest();
+  }
+
+  public void testStopAtStandaloneConditional() throws Exception {
+    doTest();
+  }
+
+  public void testTransitiveInferenceVariableDependencies() throws Exception {
+    doTest();
+  }
+
+  public void testInferenceVariablesErasure() throws Exception {
+    doTest();
+  }
+
+  public void testUncheckedWarningConvertingToInferenceVariable() throws Exception {
+    doTest();
+  }
+
+  public void testUncheckedWarningDuringStrictSubtyping() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA150688() throws Exception {
+    doTest();
+  }
+
+  public void testGlbValidityWithCapturedWildcards() throws Exception {
+    doTest();
+  }
+
+  public void testCapturedVariablesAcceptance() throws Exception {
+    doTest();
+  }
+
+  public void testPullingErrorMessagesFromSubExpressionsToTheTopLevel() throws Exception {
+    doTest();
+  }
+
+  public void testHighlightArgumentWithProblem() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA153632() throws Exception {
+    doTest();
+  }
+
+  public void testPartialRawSubstitutionToAvoidInferringObjectsWhenRawExpected() throws Exception {
+    final UncheckedWarningLocalInspection localInspection = new UncheckedWarningLocalInspection();
+    enableInspectionTool(localInspection);
+    doTest(true);
+  }
+
+  public void testIDEA154278() throws Exception {
+    doTest();
+  }
+
+  public void testPrimitiveTypeInReturnConstraintWithUncheckedConversion() throws Exception {
+    doTest();
+  }
+
+  public void testPolyMethodCallOnLeftSideOfAssignment() throws Exception {
+    doTest();
+  }
+
+  public void testTreatConditionalExpressionAsPolyIfNewExpressionWithDiamondsIsUsed() throws Exception {
+    doTest();
+  }
+
+  public void testVariableNamesOfNestedCalls() throws Exception {
+    IdeaTestUtil.setTestVersion(JavaSdkVersion.JDK_1_8, getModule(), getTestRootDisposable());
+    String filePath = BASE_PATH + "/" + getTestName(false) + ".java";
+    configureByFile(filePath);
+    Collection<HighlightInfo> infos = doHighlighting();
+
+    List<String> tooltips = new ArrayList<>();
+
+    for (HighlightInfo info : infos) {
+      if (info.getSeverity() == HighlightSeverity.ERROR) {
+        tooltips.add(info.getToolTip());
+      }
+    }
+
+    boolean found = false;
+    for (String tooltip : tooltips) {
+      if (tooltip.contains("reason: no instance(s) of type variable(s) K, U exist so that Map&lt;K, U&gt; conforms to Function&lt;U, V&gt;")) {
+        found = true;
+        break;
+      }
+    }
+
+    if (!found) {
+      fail(StringUtil.join(tooltips, ", "));
+    }
+  }
+
+  public void testCreateFreshVariablesOnlyForWildcardPlacesDuringReturnTypeProcessing() throws Exception {
     doTest();
   }
 

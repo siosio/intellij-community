@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import com.intellij.execution.process.ProcessAdapter;
 import com.intellij.execution.process.ProcessEvent;
 import com.intellij.execution.process.ProcessTerminatedListener;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.util.io.BaseOutputReader;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.Reader;
@@ -48,11 +49,13 @@ public class JUnitProcessHandler extends KillableColoredProcessHandler {
     });
   }
 
+  @NotNull
   @Override
   protected Reader createProcessOutReader() {
     return myOut.createReader();
   }
 
+  @NotNull
   @Override
   protected Reader createProcessErrReader() {
     return myErr.createReader();
@@ -73,5 +76,11 @@ public class JUnitProcessHandler extends KillableColoredProcessHandler {
     final JUnitProcessHandler processHandler = new JUnitProcessHandler(commandLine);
     ProcessTerminatedListener.attach(processHandler);
     return processHandler;
+  }
+
+  @NotNull
+  @Override
+  protected BaseOutputReader.Options readerOptions() {
+    return BaseOutputReader.Options.NON_BLOCKING;
   }
 }

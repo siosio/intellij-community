@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.util.concurrency.Semaphore;
 import com.intellij.util.ui.UIUtil;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.idea.maven.MavenImportingTestCase;
 
 import javax.swing.*;
@@ -35,10 +36,6 @@ import java.util.Collections;
 
 @SuppressWarnings({"ConstantConditions"})
 public class MavenExecutionTest extends MavenImportingTestCase {
-  @Override
-  protected boolean runInWriteAction() {
-    return false;
-  }
 
   @Override
   protected boolean runInDispatchThread() {
@@ -53,7 +50,7 @@ public class MavenExecutionTest extends MavenImportingTestCase {
 
     new WriteAction<Object>() {
       @Override
-      protected void run(Result<Object> objectResult) throws Throwable {
+      protected void run(@NotNull Result<Object> objectResult) throws Throwable {
         createProjectPom("<groupId>test</groupId>" +
                          "<artifactId>project</artifactId>" +
                          "<version>1</version>");
@@ -72,7 +69,7 @@ public class MavenExecutionTest extends MavenImportingTestCase {
 
     new WriteAction<Object>() {
       @Override
-      protected void run(Result<Object> objectResult) throws Throwable {
+      protected void run(@NotNull Result<Object> objectResult) throws Throwable {
         createStdProjectFolders();
 
         importProject("<groupId>test</groupId>" +
@@ -90,10 +87,7 @@ public class MavenExecutionTest extends MavenImportingTestCase {
     MavenRunnerParameters params = new MavenRunnerParameters(true, getProjectPath(), Arrays.asList("compile"), Collections.<String>emptyList());
     execute(params);
 
-    SwingUtilities.invokeAndWait(new Runnable() {
-      @Override
-      public void run() {
-      }
+    SwingUtilities.invokeAndWait(() -> {
     });
 
     assertSources("project",
@@ -111,31 +105,21 @@ public class MavenExecutionTest extends MavenImportingTestCase {
   private void execute(final MavenRunnerParameters params) {
     final Semaphore sema = new Semaphore();
     sema.down();
-    UIUtil.invokeLaterIfNeeded(new Runnable() {
-      @Override
-      public void run() {
-        MavenRunConfigurationType.runConfiguration(
-          myProject, params, getMavenGeneralSettings(),
-          new MavenRunnerSettings(),
-          new ProgramRunner.Callback() {
+    UIUtil.invokeLaterIfNeeded(() -> MavenRunConfigurationType.runConfiguration(
+      myProject, params, getMavenGeneralSettings(),
+      new MavenRunnerSettings(),
+      new ProgramRunner.Callback() {
+        @Override
+        public void processStarted(final RunContentDescriptor descriptor) {
+          descriptor.getProcessHandler().addProcessListener(new ProcessAdapter() {
             @Override
-            public void processStarted(final RunContentDescriptor descriptor) {
-              descriptor.getProcessHandler().addProcessListener(new ProcessAdapter() {
-                @Override
-                public void processTerminated(ProcessEvent event) {
-                  sema.up();
-                  UIUtil.invokeLaterIfNeeded(new Runnable() {
-                    @Override
-                    public void run() {
-                      Disposer.dispose(descriptor);
-                    }
-                  });
-                }
-              });
+            public void processTerminated(ProcessEvent event) {
+              sema.up();
+              UIUtil.invokeLaterIfNeeded(() -> Disposer.dispose(descriptor));
             }
           });
-      }
-    });
+        }
+      }));
     sema.waitFor();
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -152,12 +152,7 @@ public abstract class TodoTreeBuilder extends AbstractTreeBuilder {
     if (myUpdatable != updatable) {
       myUpdatable = updatable;
       if (updatable) {
-        DumbService.getInstance(myProject).runWhenSmart(new Runnable() {
-          @Override
-          public void run() {
-            updateTree(false);
-          }
-        });
+        DumbService.getInstance(myProject).runWhenSmart(() -> updateTree(false));
       }
     }
   }
@@ -188,22 +183,19 @@ public abstract class TodoTreeBuilder extends AbstractTreeBuilder {
       protected ActionCallback beforeUpdate(final TreeUpdatePass pass) {
         if (!myDirtyFileSet.isEmpty()) { // suppress redundant cache validations
           final AsyncResult callback = new AsyncResult();
-          DumbService.getInstance(myProject).runWhenSmart(new Runnable() {
-            @Override
-            public void run() {
-              try {
-                validateCache();
-                getTodoTreeStructure().validateCache();
-              }
-              finally {
-                callback.setDone();
-              }
+          DumbService.getInstance(myProject).runWhenSmart(() -> {
+            try {
+              validateCache();
+              getTodoTreeStructure().validateCache();
+            }
+            finally {
+              callback.setDone();
             }
           });
           return callback;
         }
 
-        return new ActionCallback.Done();
+        return ActionCallback.DONE;
       }
     };
   }
@@ -362,12 +354,9 @@ public abstract class TodoTreeBuilder extends AbstractTreeBuilder {
     myDirtyFileSet.clear();
     myFile2Highlighter.clear();
 
-    collectFiles(new Processor<VirtualFile>() {
-      @Override
-      public boolean process(VirtualFile virtualFile) {
-        myFileTree.add(virtualFile);
-        return true;
-      }
+    collectFiles(virtualFile -> {
+      myFileTree.add(virtualFile);
+      return true;
     });
     getTodoTreeStructure().validateCache();
   }
@@ -555,7 +544,10 @@ public abstract class TodoTreeBuilder extends AbstractTreeBuilder {
    */
   void setTodoFilter(TodoFilter filter) {
     getTodoTreeStructure().setTodoFilter(filter);
-    rebuildCache();
+    try {
+      rebuildCache();
+    }
+    catch (IndexNotReadyException ignored) {}
     updateTree(false);
   }
 
@@ -816,17 +808,7 @@ public abstract class TodoTreeBuilder extends AbstractTreeBuilder {
       String propertyName = e.getPropertyName();
       if (propertyName.equals(PsiTreeChangeEvent.PROP_ROOTS)) { // rebuild all tree when source roots were changed
         getUpdater().runBeforeUpdate(
-          new Runnable() {
-            @Override
-            public void run() {
-              DumbService.getInstance(myProject).runWhenSmart(new Runnable() {
-                @Override
-                public void run() {
-                  rebuildCache();
-                }
-              });
-            }
-          }
+          () -> DumbService.getInstance(myProject).runWhenSmart(() -> rebuildCache())
         );
         updateTree(true);
       }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,6 +37,7 @@ import com.intellij.psi.codeStyle.JavaCodeStyleManager;
 import com.intellij.psi.codeStyle.VariableKind;
 import com.intellij.psi.scope.processor.VariablesProcessor;
 import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.util.PsiTypesUtil;
 import com.intellij.psi.util.TypeConversionUtil;
 import com.intellij.refactoring.JavaRefactoringSettings;
 import com.intellij.refactoring.RefactoringActionHandler;
@@ -46,6 +47,7 @@ import com.intellij.refactoring.rename.inplace.VariableInplaceRenamer;
 import com.intellij.refactoring.ui.TypeSelectorManagerImpl;
 import com.intellij.refactoring.util.RefactoringUtil;
 import com.intellij.ui.NonFocusableCheckBox;
+import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -209,14 +211,12 @@ public class JavaVariableInplaceIntroducer extends AbstractJavaInplaceIntroducer
     myEditor.getCaretModel().moveToOffset(startOffset);
     myEditor.getScrollingModel().scrollToCaret(ScrollType.MAKE_VISIBLE);
 
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      public void run() {
-        if (psiVariable.getInitializer() != null) {
-          appendTypeCasts(getOccurrenceMarkers(), file, myProject, psiVariable);
-        }
-        if (myConflictResolver != null && myInsertedName != null && isIdentifier(myInsertedName, psiVariable.getLanguage())) {
-          myConflictResolver.apply(psiVariable.getName());
-        }
+    ApplicationManager.getApplication().runWriteAction(() -> {
+      if (psiVariable.getInitializer() != null) {
+        appendTypeCasts(getOccurrenceMarkers(), file, myProject, psiVariable);
+      }
+      if (myConflictResolver != null && myInsertedName != null && isIdentifier(myInsertedName, psiVariable.getLanguage())) {
+        myConflictResolver.apply(psiVariable.getName());
       }
     });
   }
@@ -246,7 +246,7 @@ public class JavaVariableInplaceIntroducer extends AbstractJavaInplaceIntroducer
         public void actionPerformed(ActionEvent e) {
           new WriteCommandAction(myProject, getCommandName(), getCommandName()) {
             @Override
-            protected void run(Result result) throws Throwable {
+            protected void run(@NotNull Result result) throws Throwable {
               PsiDocumentManager.getInstance(myProject).commitDocument(myEditor.getDocument());
               final PsiVariable variable = getVariable();
               if (variable != null) {
@@ -263,10 +263,12 @@ public class JavaVariableInplaceIntroducer extends AbstractJavaInplaceIntroducer
     panel.setBorder(null);
 
     if (myCanBeFinalCb != null) {
-      panel.add(myCanBeFinalCb, new GridBagConstraints(0, 1, 1, 1, 1, 0, GridBagConstraints.NORTHWEST, GridBagConstraints.HORIZONTAL, new Insets(5, 5, 5, 5), 0, 0));
+      panel.add(myCanBeFinalCb, new GridBagConstraints(0, 1, 1, 1, 1, 0, GridBagConstraints.NORTHWEST, GridBagConstraints.HORIZONTAL,
+                                                       JBUI.insets(5), 0, 0));
     }
 
-    panel.add(Box.createVerticalBox(), new GridBagConstraints(0, 2, 1, 1, 1, 1, GridBagConstraints.NORTHWEST, GridBagConstraints.BOTH, new Insets(0,0,0,0), 0,0));
+    panel.add(Box.createVerticalBox(), new GridBagConstraints(0, 2, 1, 1, 1, 1, GridBagConstraints.NORTHWEST, GridBagConstraints.BOTH,
+                                                              JBUI.emptyInsets(), 0, 0));
 
     return panel;
   }
@@ -288,7 +290,7 @@ public class JavaVariableInplaceIntroducer extends AbstractJavaInplaceIntroducer
         LOG.assertTrue(expression.isValid(), expression.getText());
         stringUsages.add(Pair.<PsiElement, TextRange>create(expression, new TextRange(0, expression.getTextLength())));
       }
-    } else if (getExpr() != null && !myReplaceSelf) {
+    } else if (getExpr() != null && !myReplaceSelf && getExpr().getParent() != getVariable()) {
       final PsiExpression expr = getExpr();
       LOG.assertTrue(expr.isValid(), expr.getText());
       stringUsages.add(Pair.<PsiElement, TextRange>create(expr, new TextRange(0, expr.getTextLength())));
@@ -297,8 +299,11 @@ public class JavaVariableInplaceIntroducer extends AbstractJavaInplaceIntroducer
 
   @Override
   protected void addReferenceAtCaret(Collection<PsiReference> refs) {
-    if (!isReplaceAllOccurrences() && getExpr() == null && !myReplaceSelf) {
-      return;
+    if (!isReplaceAllOccurrences()) {
+      final PsiExpression expr = getExpr();
+      if (expr == null && !myReplaceSelf || expr != null && expr.getParent() == getVariable()) {
+        return;
+      }
     }
     super.addReferenceAtCaret(refs);
   }
@@ -340,10 +345,12 @@ public class JavaVariableInplaceIntroducer extends AbstractJavaInplaceIntroducer
     LOG.assertTrue(initializer != null);
     final PsiType type = psiVariable.getType();
     final PsiType initializerType = initializer.getType();
-    if (initializerType != null && !TypeConversionUtil.isAssignable(type, initializerType)) {
+    if (initializerType != null && 
+        !TypeConversionUtil.isAssignable(type, initializerType) &&
+        !PsiTypesUtil.hasUnresolvedComponents(type)) {
       final PsiElementFactory elementFactory = JavaPsiFacade.getElementFactory(project);
       final PsiExpression castExpr =
-        elementFactory.createExpressionFromText("(" + psiVariable.getType().getCanonicalText() + ")" + initializer.getText(), psiVariable);
+        elementFactory.createExpressionFromText("(" + type.getCanonicalText() + ")" + initializer.getText(), psiVariable);
       JavaCodeStyleManager.getInstance(project).shortenClassReferences(initializer.replace(castExpr));
     }
   }
@@ -378,12 +385,9 @@ public class JavaVariableInplaceIntroducer extends AbstractJavaInplaceIntroducer
     final int modifierListOffset = psiVariable.getTextRange().getStartOffset();
     final int varLineNumber = document.getLineNumber(modifierListOffset);
 
-    ApplicationManager.getApplication().runWriteAction(new Runnable() { //adjust line indent if final was inserted and then deleted
-
-      public void run() {
-        PsiDocumentManager.getInstance(psiVariable.getProject()).doPostponedOperationsAndUnblockDocument(document);
-        CodeStyleManager.getInstance(psiVariable.getProject()).adjustLineIndent(document, document.getLineStartOffset(varLineNumber));
-      }
+    ApplicationManager.getApplication().runWriteAction(() -> {
+      PsiDocumentManager.getInstance(psiVariable.getProject()).doPostponedOperationsAndUnblockDocument(document);
+      CodeStyleManager.getInstance(psiVariable.getProject()).adjustLineIndent(document, document.getLineStartOffset(varLineNumber));
     });
   }
 

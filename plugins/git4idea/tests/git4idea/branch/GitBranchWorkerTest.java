@@ -60,32 +60,21 @@ public class GitBranchWorkerTest extends GitPlatformTest {
   private List<GitRepository> myRepositories;
 
   public void setUp() throws Exception {
-    try {
-      super.setUp();
-    }
-    catch (Throwable t) {
-      super.tearDown();
-    }
+    super.setUp();
 
-    try {
-      cd(myProjectRoot);
-      File community = mkdir("community");
-      File contrib = mkdir("contrib");
+    cd(myProjectRoot);
+    File community = mkdir("community");
+    File contrib = mkdir("contrib");
 
-      myUltimate = createRepository(myProjectPath);
-      myCommunity = createRepository(community.getPath());
-      myContrib = createRepository(contrib.getPath());
-      myRepositories = Arrays.asList(myUltimate, myCommunity, myContrib);
+    myUltimate = createRepository(myProjectPath);
+    myCommunity = createRepository(community.getPath());
+    myContrib = createRepository(contrib.getPath());
+    myRepositories = Arrays.asList(myUltimate, myCommunity, myContrib);
 
-      cd(myProjectRoot);
-      touch(".gitignore", "community\ncontrib");
-      git("add .gitignore");
-      git("commit -m gitignore");
-    }
-    catch (Exception e) {
-      tearDown();
-      throw e;
-    }
+    cd(myProjectRoot);
+    touch(".gitignore", "community\ncontrib");
+    git("add .gitignore");
+    git("commit -m gitignore");
   }
 
   public void test_create_new_branch_without_problems() {
@@ -227,6 +216,52 @@ public class GitBranchWorkerTest extends GitPlatformTest {
     assertCurrentBranch(myUltimate, "feature");
     assertCurrentBranch(myCommunity, "master");
     assertCurrentBranch(myContrib, "master");
+  }
+
+  public void test_checkout_revision_checkout_branch_with_complete_success() {
+    branchWithCommit(myRepositories, "feature");
+
+    checkoutRevision("feature", new TestUiHandler());
+
+    assertDetachedState("feature");
+    assertEquals("Notification about successful branch checkout is incorrect", "Checked out " + bcode("feature"),
+                 myVcsNotifier.getLastNotification().getContent());
+  }
+
+  public void test_checkout_revision_checkout_ref_with_complete_success() {
+    branchWithCommit(myRepositories, "feature");
+
+    checkoutRevision("feature~1", new TestUiHandler());
+
+    assertDetachedState("master");
+    assertEquals("Notification about successful branch checkout is incorrect", "Checked out " + bcode("feature~1"),
+                 myVcsNotifier.getLastNotification().getContent());
+  }
+
+  public void test_checkout_revision_checkout_ref_with_complete_failure() {
+    branchWithCommit(myRepositories, "feature");
+
+    checkoutRevision("unknown_ref", new TestUiHandler());
+
+    assertCurrentBranch("master");
+    assertCurrentRevision("master");
+    assertEquals("Notification about successful branch checkout is incorrect", "Revision not found in project, community and contrib",
+                 myVcsNotifier.getLastNotification().getContent());
+  }
+
+  public void test_checkout_revision_checkout_ref_with_partial_success() {
+    branchWithCommit(ContainerUtil.list(myCommunity, myContrib), "feature");
+
+    checkoutRevision("feature", new TestUiHandler());
+
+    assertCurrentBranch(myUltimate, "master");
+    assertDetachedState(myCommunity, "feature");
+    assertDetachedState(myContrib, "feature");
+
+    assertEquals("Notification about successful branch checkout is incorrect",
+                 "Checked out " + bcode("feature") + " in community and contrib" + "<br>" +
+                 "Revision not found in project" + "<br><a href='rollback'>Rollback</a>",
+                 myVcsNotifier.getLastNotification().getContent());
   }
 
   public void test_checkout_with_untracked_files_overwritten_by_checkout_in_first_repo_should_show_notification() {
@@ -463,7 +498,7 @@ public class GitBranchWorkerTest extends GitPlatformTest {
     // IDEA-99849
     prepareLocalChangesOverwrittenBy(myUltimate);
 
-    GitBranchWorker brancher = new GitBranchWorker(myProject, myPlatformFacade, myGit, new TestUiHandler() {
+    GitBranchWorker brancher = new GitBranchWorker(myProject, myGit, new TestUiHandler() {
       @Override
       public int showSmartOperationDialog(@NotNull Project project,
                                           @NotNull List<Change> changes,
@@ -491,7 +526,7 @@ public class GitBranchWorkerTest extends GitPlatformTest {
     unmergedFiles(myCommunity);
 
     final Ref<Boolean> rollbackProposed = Ref.create(false);
-    GitBranchWorker brancher = new GitBranchWorker(myProject, myPlatformFacade, myGit, new TestUiHandler() {
+    GitBranchWorker brancher = new GitBranchWorker(myProject, myGit, new TestUiHandler() {
       @Override
       public boolean showUnmergedFilesMessageWithRollback(@NotNull String operationName, @NotNull String rollbackProposal) {
         rollbackProposed.set(true);
@@ -660,7 +695,7 @@ public class GitBranchWorkerTest extends GitPlatformTest {
 
     // delete feature fully merged to current HEAD, but not to the upstream
     final Ref<Boolean> dialogShown = Ref.create(false);
-    GitBranchWorker brancher = new GitBranchWorker(myProject, myPlatformFacade, myGit, new TestUiHandler() {
+    GitBranchWorker brancher = new GitBranchWorker(myProject, myGit, new TestUiHandler() {
       @Override
       public boolean showBranchIsNotFullyMergedDialog(@NotNull Project project,
                                                       @NotNull Map<GitRepository, List<GitCommit>> history,
@@ -818,14 +853,40 @@ public class GitBranchWorkerTest extends GitPlatformTest {
     assertCurrentBranch(myContrib, "master");
   }
 
+  static private void assertDetachedState(GitRepository repository, String reference) {
+    assertCurrentRevision(repository, reference);
+
+    String curBranch = getCurrentBranch(repository);
+    boolean isDetached = curBranch.contains("detached");
+    assertTrue("Current branch is not detached in ${repository} - " + curBranch, isDetached);
+  }
+
   static private void assertCurrentBranch(GitRepository repository, String name) {
-    String curBranch = ObjectUtils.assertNotNull(ContainerUtil.find(git(repository, "branch").split("\n"), new Condition<String>() {
+    String curBranch = getCurrentBranch(repository);
+    assertEquals("Current branch is incorrect in ${repository}", name, curBranch);
+  }
+
+  @NotNull
+  private static String getCurrentBranch(GitRepository repository) {
+    return ObjectUtils.assertNotNull(ContainerUtil.find(git(repository, "branch").split("\n"), new Condition<String>() {
       @Override
       public boolean value(String s) {
         return s.contains("*");
       }
     })).replace('*', ' ').trim();
-    assertEquals("Current branch is incorrect in ${repository}", name, curBranch);
+  }
+
+  static private void assertCurrentRevision(GitRepository repository, String reference) {
+    String expectedRef = git(repository, "rev-parse " + "HEAD");
+    String currentRef = git(repository, "rev-parse " + reference);
+
+    assertEquals("Current revision is incorrect in ${repository}", expectedRef, currentRef);
+  }
+
+  private void assertDetachedState(String reference) {
+    for (GitRepository repository : myRepositories) {
+      assertDetachedState(repository, reference);
+    }
   }
 
   private void assertCurrentBranch(String name) {
@@ -834,23 +895,34 @@ public class GitBranchWorkerTest extends GitPlatformTest {
     }
   }
 
+  private void assertCurrentRevision(String reference) {
+    for (GitRepository repository : myRepositories) {
+      assertCurrentRevision(repository, reference);
+    }
+  }
+
   private void checkoutNewBranch(String name, GitBranchUiHandler uiHandler) {
-    GitBranchWorker brancher = new GitBranchWorker(myProject, myPlatformFacade, myGit, uiHandler);
+    GitBranchWorker brancher = new GitBranchWorker(myProject, myGit, uiHandler);
     brancher.checkoutNewBranch(name, myRepositories);
   }
 
   private void checkoutBranch(String name, GitBranchUiHandler uiHandler) {
-    GitBranchWorker brancher = new GitBranchWorker(myProject, myPlatformFacade, myGit, uiHandler);
+    GitBranchWorker brancher = new GitBranchWorker(myProject, myGit, uiHandler);
     brancher.checkout(name, false, myRepositories);
   }
 
+  private void checkoutRevision(String reference, GitBranchUiHandler uiHandler) {
+    GitBranchWorker brancher = new GitBranchWorker(myProject, myGit, uiHandler);
+    brancher.checkout(reference, true, myRepositories);
+  }
+
   private void mergeBranch(String name, GitBranchUiHandler uiHandler) {
-    GitBranchWorker brancher = new GitBranchWorker(myProject, myPlatformFacade, myGit, uiHandler);
+    GitBranchWorker brancher = new GitBranchWorker(myProject, myGit, uiHandler);
     brancher.merge(name, GitBrancher.DeleteOnMergeOption.PROPOSE, myRepositories);
   }
 
   private void deleteBranch(String name, GitBranchUiHandler uiHandler) {
-    GitBranchWorker brancher = new GitBranchWorker(myProject, myPlatformFacade, myGit, uiHandler);
+    GitBranchWorker brancher = new GitBranchWorker(myProject, myGit, uiHandler);
     brancher.deleteBranch(name, myRepositories);
   }
 

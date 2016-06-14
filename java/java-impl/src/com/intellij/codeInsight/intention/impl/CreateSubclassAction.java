@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -145,7 +145,7 @@ public class CreateSubclassAction extends BaseIntentionAction {
   public static void createInnerClass(final PsiClass aClass) {
     new WriteCommandAction(aClass.getProject(), getTitle(aClass), getTitle(aClass)) {
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         final PsiClass containingClass = aClass.getContainingClass();
         LOG.assertTrue(containingClass != null);
 
@@ -197,7 +197,7 @@ public class CreateSubclassAction extends BaseIntentionAction {
     final PsiClass[] targetClass = new PsiClass[1];
     new WriteCommandAction(project, getTitle(psiClass), getTitle(psiClass)) {
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         IdeDocumentHistory.getInstance(project).includeCurrentPlaceAsChangePlace();
 
         final PsiTypeParameterList oldTypeParameterList = psiClass.getTypeParameterList();
@@ -206,14 +206,10 @@ public class CreateSubclassAction extends BaseIntentionAction {
           targetClass[0] = JavaDirectoryService.getInstance().createClass(targetDirectory, className);
         }
         catch (final IncorrectOperationException e) {
-          ApplicationManager.getApplication().invokeLater(new Runnable() {
-            @Override
-            public void run() {
-              Messages.showErrorDialog(project, CodeInsightBundle.message("intention.error.cannot.create.class.message", className) +
-                                                "\n"+e.getLocalizedMessage(),
-                                       CodeInsightBundle.message("intention.error.cannot.create.class.title"));
-            }
-          });
+          ApplicationManager.getApplication().invokeLater(
+            () -> Messages.showErrorDialog(project, CodeInsightBundle.message("intention.error.cannot.create.class.message", className) +
+                                                  "\n" + e.getLocalizedMessage(),
+                                         CodeInsightBundle.message("intention.error.cannot.create.class.title")));
           return;
         }
         startTemplate(oldTypeParameterList, project, psiClass, targetClass[0], false);
@@ -222,7 +218,7 @@ public class CreateSubclassAction extends BaseIntentionAction {
     if (targetClass[0] == null) return null;
     if (!ApplicationManager.getApplication().isUnitTestMode() && !psiClass.hasTypeParameters()) {
 
-      final Editor editor = CodeInsightUtil.positionCursor(project, targetClass[0].getContainingFile(), targetClass[0].getLBrace());
+      final Editor editor = CodeInsightUtil.positionCursorAtLBrace(project, targetClass[0].getContainingFile(), targetClass[0]);
       if (editor == null) return targetClass[0];
 
       chooseAndImplement(psiClass, project, targetClass[0], editor);
@@ -245,7 +241,7 @@ public class CreateSubclassAction extends BaseIntentionAction {
         ref = (PsiJavaCodeReferenceElement)targetClass.getExtendsList().add(ref);
       }
       if (psiClass.hasTypeParameters() || includeClassName) {
-        final Editor editor = CodeInsightUtil.positionCursor(project, targetClass.getContainingFile(), targetClass.getLBrace());
+        final Editor editor = CodeInsightUtil.positionCursorAtLBrace(project, targetClass.getContainingFile(), targetClass);
         final TemplateBuilderImpl templateBuilder = editor != null
                    ? (TemplateBuilderImpl)TemplateBuilderFactory.getInstance().createTemplateBuilder(targetClass) : null;
 

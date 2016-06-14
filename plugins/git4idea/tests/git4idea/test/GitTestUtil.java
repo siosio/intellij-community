@@ -15,9 +15,13 @@
  */
 package git4idea.test;
 
+import com.intellij.notification.Notification;
+import com.intellij.notification.NotificationType;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.ServiceManager;
+import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.ProjectLevelVcsManager;
 import com.intellij.openapi.vcs.impl.ProjectLevelVcsManagerImpl;
@@ -25,16 +29,20 @@ import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.vcs.log.VcsLogObjectsFactory;
+import com.intellij.vcs.log.VcsLogProvider;
 import com.intellij.vcs.log.VcsRef;
+import com.intellij.vcs.log.impl.VcsLogManager;
 import git4idea.GitUtil;
 import git4idea.GitVcs;
 import git4idea.config.GitVersion;
+import git4idea.log.GitLogProvider;
 import git4idea.repo.GitRepository;
 import org.jetbrains.annotations.NotNull;
 import org.picocontainer.MutablePicoContainer;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.List;
 import java.util.Set;
 
 import static com.intellij.openapi.vcs.Executor.append;
@@ -43,6 +51,7 @@ import static com.intellij.openapi.vcs.Executor.mkdir;
 import static com.intellij.openapi.vcs.Executor.touch;
 import static git4idea.test.GitExecutor.*;
 import static junit.framework.Assert.assertNotNull;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assume.assumeTrue;
 
@@ -75,10 +84,10 @@ public class GitTestUtil {
     }
   }
 
-  private static void initRepo(@NotNull String repoRoot, boolean makeInitialCommit) {
+  public static void initRepo(@NotNull String repoRoot, boolean makeInitialCommit) {
     cd(repoRoot);
     git("init");
-    setupUsername();
+    setupDefaultUsername();
     if (makeInitialCommit) {
       touch("initial.txt");
       git("add initial.txt");
@@ -86,9 +95,25 @@ public class GitTestUtil {
     }
   }
 
-  public static void setupUsername() {
-    git("config user.name '" + USER_NAME + "'");
-    git("config user.email '" + USER_EMAIL + "'");
+  public static void cloneRepo(@NotNull String source, @NotNull String destination, boolean bare) {
+    cd(source);
+    if (bare) {
+      git("clone --bare -- . " + destination);
+    }
+    else {
+      git("clone -- . " + destination);
+    }
+  }
+
+  public static void setupDefaultUsername() {
+    setupUsername(USER_NAME, USER_EMAIL);
+  }
+
+  public static void setupUsername(@NotNull String name, @NotNull String email) {
+    assertFalse("Can not set empty user name ", name.isEmpty());
+    assertFalse("Can not set empty user email ", email.isEmpty());
+    git("config user.name '" + name + "'");
+    git("config user.email '" + email + "'");
   }
 
   /**
@@ -125,6 +150,7 @@ public class GitTestUtil {
   }
 
   @SuppressWarnings("unchecked")
+  @NotNull
   public static <T> T overrideService(@NotNull Project project, Class<? super T> serviceInterface, Class<T> serviceImplementation) {
     String key = serviceInterface.getName();
     MutablePicoContainer picoContainer = (MutablePicoContainer) project.getPicoContainer();
@@ -134,6 +160,7 @@ public class GitTestUtil {
   }
 
   @SuppressWarnings("unchecked")
+  @NotNull
   public static <T> T overrideService(Class<? super T> serviceInterface, Class<T> serviceImplementation) {
     String key = serviceInterface.getName();
     MutablePicoContainer picoContainer = (MutablePicoContainer) ApplicationManager.getApplication().getPicoContainer();
@@ -157,5 +184,36 @@ public class GitTestUtil {
     append(file, "some content");
     addCommit("some message");
     return last();
+  }
+
+  public static void assertNotification(@NotNull NotificationType type,
+                                        @NotNull String title,
+                                        @NotNull String content,
+                                        @NotNull Notification actual) {
+    assertEquals("Incorrect notification type: " + tos(actual), type, actual.getType());
+    assertEquals("Incorrect notification title: " + tos(actual), title, actual.getTitle());
+    assertEquals("Incorrect notification content: " + tos(actual), cleanupForAssertion(content), cleanupForAssertion(actual.getContent()));
+  }
+
+  @NotNull
+  public static String cleanupForAssertion(@NotNull String content) {
+    return content.replace("<br/>", "\n").replace("\n", " ").replaceAll("[ ]{2,}", " ").replaceAll(" href='[^']*'", "").trim();
+  }
+
+  @NotNull
+  private static String tos(@NotNull Notification notification) {
+    return notification.getTitle() + "|" + notification.getContent();
+  }
+
+  public static GitLogProvider findGitLogProvider(@NotNull Project project) {
+    List<VcsLogProvider> providers =
+      ContainerUtil.filter(Extensions.getExtensions(VcsLogManager.LOG_PROVIDER_EP, project), new Condition<VcsLogProvider>() {
+        @Override
+        public boolean value(VcsLogProvider provider) {
+          return provider.getSupportedVcs().equals(GitVcs.getKey());
+        }
+      });
+    assertEquals("Incorrect number of GitLogProviders", 1, providers.size());
+    return (GitLogProvider)providers.get(0);
   }
 }

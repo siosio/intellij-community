@@ -44,13 +44,14 @@ public class DataFlowInspectionTestSuite {
     suite.addTestSuite(NormalCompletionDfaTest.class);
 
     suite.addTestSuite(NullableStuffInspectionTest.class);
-    suite.addTestSuite(NullableStuffInspection14Test.class);
+    suite.addTestSuite(NullableStuffInspectionAncientTest.class);
 
     suite.addTestSuite(AddAssertStatementFixTest.class);
     suite.addTestSuite(SurroundWithIfFixTest.class);
     suite.addTestSuite(ReplaceWithTernaryOperatorTest.class);
     suite.addTestSuite(ReplaceWithOfNullableFixTest.class);
     suite.addTestSuite(ReplaceFromOfNullableFixTest.class);
+    suite.addTestSuite(UnwrapIfStatementFixTest.class);
     return suite;
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -79,14 +79,11 @@ public abstract class BaseProjectViewTestCase extends TestSourceBasedTestCase {
   }
 
   public static void checkContainsMethod(final Object rootElement, final AbstractTreeStructure structure) {
-    ProjectViewTestUtil.checkContainsMethod(rootElement, structure, new Function<AbstractTreeNode, VirtualFile[]>() {
-      @Override
-      public VirtualFile[] fun(AbstractTreeNode kid) {
-        if (kid instanceof PackageElementNode) {
-          return ((PackageElementNode)kid).getVirtualFiles();
-        }
-        return null;
+    ProjectViewTestUtil.checkContainsMethod(rootElement, structure, kid -> {
+      if (kid instanceof PackageElementNode) {
+        return ((PackageElementNode)kid).getVirtualFiles();
       }
+      return null;
     });
   }
 
@@ -108,8 +105,4 @@ public abstract class BaseProjectViewTestCase extends TestSourceBasedTestCase {
     return PathManagerEx.getTestDataPath(getClass());
   }
 
-  @Override
-  protected boolean isRunInWriteAction() {
-    return false;
-  }
 }

@@ -86,14 +86,10 @@ public class GrCreateSubclassAction extends CreateSubclassAction {
           targetClass.set(CreateClassActionBase.createClassByType(targetDirectory, className, PsiManager.getInstance(project), psiClass, GroovyTemplates.GROOVY_CLASS, true));
         }
         catch (final IncorrectOperationException e) {
-          ApplicationManager.getApplication().invokeLater(new Runnable() {
-            @Override
-            public void run() {
-              Messages.showErrorDialog(project, CodeInsightBundle.message("intention.error.cannot.create.class.message", className) +
-                                                "\n" + e.getLocalizedMessage(),
-                                       CodeInsightBundle.message("intention.error.cannot.create.class.title"));
-            }
-          });
+          ApplicationManager.getApplication().invokeLater(
+            () -> Messages.showErrorDialog(project, CodeInsightBundle.message("intention.error.cannot.create.class.message", className) +
+                                                  "\n" + e.getLocalizedMessage(),
+                                         CodeInsightBundle.message("intention.error.cannot.create.class.title")));
           return;
         }
         startTemplate(oldTypeParameterList, project, psiClass, targetClass.get(), false);
@@ -103,7 +99,7 @@ public class GrCreateSubclassAction extends CreateSubclassAction {
     if (targetClass.get() == null) return null;
     if (!ApplicationManager.getApplication().isUnitTestMode() && !psiClass.hasTypeParameters()) {
 
-      final Editor editor = CodeInsightUtil.positionCursor(project, targetClass.get().getContainingFile(), targetClass.get().getLBrace());
+      final Editor editor = CodeInsightUtil.positionCursorAtLBrace(project, targetClass.get().getContainingFile(), targetClass.get());
       if (editor == null) return targetClass.get();
       chooseAndImplement(psiClass, project, targetClass.get(), editor);
     }
@@ -128,7 +124,7 @@ public class GrCreateSubclassAction extends CreateSubclassAction {
       GrCodeReferenceElement ref = (GrCodeReferenceElement)clause.add(stubRef);
 
       if (psiClass.hasTypeParameters() || includeClassName) {
-        final Editor editor = CodeInsightUtil.positionCursor(project, targetClass.getContainingFile(), targetClass.getLBrace());
+        final Editor editor = CodeInsightUtil.positionCursorAtLBrace(project, targetClass.getContainingFile(), targetClass);
         final TemplateBuilderImpl templateBuilder = editor == null || ApplicationManager.getApplication().isUnitTestMode() ? null
                                                     : (TemplateBuilderImpl)TemplateBuilderFactory.getInstance().createTemplateBuilder(targetClass);
 

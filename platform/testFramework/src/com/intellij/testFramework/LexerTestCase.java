@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.tree.IElementType;
+import com.intellij.psi.tree.TokenSet;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -32,7 +33,6 @@ import java.io.IOException;
  * @author peter
  */
 public abstract class LexerTestCase extends UsefulTestCase {
-
   protected void doTest(@NonNls String text) {
     doTest(text, null);
   }
@@ -49,6 +49,22 @@ public abstract class LexerTestCase extends UsefulTestCase {
     }
     else {
       assertSameLinesWithFile(PathManager.getHomePath() + "/" + getDirPath() + "/" + getTestName(true) + ".txt", result);
+    }
+  }
+
+  protected void checkZeroState(String text, TokenSet tokenTypes) {
+    Lexer lexer = createLexer();
+    lexer.start(text);
+
+    while (true) {
+      IElementType type = lexer.getTokenType();
+      if (type == null) {
+        break;
+      }
+      if (tokenTypes.contains(type) && lexer.getState() != 0) {
+        fail("Non-zero lexer state on token \"" + lexer.getTokenText() + "\" (" + type + ") at " + lexer.getTokenStart());
+      }
+      lexer.advance();
     }
   }
 
@@ -80,19 +96,13 @@ public abstract class LexerTestCase extends UsefulTestCase {
 
   public static String printTokens(CharSequence text, int start, Lexer lexer) {
     lexer.start(text, start, text.length());
-    String result = "";
-    while (true) {
-      IElementType tokenType = lexer.getTokenType();
-      if (tokenType == null) {
-        break;
-      }
-      String tokenText = getTokenText(lexer);
-      String tokenTypeName = tokenType.toString();
-      String line = tokenTypeName + " ('" + tokenText + "')\n";
-      result += line;
+    StringBuilder result = new StringBuilder();
+    IElementType tokenType;
+    while ((tokenType = lexer.getTokenType()) != null) {
+      result.append(tokenType).append(" ('").append(getTokenText(lexer)).append("')\n");
       lexer.advance();
     }
-    return result;
+    return result.toString();
   }
 
   protected void doFileTest(@NonNls String fileExt) {

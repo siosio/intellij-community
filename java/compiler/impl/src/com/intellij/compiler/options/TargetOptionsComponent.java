@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,9 +21,12 @@ import com.intellij.openapi.module.ModuleType;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ui.configuration.ChooseModulesDialog;
 import com.intellij.openapi.ui.ComboBox;
+import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.pom.java.LanguageLevel;
 import com.intellij.ui.*;
 import com.intellij.ui.table.JBTable;
 import com.intellij.util.ui.ItemRemovable;
+import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
@@ -40,13 +43,25 @@ import java.util.List;
  *         Date: 5/9/12
  */
 public class TargetOptionsComponent extends JPanel {
-  private static final String[] KNOWN_TARGETS = new String[] {"1.1", "1.2", "1.3","1.4","1.5", "1.6", "1.7", "1.8"};
+  private static final String[] KNOWN_TARGETS;
   private static final String COMPILER_DEFAULT = "Same as language level";
 
   private ComboBox myCbProjectTargetLevel;
   private JBTable myTable;
   private final Project myProject;
-
+  
+  static {
+    List<String> targets = new ArrayList<String>();
+    targets.add("1.1");
+    targets.add("1.2");
+    for (LanguageLevel level : LanguageLevel.values()) {
+      final String target = level.getCompilerComplianceDefaultOption();
+      if (!StringUtil.isEmptyOrSpaces(target)) {
+        targets.add(target);
+      }
+    }
+    KNOWN_TARGETS = targets.toArray(new String[targets.size()]);
+  }
   public TargetOptionsComponent(Project project) {
     super(new GridBagLayout());
     myProject = project;
@@ -73,7 +88,7 @@ public class TargetOptionsComponent extends JPanel {
 
     new TableSpeedSearch(myTable);
 
-    add(new JLabel("Project bytecode version (leave blank for JDK default): "),
+    add(new JLabel("Project bytecode version: "),
         constraints(0, 0, 1, 1, 0.0, 0.0, GridBagConstraints.NONE));
     add(myCbProjectTargetLevel, constraints(1, 0, 1, 1, 1.0, 0.0, GridBagConstraints.NONE));
     add(new JLabel("Per-module bytecode version:"), constraints(0, 1, 2, 1, 1.0, 0.0, GridBagConstraints.NONE));
@@ -117,12 +132,7 @@ public class TargetOptionsComponent extends JPanel {
         it.remove();
       }
     }
-    Collections.sort(items, new Comparator<Module>() {
-      @Override
-      public int compare(Module o1, Module o2) {
-        return o1.getName().compareTo(o2.getName());
-      }
-    });
+    Collections.sort(items, (o1, o2) -> o1.getName().compareTo(o2.getName()));
     final ChooseModulesDialog chooser = new ChooseModulesDialog(this, items, "Choose module");
     chooser.show();
     final List<Module> elements = chooser.getChosenElements();
@@ -167,7 +177,7 @@ public class TargetOptionsComponent extends JPanel {
   }
 
   private static GridBagConstraints constraints(final int gridx, final int gridy, final int gridwidth, final int gridheight, final double weightx, final double weighty, final int fill) {
-    return new GridBagConstraints(gridx, gridy, gridwidth, gridheight, weightx, weighty, GridBagConstraints.WEST, fill, new Insets(5, 5, 0, 0), 0, 0);
+    return new GridBagConstraints(gridx, gridy, gridwidth, gridheight, weightx, weighty, GridBagConstraints.WEST, fill, JBUI.insets(5, 5, 0, 0), 0, 0);
   }
 
   private static final class TargetLevelTableModel extends AbstractTableModel implements ItemRemovable{
@@ -215,12 +225,7 @@ public class TargetOptionsComponent extends JPanel {
     }
 
     private void sorItems() {
-      Collections.sort(myItems, new Comparator<Item>() {
-        @Override
-        public int compare(Item o1, Item o2) {
-          return o1.module.getName().compareTo(o2.module.getName());
-        }
-      });
+      Collections.sort(myItems, (o1, o2) -> o1.module.getName().compareTo(o2.module.getName()));
     }
 
     public List<Item> getItems() {
@@ -272,7 +277,6 @@ public class TargetOptionsComponent extends JPanel {
     private String mySelectedItem = "";
 
     TargetLevelComboboxModel() {
-      //myOptions.add("");
       for (int i = KNOWN_TARGETS.length - 1; i >= 0; i--) {
         myOptions.add(KNOWN_TARGETS[i]);
       }
@@ -329,7 +333,9 @@ public class TargetOptionsComponent extends JPanel {
     combo.setEditor(new BasicComboBoxEditor() {
       @Override
       protected JTextField createEditorComponent() {
-        return new HintTextField(COMPILER_DEFAULT, 12);
+        HintTextField editor = new HintTextField(COMPILER_DEFAULT, 12);
+        editor.setBorder(null);
+        return editor;
       }
     });
     return combo;

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ApplicationInfo;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ApplicationNamesInfo;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.ex.ApplicationEx;
 import com.intellij.openapi.ui.DialogWrapper;
@@ -32,6 +33,7 @@ import com.intellij.ui.*;
 import com.intellij.ui.table.JBTable;
 import com.intellij.util.PlatformIcons;
 import com.intellij.util.ui.UIUtil;
+import com.intellij.xml.util.XmlStringUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -92,6 +94,8 @@ public class RegistryUi implements Disposable {
     myTable.setStriped(true);
 
     myDescriptionLabel = new JTextArea(3, 50);
+    myDescriptionLabel.setWrapStyleWord(true);
+    myDescriptionLabel.setLineWrap(true);
     myDescriptionLabel.setEditable(false);
     final JScrollPane label = ScrollPaneFactory.createScrollPane(myDescriptionLabel);
     final JPanel descriptionPanel = new JPanel(new BorderLayout());
@@ -167,7 +171,7 @@ public class RegistryUi implements Disposable {
     public void update(AnActionEvent e) {
       e.getPresentation().setEnabled(!myTable.isEditing() && myTable.getSelectedRow() >= 0);
       e.getPresentation().setText("Revert to Default");
-      e.getPresentation().setIcon(AllIcons.General.Remove);
+      e.getPresentation().setIcon(AllIcons.General.Reset);
 
       if (e.getPresentation().isEnabled()) {
         final RegistryValue rv = myModel.getRegistryValue(myTable.getSelectedRow());
@@ -206,12 +210,9 @@ public class RegistryUi implements Disposable {
 
   private void startEditingAtSelection() {
     myTable.editCellAt(myTable.getSelectedRow(), 2);
-    SwingUtilities.invokeLater(new Runnable() {
-      @Override
-      public void run() {
-        if (myTable.isEditing()) {
-          myTable.getEditorComponent().requestFocus();
-        }
+    SwingUtilities.invokeLater(() -> {
+      if (myTable.isEditing()) {
+        myTable.getEditorComponent().requestFocus();
       }
     });
   }
@@ -224,20 +225,17 @@ public class RegistryUi implements Disposable {
       myAll = Registry.getAll();
       final List<String> recent = getRecent();
 
-      Collections.sort(myAll, new Comparator<RegistryValue>() {
-        @Override
-        public int compare(@NotNull RegistryValue o1, @NotNull RegistryValue o2) {
-          final String key1 = o1.getKey();
-          final String key2 = o2.getKey();
-          final int i1 = recent.indexOf(key1);
-          final int i2 = recent.indexOf(key2);
-          final boolean c1 = i1 != -1;
-          final boolean c2 = i2 != -1;
-          if (c1 && !c2) return -1;
-          if (!c1 && c2) return 1;
-          if (c1 && c2) return i1 - i2;
-          return key1.compareToIgnoreCase(key2);
-        }
+      Collections.sort(myAll, (o1, o2) -> {
+        final String key1 = o1.getKey();
+        final String key2 = o2.getKey();
+        final int i1 = recent.indexOf(key1);
+        final int i2 = recent.indexOf(key2);
+        final boolean c1 = i1 != -1;
+        final boolean c2 = i2 != -1;
+        if (c1 && !c2) return -1;
+        if (!c1 && c2) return 1;
+        if (c1 && c2) return i1 - i2;
+        return key1.compareToIgnoreCase(key2);
       });
     }
 
@@ -289,8 +287,7 @@ public class RegistryUi implements Disposable {
     final List<String> recent = getRecent();
     recent.remove(key);
     recent.add(0, key);
-    final String newValue = StringUtil.join(recent, "=");
-    PropertiesComponent.getInstance().setValue(RECENT_PROPERTIES_KEY, newValue);
+    PropertiesComponent.getInstance().setValue(RECENT_PROPERTIES_KEY, StringUtil.join(recent, "="), "");
   }
 
   public boolean show() {
@@ -303,6 +300,19 @@ public class RegistryUi implements Disposable {
       }
 
       private AbstractAction myCloseAction;
+
+      @Nullable
+      @Override
+      protected JComponent createNorthPanel() {
+        if (!ApplicationManager.getApplication().isInternal()) {
+          JLabel warningLabel = new JLabel(XmlStringUtil.wrapInHtml("<b>Changing these values may cause unwanted behavior of " +
+                                                                    ApplicationNamesInfo.getInstance().getFullProductName() + ". Please do not change these unless you have been asked.</b>"));
+          warningLabel.setIcon(UIUtil.getWarningIcon());
+          warningLabel.setForeground(JBColor.RED);
+          return warningLabel;
+        }
+        return null;
+      }
 
       @Override
       protected JComponent createCenterPanel() {
@@ -371,12 +381,7 @@ public class RegistryUi implements Disposable {
 
 
       if (r == Messages.OK) {
-        ApplicationManager.getApplication().invokeLater(new Runnable() {
-          @Override
-          public void run() {
-            app.restart(true);
-          }
-        }, ModalityState.NON_MODAL);
+        ApplicationManager.getApplication().invokeLater(() -> app.restart(true), ModalityState.NON_MODAL);
       }
     }
   }
@@ -409,7 +414,7 @@ public class RegistryUi implements Disposable {
       myLabel.setIcon(null);
       myLabel.setText(null);
       myLabel.setHorizontalAlignment(SwingConstants.LEFT);
-      Color fg = isSelected ? table.getSelectionForeground() : table.getForeground();
+      Color fg = isSelected ? table.getSelectionForeground() : v.isChangedFromDefault() ? JBColor.blue : table.getForeground();
       Color bg = isSelected ? table.getSelectionBackground() : table.getBackground();
       
       if (v != null) {

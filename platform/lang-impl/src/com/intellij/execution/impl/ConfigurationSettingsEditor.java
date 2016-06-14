@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,16 +21,19 @@ import com.intellij.execution.configurations.ConfigurationPerRunnerSettings;
 import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.execution.configurations.RunnerSettings;
 import com.intellij.execution.runners.ProgramRunner;
+import com.intellij.execution.ui.AdjustingTabSettingsEditor;
 import com.intellij.openapi.options.*;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Pair;
 import com.intellij.ui.ColoredListCellRenderer;
 import com.intellij.ui.IdeBorderFactory;
-import com.intellij.ui.ListScrollingUtil;
+import com.intellij.ui.ScrollingUtil;
 import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.Convertor;
+import com.intellij.util.ui.update.Activatable;
+import com.intellij.util.ui.update.UiNotifyConnector;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
@@ -187,13 +190,8 @@ public class ConfigurationSettingsEditor extends CompositeSettingsEditor<RunnerA
 
   public <T extends SettingsEditor> T selectExecutorAndGetEditor(final ProgramRunner runner, Class<T> editorClass) {
     myGroupSettingsBuilder.selectEditor(RUNNERS_TAB_NAME);
-    Executor executor = ContainerUtil.find(myRunnersComponent.getExecutors(), new Condition<Executor>() {
-
-      @Override
-      public boolean value(Executor executor) {
-        return runner.equals(RunnerRegistry.getInstance().getRunner(executor.getId(), myConfiguration));
-      }
-    });
+    Executor executor = ContainerUtil.find(myRunnersComponent.getExecutors(),
+                                           executor1 -> runner.equals(RunnerRegistry.getInstance().getRunner(executor1.getId(), myConfiguration)));
     if (executor == null) {
       return null;
     }
@@ -258,7 +256,7 @@ public class ConfigurationSettingsEditor extends CompositeSettingsEditor<RunnerA
       updateRunnerComponent();
       myRunnersList.setCellRenderer(new ColoredListCellRenderer() {
         @Override
-        protected void customizeCellRenderer(JList list, Object value, int index, boolean selected, boolean hasFocus) {
+        protected void customizeCellRenderer(@NotNull JList list, Object value, int index, boolean selected, boolean hasFocus) {
           Executor executor = (Executor)value;
           setIcon(executor.getIcon());
           append(executor.getId(), SimpleTextAttributes.REGULAR_ATTRIBUTES);
@@ -275,7 +273,7 @@ public class ConfigurationSettingsEditor extends CompositeSettingsEditor<RunnerA
     public void addExecutorComponent(Executor executor, JComponent component) {
       myRunnerPanel.add(component, executor.getId());
       myListModel.addElement(executor);
-      ListScrollingUtil.ensureSelectionExists(myRunnersList);
+      ScrollingUtil.ensureSelectionExists(myRunnersList);
     }
 
     public List<Executor> getExecutors() {
@@ -318,7 +316,36 @@ public class ConfigurationSettingsEditor extends CompositeSettingsEditor<RunnerA
     @Override
     @NotNull
     public JComponent createEditor() {
-      return myConfigEditor.getComponent();
+      JComponent component = myConfigEditor.getComponent();
+      if (myConfigEditor instanceof AdjustingTabSettingsEditor) {
+        JPanel panel = new JPanel(new BorderLayout());
+        UiNotifyConnector connector = new UiNotifyConnector(panel, new Activatable() {
+          private boolean myIsEmpty = true;
+          @Override
+          public void showNotify() {
+            if (myIsEmpty) {
+              panel.add(component, BorderLayout.CENTER);
+              panel.revalidate();
+              panel.repaint();
+              myIsEmpty = false;
+            }
+          }
+
+          @Override
+          public void hideNotify() {
+            if (!myIsEmpty) {
+              panel.removeAll();
+              panel.revalidate();
+              panel.repaint();
+              myIsEmpty = true;
+            }
+          }
+
+        });
+        Disposer.register(this, connector);
+        return panel;
+      }
+      return component;
     }
 
     @Override

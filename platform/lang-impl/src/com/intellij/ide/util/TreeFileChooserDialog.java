@@ -33,6 +33,7 @@ import com.intellij.ide.util.treeView.NodeRenderer;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.fileTypes.FileType;
+import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.util.Condition;
@@ -112,20 +113,10 @@ public final class TreeFileChooserDialog extends DialogWrapper implements TreeFi
     init();
     if (initialFile != null) {
       // dialog does not exist yet
-      SwingUtilities.invokeLater(new Runnable(){
-        @Override
-        public void run() {
-          selectFile(initialFile);
-        }
-      });
+      SwingUtilities.invokeLater(() -> selectFile(initialFile));
     }
 
-    SwingUtilities.invokeLater(new Runnable(){
-      @Override
-      public void run() {
-        handleSelectionChanged();
-      }
-    });
+    SwingUtilities.invokeLater(() -> handleSelectionChanged());
   }
 
   @Override
@@ -263,12 +254,7 @@ public final class TreeFileChooserDialog extends DialogWrapper implements TreeFi
     myTabbedPane.addTab(IdeBundle.message("tab.chooser.project"), scrollPane);
     myTabbedPane.addTab(IdeBundle.message("tab.chooser.search.by.name"), dummyPanel);
 
-    SwingUtilities.invokeLater(new Runnable() {
-      @Override
-      public void run() {
-        myGotoByNamePanel.invoke(new MyCallback(), ModalityState.stateForComponent(getRootPane()), false);
-      }
-    });
+    SwingUtilities.invokeLater(() -> myGotoByNamePanel.invoke(new MyCallback(), ModalityState.stateForComponent(getRootPane()), false));
 
     myTabbedPane.addChangeListener(
       new ChangeListener() {
@@ -312,12 +298,9 @@ public final class TreeFileChooserDialog extends DialogWrapper implements TreeFi
   @Override
   public void selectFile(@NotNull final PsiFile file) {
     // Select element in the tree
-    ApplicationManager.getApplication().invokeLater(new Runnable() {
-      @Override
-      public void run() {
-        if (myBuilder != null) {
-          myBuilder.select(file, file.getVirtualFile(), true);
-        }
+    ApplicationManager.getApplication().invokeLater(() -> {
+      if (myBuilder != null) {
+        myBuilder.select(file, file.getVirtualFile(), true);
       }
     }, ModalityState.stateForComponent(getWindow()));
   }
@@ -367,7 +350,7 @@ public final class TreeFileChooserDialog extends DialogWrapper implements TreeFi
     return myTree;
   }
 
-  private final class MyGotoFileModel implements ChooseByNameModel {
+  private final class MyGotoFileModel implements ChooseByNameModel, DumbAware {
     private final int myMaxSize = WindowManagerEx.getInstanceEx().getFrame(myProject).getSize().width;
     @Override
     @NotNull
@@ -423,12 +406,7 @@ public final class TreeFileChooserDialog extends DialogWrapper implements TreeFi
       if (myFileType != null && myProject != null) {
         GlobalSearchScope scope = myShowLibraryContents ? GlobalSearchScope.allScope(myProject) : GlobalSearchScope.projectScope(myProject);
         Collection<VirtualFile> virtualFiles = FileTypeIndex.getFiles(myFileType, scope);
-        fileNames = ContainerUtil.map2Array(virtualFiles, String.class, new Function<VirtualFile, String>() {
-          @Override
-          public String fun(VirtualFile file) {
-            return file.getName();
-          }
-        });
+        fileNames = ContainerUtil.map2Array(virtualFiles, String.class, file -> file.getName());
       }
       else {
         fileNames = FilenameIndex.getAllFilenames(myProject);
@@ -493,19 +471,16 @@ public final class TreeFileChooserDialog extends DialogWrapper implements TreeFi
   }
 
   private Object[] filterFiles(final Object[] list) {
-    Condition<PsiFile> condition = new Condition<PsiFile>() {
-      @Override
-      public boolean value(final PsiFile psiFile) {
-        if (myFilter != null && !myFilter.accept(psiFile)) {
-          return false;
-        }
-        boolean accepted = myFileType == null || psiFile.getFileType() == myFileType;
-        VirtualFile virtualFile = psiFile.getVirtualFile();
-        if (virtualFile != null && !accepted) {
-          accepted = virtualFile.getFileType() == myFileType;
-        }
-        return accepted;
+    Condition<PsiFile> condition = psiFile -> {
+      if (myFilter != null && !myFilter.accept(psiFile)) {
+        return false;
       }
+      boolean accepted = myFileType == null || psiFile.getFileType() == myFileType;
+      VirtualFile virtualFile = psiFile.getVirtualFile();
+      if (virtualFile != null && !accepted) {
+        accepted = virtualFile.getFileType() == myFileType;
+      }
+      return accepted;
     };
     final List<Object> result = new ArrayList<Object>(list.length);
     for (Object o : list) {

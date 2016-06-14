@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -61,6 +61,10 @@ public class XmlDocumentationProvider implements DocumentationProvider {
   public String getQuickNavigateInfo(PsiElement element, PsiElement originalElement) {
     if (element instanceof SchemaPrefix) {
       return ((SchemaPrefix)element).getQuickNavigateInfo();
+    }
+    if (element instanceof XmlEntityDecl) {
+      final XmlAttributeValue value = ((XmlEntityDecl)element).getValueElement();
+      return value != null ? value.getText() : null;
     }
     return null;
   }
@@ -178,14 +182,11 @@ public class XmlDocumentationProvider implements DocumentationProvider {
   private static XmlTag findEnumerationValue(final String text, XmlTag tag) {
     final Ref<XmlTag> enumerationTag = new Ref<XmlTag>();
 
-    Processor<XmlTag> processor = new Processor<XmlTag>() {
-      @Override
-      public boolean process(XmlTag xmlTag) {
-        if (text.equals(xmlTag.getAttributeValue(XmlUtil.VALUE_ATTR_NAME))) {
-          enumerationTag.set(xmlTag);
-        }
-        return true;
+    Processor<XmlTag> processor = xmlTag -> {
+      if (text.equals(xmlTag.getAttributeValue(XmlUtil.VALUE_ATTR_NAME))) {
+        enumerationTag.set(xmlTag);
       }
+      return true;
     };
     XmlUtil.processEnumerationValues(tag, processor);
 
@@ -447,7 +448,7 @@ public class XmlDocumentationProvider implements DocumentationProvider {
   public static PsiElement findDeclWithName(final String name, final @NotNull PsiElement element) {
     final XmlFile containingXmlFile = XmlUtil.getContainingFile(element);
     final XmlTag nearestTag = PsiTreeUtil.getParentOfType(element, XmlTag.class, false);
-    final XmlFile xmlFile = nearestTag != null? XmlCompletionData.findDescriptorFile(nearestTag, containingXmlFile):containingXmlFile;
+    final XmlFile xmlFile = nearestTag != null && containingXmlFile != null ? XmlCompletionData.findDescriptorFile(nearestTag, containingXmlFile):containingXmlFile;
 
     if (xmlFile != null) {
       final PsiElement[] result = new PsiElement[1];
@@ -508,9 +509,7 @@ public class XmlDocumentationProvider implements DocumentationProvider {
           withCData = true;
         }
 
-        if (result.endsWith(CDATA_SUFFIX)) {
-          result = result.substring(0, result.length() - CDATA_SUFFIX.length());
-        }
+        result = StringUtil.trimEnd(result, CDATA_SUFFIX);
         result = result.trim();
 
         if (withCData) {

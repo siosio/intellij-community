@@ -21,18 +21,23 @@ import com.intellij.openapi.diff.impl.patch.TextFilePatch;
 import com.intellij.openapi.diff.impl.patch.apply.GenericPatchApplier;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Computable;
+import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vcs.ObjectsConvertor;
-import com.intellij.openapi.vcs.changes.shelf.ShelveChangesManager.ShelvedBinaryFilePatch;
+import com.intellij.openapi.vcs.changes.shelf.ShelveChangesManager;
+import com.intellij.openapi.vcs.changes.shelf.ShelvedBinaryFilePatch;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.util.ArrayUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.Convertor;
 import com.intellij.util.containers.MultiMap;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -45,6 +50,7 @@ public class MatchPatchPaths {
   private static final int BIG_FILE_BOUND = 100000;
   private final Project myProject;
   private final VirtualFile myBaseDir;
+  private boolean myUseProjectRootAsPredefinedBase;
 
   public MatchPatchPaths(Project project) {
     myProject = project;
@@ -52,8 +58,21 @@ public class MatchPatchPaths {
   }
 
   public List<AbstractFilePatchInProgress> execute(@NotNull final List<? extends FilePatch> list) {
+    return execute(list, false);
+  }
+
+  /**
+   * Find the best matched bases for file patches; e.g. Unshelve has to use project dir as best base by default,
+   * while Apply patch should process through context, because it may have been created outside IDE for a certain vcs root
+   *
+   * @param list
+   * @param useProjectRootAsPredefinedBase if true then we use project dir as default base despite context matching
+   * @return
+   */
+  public List<AbstractFilePatchInProgress> execute(@NotNull final List<? extends FilePatch> list, boolean useProjectRootAsPredefinedBase) {
     final PatchBaseDirectoryDetector directoryDetector = PatchBaseDirectoryDetector.getInstance(myProject);
 
+    myUseProjectRootAsPredefinedBase = useProjectRootAsPredefinedBase;
     final List<PatchAndVariants> candidates = new ArrayList<PatchAndVariants>(list.size());
     final List<FilePatch> newOrWithoutMatches = new ArrayList<FilePatch>();
     findCandidates(list, directoryDetector, candidates, newOrWithoutMatches);
@@ -73,7 +92,8 @@ public class MatchPatchPaths {
                                    @NotNull List<FilePatch> newOrWithoutMatches,
                                    @NotNull MultiMap<VirtualFile, AbstractFilePatchInProgress> result) {
     for (FilePatch patch : newOrWithoutMatches) {
-      final String[] strings = patch.getAfterName().replace('\\', '/').split("/");
+      String afterName = patch.getAfterName();
+      final String[] strings = afterName != null ? afterName.replace('\\', '/').split("/") : ArrayUtil.EMPTY_STRING_ARRAY;
       Pair<VirtualFile, Integer> best = null;
       for (int i = strings.length - 2; i >= 0; --i) {
         final String name = strings[i];
@@ -83,7 +103,7 @@ public class MatchPatchPaths {
           for (VirtualFile file : files) {
             Pair<VirtualFile, Integer> pair = compareNamesImpl(strings, file, i);
             if (pair != null && pair.getSecond() < i) {
-              if (best == null || pair.getSecond() < best.getSecond()) {
+              if (best == null || pair.getSecond() < best.getSecond() || isGoodAndProjectBased(best, pair)) {
                 best = pair;
               }
             }
@@ -102,6 +122,11 @@ public class MatchPatchPaths {
         result.putValue(myBaseDir, patchInProgress);
       }
     }
+  }
+
+  private boolean isGoodAndProjectBased(@NotNull Pair<VirtualFile, Integer> bestVariant,
+                                        @NotNull Pair<VirtualFile, Integer> currentVariant) {
+    return currentVariant.getSecond().equals(bestVariant.getSecond()) && myBaseDir.equals(currentVariant.getFirst());
   }
 
   private static void selectByContextOrByStrip(@NotNull List<PatchAndVariants> candidates,
@@ -148,7 +173,7 @@ public class MatchPatchPaths {
         newOrWithoutMatches.add(patch);
         continue;
       }
-      final Collection<VirtualFile> files = findFilesFromIndex(directoryDetector, fileName);
+      final Collection<VirtualFile> files = new ArrayList<VirtualFile>(findFilesFromIndex(directoryDetector, fileName));
       // for directories outside the project scope but under version control
       if (patch.getBeforeName() != null && patch.getBeforeName().startsWith("..")) {
         final VirtualFile relativeFile = VfsUtil.findRelativeFile(myBaseDir, patch.getBeforeName().replace('\\', '/').split("/"));
@@ -178,11 +203,18 @@ public class MatchPatchPaths {
     }
   }
 
-  private static Collection<VirtualFile> findFilesFromIndex(@NotNull final PatchBaseDirectoryDetector directoryDetector,
-                                                            @NotNull final String fileName) {
-    return ApplicationManager.getApplication().runReadAction(new Computable<Collection<VirtualFile>>() {
+  private Collection<VirtualFile> findFilesFromIndex(@NotNull final PatchBaseDirectoryDetector directoryDetector,
+                                                     @NotNull final String fileName) {
+    Collection<VirtualFile> files = ApplicationManager.getApplication().runReadAction(new Computable<Collection<VirtualFile>>() {
       public Collection<VirtualFile> compute() {
         return directoryDetector.findFiles(fileName);
+      }
+    });
+    final File shelfResourcesDirectory = ShelveChangesManager.getInstance(myProject).getShelfResourcesDirectory();
+    return ContainerUtil.filter(files, new Condition<VirtualFile>() {
+      @Override
+      public boolean value(VirtualFile file) {
+        return !FileUtil.isAncestor(shelfResourcesDirectory, VfsUtilCore.virtualToIoFile(file), false);
       }
     });
   }
@@ -218,7 +250,7 @@ public class MatchPatchPaths {
     return new GenericPatchApplier(text, patch.getPatch().getHunks()).weightContextMatch(100, 5);
   }
 
-  private static class PatchAndVariants {
+  private class PatchAndVariants {
     @NotNull private final List<AbstractFilePatchInProgress> myVariants;
 
     private PatchAndVariants(@NotNull List<AbstractFilePatchInProgress> variants) {
@@ -238,6 +270,10 @@ public class MatchPatchPaths {
         int maxLines = -100;
         for (AbstractFilePatchInProgress variant : myVariants) {
           TextFilePatchInProgress textFilePAch = (TextFilePatchInProgress)variant;
+          if (myUseProjectRootAsPredefinedBase && variantMatchedToProjectDir(textFilePAch)) {
+            best = textFilePAch;
+            break;
+          }
           final int lines = getMatchingLines(textFilePAch);
           if (lines > maxLines) {
             maxLines = lines;
@@ -249,13 +285,24 @@ public class MatchPatchPaths {
       else {
         int stripCounter = Integer.MAX_VALUE;
         for (AbstractFilePatchInProgress variant : myVariants) {
-          if (variant.getCurrentStrip() < stripCounter) {
+          int currentStrip = variant.getCurrentStrip();
+          //the best variant if several match should be project based variant
+          if (variantMatchedToProjectDir(variant)) {
             best = variant;
+            break;
+          }
+          else if (currentStrip < stripCounter) {
+            best = variant;
+            stripCounter = currentStrip;
           }
         }
         putSelected(result, myVariants, best);
       }
     }
+  }
+
+  private boolean variantMatchedToProjectDir(@NotNull AbstractFilePatchInProgress variant) {
+    return variant.getCurrentStrip() == 0 && myProject.getBaseDir().equals(variant.getBase());
   }
 
   private static Pair<VirtualFile, Integer> compareNames(final String beforeName, final VirtualFile file) {

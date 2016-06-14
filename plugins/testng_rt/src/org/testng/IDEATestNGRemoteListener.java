@@ -13,37 +13,64 @@ import java.util.*;
  * User: anna
  * Date: 5/22/13
  */
-public class IDEATestNGRemoteListener implements ISuiteListener, IResultListener{
+public class IDEATestNGRemoteListener implements ISuiteListener, IResultListener {
 
   private final PrintStream myPrintStream;
   private final List<String> myCurrentSuites = new ArrayList<String>();
   private final Map<String, Integer> myInvocationCounts = new HashMap<String, Integer>();
   private final Map<ExposedTestResult, String> myParamsMap = new HashMap<ExposedTestResult, String>();
+  private final Map<ExposedTestResult, DelegatedResult> myResults = new HashMap<ExposedTestResult, DelegatedResult>();
 
   public IDEATestNGRemoteListener() {
-    myPrintStream = System.out;
+    this(System.out);
   }
 
   public IDEATestNGRemoteListener(PrintStream printStream) {
     myPrintStream = printStream;
+    myPrintStream.println("##teamcity[enteredTheMatrix]");
   }
 
   public synchronized void onStart(final ISuite suite) {
-    myPrintStream.println("##teamcity[enteredTheMatrix]");
     if (suite != null) {
-      final List<ITestNGMethod> allMethods = suite.getAllMethods();
-      if (allMethods != null) {
-        int count = 0;
-        for (ITestNGMethod method : allMethods) {
-          if (method.isTest()) count++;
+      try {
+        final List<ITestNGMethod> allMethods = suite.getAllMethods();
+        if (allMethods != null) {
+          int count = 0;
+          for (ITestNGMethod method : allMethods) {
+            if (method.isTest()) count += method.getInvocationCount();
+          }
+          myPrintStream.println("##teamcity[testCount count = \'" + count + "\']");
         }
-        myPrintStream.println("##teamcity[testCount count = \'" + count + "\']");
       }
+      catch (NoSuchMethodError ignore) {}
       myPrintStream.println("##teamcity[rootName name = '" + suite.getName() + "' location = 'file://" + suite.getXmlSuite().getFileName() + "']");
     }
   }
 
   public synchronized void onFinish(ISuite suite) {
+    try {
+      if (suite != null && suite.getAllInvokedMethods().size() < suite.getAllMethods().size()) {
+        for (ITestNGMethod method : suite.getAllMethods()) {
+          if (method.isTest()) {
+            boolean found = false;
+            for (IInvokedMethod invokedMethod : suite.getAllInvokedMethods()) {
+              if (invokedMethod.getTestMethod() == method) {
+                found = true;
+                break;
+              }
+            }
+            if (!found) {
+              final String fullEscapedMethodName = escapeName(getShortName(method.getTestClass().getName()) + "." + method.getMethodName());
+              myPrintStream.println("##teamcity[testStarted name=\'" + fullEscapedMethodName + "\']");
+              myPrintStream.println("##teamcity[testIgnored name=\'" + fullEscapedMethodName + "\']");
+              myPrintStream.println("##teamcity[testFinished name=\'" + fullEscapedMethodName + "\']");
+              break;
+            }
+          }
+        }
+      }
+    }
+    catch (NoSuchMethodError ignored) {}
     for (int i = myCurrentSuites.size() - 1; i >= 0; i--) {
       onSuiteFinish(myCurrentSuites.remove(i));
     }
@@ -51,29 +78,33 @@ public class IDEATestNGRemoteListener implements ISuiteListener, IResultListener
   }
 
   public synchronized void onConfigurationSuccess(ITestResult result) {
-    onConfigurationSuccess(new DelegatedResult(result));
+    final DelegatedResult delegatedResult = createDelegated(result);
+    onConfigurationStart(delegatedResult);
+    onConfigurationSuccess(delegatedResult);
   }
 
   public synchronized void onConfigurationFailure(ITestResult result) {
-    onConfigurationFailure(new DelegatedResult(result));
+    final DelegatedResult delegatedResult = createDelegated(result);
+    onConfigurationStart(delegatedResult);
+    onConfigurationFailure(delegatedResult);
   }
 
   public synchronized void onConfigurationSkip(ITestResult itr) {}
 
   public synchronized void onTestStart(ITestResult result) {
-    onTestStart(new DelegatedResult(result));
+    onTestStart(createDelegated(result));
   }
 
   public synchronized void onTestSuccess(ITestResult result) {
-    onTestFinished(new DelegatedResult(result));
+    onTestFinished(createDelegated(result));
   }
 
   public synchronized void onTestFailure(ITestResult result) {
-    onTestFailure(new DelegatedResult(result));
+    onTestFailure(createDelegated(result));
   }
 
   public synchronized void onTestSkipped(ITestResult result) {
-    onTestSkipped(new DelegatedResult(result));
+    onTestSkipped(createDelegated(result));
   }
 
   public synchronized void onTestFailedButWithinSuccessPercentage(ITestResult result) {
@@ -90,7 +121,7 @@ public class IDEATestNGRemoteListener implements ISuiteListener, IResultListener
 
   public void onTestStart(ExposedTestResult result) {
     final Object[] parameters = result.getParameters();
-    final String qualifiedName = result.getClassName() + result.getMethodName();
+    final String qualifiedName = result.getClassName() + result.getDisplayMethodName();
     Integer invocationCount = myInvocationCounts.get(qualifiedName);
     if (invocationCount == null) {
       invocationCount = 0;
@@ -101,13 +132,15 @@ public class IDEATestNGRemoteListener implements ISuiteListener, IResultListener
     myInvocationCounts.put(qualifiedName, invocationCount + 1);
   }
 
-  public void onConfigurationSuccess(ExposedTestResult result) {
+  public void onConfigurationStart(ExposedTestResult result) {
     onTestStart(result, null, -1, true);
+  }
+
+  public void onConfigurationSuccess(ExposedTestResult result) {
     onTestFinished(result);
   }
 
   public void onConfigurationFailure(ExposedTestResult result) {
-    onTestStart(result, null, -1, true);
     onTestFailure(result);
   }
   
@@ -159,8 +192,8 @@ public class IDEATestNGRemoteListener implements ISuiteListener, IResultListener
     myParamsMap.put(result, paramString);
     onSuiteStart(result.getTestHierarchy(), result, true);
     final String className = result.getClassName();
-    final String methodName = result.getMethodName();
-    final String location = className + "." + methodName + (invocationCount >= 0 ? "[" + invocationCount + "]" : "");
+    final String methodName = result.getDisplayMethodName();
+    final String location = className + "." + result.getMethodName() + (invocationCount >= 0 ? "[" + invocationCount + "]" : "");
     myPrintStream.println("\n##teamcity[testStarted name=\'" + escapeName(getShortName(className) + "." + methodName + (paramString != null ? paramString : "")) +
                           "\' locationHint=\'java:test://" + escapeName(location) + (config ? "\' config=\'true" : "") + "\']");
   }
@@ -182,6 +215,7 @@ public class IDEATestNGRemoteListener implements ISuiteListener, IResultListener
       notification = null;
     }
     ComparisonFailureData.registerSMAttributes(notification, getTrace(ex), failureMessage, attrs, ex);
+    myPrintStream.println();
     myPrintStream.println(MapSerializerUtil.asString("testFailed", attrs));
     onTestFinished(result);
   }
@@ -203,7 +237,7 @@ public class IDEATestNGRemoteListener implements ISuiteListener, IResultListener
   }
 
   private synchronized String getTestMethodNameWithParams(ExposedTestResult result) {
-    String methodName = getShortName(result.getClassName()) + "." + result.getMethodName();
+    String methodName = getShortName(result.getClassName()) + "." + result.getDisplayMethodName();
     String paramString = myParamsMap.get(result);
     if (paramString != null) {
       methodName += paramString;
@@ -252,6 +286,7 @@ public class IDEATestNGRemoteListener implements ISuiteListener, IResultListener
   public interface ExposedTestResult {
     Object[] getParameters();
     String getMethodName();
+    String getDisplayMethodName();
     String getClassName();
     long getDuration();
     List<String> getTestHierarchy();
@@ -260,11 +295,23 @@ public class IDEATestNGRemoteListener implements ISuiteListener, IResultListener
     Throwable getThrowable();
   }
 
-  private static class DelegatedResult implements ExposedTestResult {
+  protected DelegatedResult createDelegated(ITestResult result) {
+    final DelegatedResult newResult = new DelegatedResult(result);
+    final DelegatedResult oldResult = myResults.get(newResult);
+    if (oldResult != null) {
+      return oldResult;
+    }
+    myResults.put(newResult, newResult);
+    return newResult;
+  }
+  
+  protected static class DelegatedResult implements ExposedTestResult {
     private final ITestResult myResult;
+    private final String myTestName;
 
     public DelegatedResult(ITestResult result) {
       myResult = result;
+      myTestName = myResult.getTestName();
     }
 
     public Object[] getParameters() {
@@ -273,6 +320,10 @@ public class IDEATestNGRemoteListener implements ISuiteListener, IResultListener
 
     public String getMethodName() {
       return myResult.getMethod().getMethodName();
+    }
+
+    public String getDisplayMethodName() {
+      return myTestName != null && myTestName.length() > 0 ? myTestName : myResult.getMethod().getMethodName();
     }
 
     public String getClassName() {

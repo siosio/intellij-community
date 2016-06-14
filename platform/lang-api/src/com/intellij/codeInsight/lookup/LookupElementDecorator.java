@@ -18,12 +18,16 @@ package com.intellij.codeInsight.lookup;
 import com.intellij.codeInsight.completion.InsertHandler;
 import com.intellij.codeInsight.completion.InsertionContext;
 import com.intellij.openapi.util.ClassConditionKey;
+import com.intellij.psi.PsiElement;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.Set;
 
 /**
  * @author peter
+ *
+ * @see com.intellij.codeInsight.completion.PrioritizedLookupElement
  */
 public abstract class LookupElementDecorator<T extends LookupElement> extends LookupElement {
   private final T myDelegate;
@@ -39,7 +43,7 @@ public abstract class LookupElementDecorator<T extends LookupElement> extends Lo
 
   @Override
   public boolean isValid() {
-    return super.isValid() && myDelegate.isValid();
+    return myDelegate.isValid() && super.isValid();
   }
 
   @Override
@@ -115,6 +119,17 @@ public abstract class LookupElementDecorator<T extends LookupElement> extends Lo
   @Override
   public boolean isCaseSensitive() {
     return myDelegate.isCaseSensitive();
+  }
+
+  @Override
+  public boolean isWorthShowingInAutoPopup() {
+    return myDelegate.isWorthShowingInAutoPopup();
+  }
+
+  @Nullable
+  @Override
+  public PsiElement getPsiElement() {
+    return myDelegate.getPsiElement();
   }
 
   private static class InsertingDecorator<T extends LookupElement> extends LookupElementDecorator<T> {

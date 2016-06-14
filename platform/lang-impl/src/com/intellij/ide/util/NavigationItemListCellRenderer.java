@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,8 +22,6 @@ import com.intellij.navigation.NavigationItem;
 import com.intellij.navigation.NavigationItemFileStatus;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataProvider;
-import com.intellij.openapi.editor.colors.EditorColorsManager;
-import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.editor.markup.EffectType;
 import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.project.Project;
@@ -43,14 +41,13 @@ import com.intellij.util.IconUtil;
 import com.intellij.util.text.Matcher;
 import com.intellij.util.text.MatcherHolder;
 import com.intellij.util.ui.UIUtil;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
 
-public class NavigationItemListCellRenderer extends OpaquePanel implements ListCellRenderer, MatcherHolder {
-
-  private Matcher myMatcher;
+public class NavigationItemListCellRenderer extends OpaquePanel implements ListCellRenderer {
 
   public NavigationItemListCellRenderer() {
     super(new BorderLayout());
@@ -63,15 +60,12 @@ public class NavigationItemListCellRenderer extends OpaquePanel implements ListC
     int index,
     boolean isSelected,
     boolean cellHasFocus) {
-    EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
-    Font editorFont = new Font(scheme.getEditorFontName(), Font.PLAIN, scheme.getEditorFontSize());
-    setFont(editorFont);
     removeAll();
 
     final boolean hasRightRenderer = UISettings.getInstance().SHOW_ICONS_IN_QUICK_NAVIGATION;
     final ModuleRendererFactory factory = ModuleRendererFactory.findInstance(value);
 
-    final LeftRenderer left = new LeftRenderer(!hasRightRenderer || !factory.rendersLocationString(), myMatcher);
+    final LeftRenderer left = new LeftRenderer(!hasRightRenderer || !factory.rendersLocationString(), MatcherHolder.getAssociatedMatcher(list));
     final Component leftCellRendererComponent = left.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
     final Color listBg = leftCellRendererComponent.getBackground();
     add(leftCellRendererComponent, BorderLayout.WEST);
@@ -94,11 +88,6 @@ public class NavigationItemListCellRenderer extends OpaquePanel implements ListC
       add(spacer, BorderLayout.CENTER);
     }
     return this;
-  }
-
-  @Override
-  public void setPatternMatcher(final Matcher matcher) {
-    myMatcher = matcher;
   }
 
   protected static Color getBackgroundColor(@Nullable Object value) {
@@ -129,7 +118,7 @@ public class NavigationItemListCellRenderer extends OpaquePanel implements ListC
 
     @Override
     protected void customizeCellRenderer(
-      JList list,
+      @NotNull JList list,
       Object value,
       int index,
       boolean selected,
@@ -180,7 +169,7 @@ public class NavigationItemListCellRenderer extends OpaquePanel implements ListC
         final TextAttributes textAttributes = NodeRenderer.getSimpleTextAttributes(presentation).toTextAttributes();
         if (isProblemFile) {
           textAttributes.setEffectType(EffectType.WAVE_UNDERSCORE);
-          textAttributes.setEffectColor(Color.red);
+          textAttributes.setEffectColor(JBColor.red);
         }
         textAttributes.setForegroundColor(color);
         SimpleTextAttributes nameAttributes = SimpleTextAttributes.fromTextAttributes(textAttributes);
@@ -191,13 +180,13 @@ public class NavigationItemListCellRenderer extends OpaquePanel implements ListC
           String containerText = presentation.getLocationString();
 
           if (containerText != null && containerText.length() > 0) {
-            append(" " + containerText, new SimpleTextAttributes(Font.PLAIN, JBColor.GRAY));
+            append(" " + containerText, new SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, JBColor.GRAY));
           }
         }
       }
       else {
         setIcon(IconUtil.getEmptyIcon(false));
-        append(value == null ? "" : value.toString(), new SimpleTextAttributes(Font.PLAIN, list.getForeground()));
+        append(value == null ? "" : value.toString(), new SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, list.getForeground()));
       }
       setPaintFocusBorder(false);
       setBackground(selected ? UIUtil.getListSelectionBackground() : bgColor);

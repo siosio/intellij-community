@@ -18,28 +18,36 @@ package org.jetbrains.idea.maven.utils.library;
 import com.intellij.openapi.roots.libraries.LibraryProperties;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.util.xmlb.annotations.Attribute;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.jps.maven.model.RepositoryLibraryDescriptor;
+
+import java.util.function.Function;
 
 /**
  * @author nik
  */
 public class RepositoryLibraryProperties extends LibraryProperties<RepositoryLibraryProperties> {
-  private String myMavenId;
+  private RepositoryLibraryDescriptor myDescriptor;
 
   public RepositoryLibraryProperties() {
   }
 
   public RepositoryLibraryProperties(String mavenId) {
-    myMavenId = mavenId;
+    myDescriptor = new RepositoryLibraryDescriptor(mavenId);
+  }
+
+  public RepositoryLibraryProperties(@NotNull String groupId, @NotNull String artifactId, @NotNull String version) {
+    myDescriptor = new RepositoryLibraryDescriptor(groupId,  artifactId, version);
   }
 
   @Override
   public boolean equals(Object obj) {
-    return obj instanceof RepositoryLibraryProperties && Comparing.equal(myMavenId, ((RepositoryLibraryProperties)obj).myMavenId);
+    return obj instanceof RepositoryLibraryProperties && Comparing.equal(myDescriptor, ((RepositoryLibraryProperties)obj).myDescriptor);
   }
 
   @Override
   public int hashCode() {
-    return Comparing.hashcode(myMavenId);
+    return Comparing.hashcode(getMavenId());
   }
 
   @Override
@@ -49,15 +57,36 @@ public class RepositoryLibraryProperties extends LibraryProperties<RepositoryLib
 
   @Override
   public void loadState(RepositoryLibraryProperties state) {
-    myMavenId = state.myMavenId;
+    myDescriptor = state.myDescriptor;
   }
 
   @Attribute("maven-id")
   public String getMavenId() {
-    return myMavenId;
+    return call(RepositoryLibraryDescriptor::getMavenId);
   }
 
   public void setMavenId(String mavenId) {
-    myMavenId = mavenId;
+    myDescriptor = new RepositoryLibraryDescriptor(mavenId);
+  }
+
+  public String getGroupId() {
+    return call(RepositoryLibraryDescriptor::getGroupId);
+  }
+
+  public String getArtifactId() {
+    return call(RepositoryLibraryDescriptor::getArtifactId);
+  }
+
+  public String getVersion() {
+    return call(RepositoryLibraryDescriptor::getVersion);
+  }
+
+  public void changeVersion(String version) {
+    myDescriptor = new RepositoryLibraryDescriptor(getGroupId(), getArtifactId(), version);
+  }
+
+  private String call(Function<RepositoryLibraryDescriptor, String> method) {
+    final RepositoryLibraryDescriptor descriptor = myDescriptor;
+    return descriptor != null ? method.apply(descriptor) : null;
   }
 }

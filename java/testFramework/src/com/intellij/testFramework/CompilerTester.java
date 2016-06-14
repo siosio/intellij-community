@@ -28,6 +28,7 @@ import com.intellij.openapi.roots.CompilerModuleExtension;
 import com.intellij.openapi.roots.CompilerProjectExtension;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.ModuleRootModificationUtil;
+import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -38,6 +39,7 @@ import com.intellij.testFramework.fixtures.TempDirTestFixture;
 import com.intellij.testFramework.fixtures.impl.TempDirTestFixtureImpl;
 import com.intellij.util.Consumer;
 import com.intellij.util.ObjectUtils;
+import com.intellij.util.ThrowableRunnable;
 import com.intellij.util.concurrency.Semaphore;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
@@ -69,12 +71,12 @@ public class CompilerTester {
     myMainOutput = new TempDirTestFixtureImpl();
     myMainOutput.setUp();
 
+    CompilerTestUtil.enableExternalCompiler();
     new WriteCommandAction(getProject()) {
       @Override
       protected void run(@NotNull Result result) throws Throwable {
         //noinspection ConstantConditions
         CompilerProjectExtension.getInstance(getProject()).setCompilerOutputUrl(myMainOutput.findOrCreateDir("out").getUrl());
-        CompilerTestUtil.enableExternalCompiler();
         for (Module module : myModules) {
           ModuleRootModificationUtil.setModuleSdk(module, JavaAwareProjectJdkTableImpl.getInstanceEx().getInternalJdk());
         }
@@ -154,48 +156,23 @@ public class CompilerTester {
   }
 
   public List<CompilerMessage> make() {
-    return runCompiler(new Consumer<ErrorReportingCallback>() {
-      @Override
-      public void consume(ErrorReportingCallback callback) {
-        CompilerManager.getInstance(getProject()).make(callback);
-      }
-    });
+    return runCompiler(callback -> CompilerManager.getInstance(getProject()).make(callback));
   }
 
   public List<CompilerMessage> rebuild() {
-    return runCompiler(new Consumer<ErrorReportingCallback>() {
-      @Override
-      public void consume(ErrorReportingCallback callback) {
-        CompilerManager.getInstance(getProject()).rebuild(callback);
-      }
-    });
+    return runCompiler(callback -> CompilerManager.getInstance(getProject()).rebuild(callback));
   }
 
   public List<CompilerMessage> compileModule(final Module module) {
-    return runCompiler(new Consumer<ErrorReportingCallback>() {
-      @Override
-      public void consume(ErrorReportingCallback callback) {
-        CompilerManager.getInstance(getProject()).compile(module, callback);
-      }
-    });
+    return runCompiler(callback -> CompilerManager.getInstance(getProject()).compile(module, callback));
   }
 
   public List<CompilerMessage> make(final CompileScope scope) {
-    return runCompiler(new Consumer<ErrorReportingCallback>() {
-      @Override
-      public void consume(ErrorReportingCallback callback) {
-        CompilerManager.getInstance(getProject()).make(scope, callback);
-      }
-    });
+    return runCompiler(callback -> CompilerManager.getInstance(getProject()).make(scope, callback));
   }
 
   public List<CompilerMessage> compileFiles(final VirtualFile... files) {
-    return runCompiler(new Consumer<ErrorReportingCallback>() {
-      @Override
-      public void consume(ErrorReportingCallback callback) {
-        CompilerManager.getInstance(getProject()).compile(files, callback);
-      }
-    });
+    return runCompiler(callback -> CompilerManager.getInstance(getProject()).compile(files, callback));
   }
 
   private List<CompilerMessage> runCompiler(final Consumer<ErrorReportingCallback> runnable) {
@@ -203,26 +180,24 @@ public class CompilerTester {
     semaphore.down();
 
     final ErrorReportingCallback callback = new ErrorReportingCallback(semaphore);
-    UIUtil.invokeAndWaitIfNeeded(new Runnable() {
+    EdtTestUtil.runInEdtAndWait(new ThrowableRunnable<Throwable>() {
       @Override
-      public void run() {
-        try {
-          getProject().save();
-          CompilerTestUtil.saveApplicationSettings();
-          for (Module module : myModules) {
-            VirtualFile moduleFile = module.getModuleFile();
-            assert moduleFile != null;
-            File ioFile = VfsUtilCore.virtualToIoFile(moduleFile);
-            if (!ioFile.exists()) {
-              getProject().save();
-              assert ioFile.exists() : "File does not exist: " + ioFile.getPath();
-            }
+      public void run() throws Throwable {
+        refreshVfs(getProject().getProjectFilePath());
+        for (Module module : myModules) {
+          refreshVfs(module.getModuleFilePath());
+        }
+
+        PlatformTestUtil.saveProject(getProject());
+        CompilerTestUtil.saveApplicationSettings();
+        for (Module module : myModules) {
+          File ioFile = new File(module.getModuleFilePath());
+          if (!ioFile.exists()) {
+            getProject().save();
+            assert ioFile.exists() : "File does not exist: " + ioFile.getPath();
           }
-          runnable.consume(callback);
         }
-        catch (Exception e) {
-          throw new RuntimeException(e);
-        }
+        runnable.consume(callback);
       }
     });
 
@@ -236,6 +211,13 @@ public class CompilerTester {
 
     callback.throwException();
     return callback.getMessages();
+  }
+
+  private static void refreshVfs(String path) {
+    VirtualFile vFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(new File(path));
+    if (vFile != null) {
+      vFile.refresh(false, false);
+    }
   }
 
   private static class ErrorReportingCallback implements CompileStatusNotification {

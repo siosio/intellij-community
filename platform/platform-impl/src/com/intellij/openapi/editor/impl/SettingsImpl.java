@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,9 +28,11 @@ import com.intellij.codeStyle.CodeStyleFacade;
 import com.intellij.lang.Language;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.EditorSettings;
+import com.intellij.openapi.editor.ex.DocumentEx;
 import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.editor.ex.EditorSettingsExternalizable;
 import com.intellij.openapi.editor.impl.softwrap.SoftWrapAppliancePlaces;
+import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.psi.PsiDocumentManager;
@@ -66,6 +68,7 @@ public class SettingsImpl implements EditorSettings {
   private Boolean myIsRightMarginShown                    = null;
   private Integer myRightMargin                           = null;
   private Boolean myAreLineNumbersShown                   = null;
+  private Boolean myGutterIconsShown                      = null;
   private Boolean myIsFoldingOutlineShown                 = null;
   private Boolean myIsSmartHome                           = null;
   private Boolean myIsBlockCursor                         = null;
@@ -194,6 +197,21 @@ public class SettingsImpl implements EditorSettings {
   }
 
   @Override
+  public boolean areGutterIconsShown() {
+    return myGutterIconsShown != null
+           ? myGutterIconsShown.booleanValue()
+           : EditorSettingsExternalizable.getInstance().areGutterIconsShown();
+  }
+
+  @Override
+  public void setGutterIconsShown(boolean val) {
+    final Boolean newValue = val ? Boolean.TRUE : Boolean.FALSE;
+    if (newValue.equals(myGutterIconsShown)) return;
+    myGutterIconsShown = newValue;
+    fireEditorRefresh();
+  }
+
+  @Override
   public int getRightMargin(Project project) {
     return myRightMargin != null ? myRightMargin.intValue() :
            CodeStyleFacade.getInstance(project).getRightMargin(myLanguage);
@@ -213,7 +231,7 @@ public class SettingsImpl implements EditorSettings {
   public boolean isWrapWhenTypingReachesRightMargin(Project project) {
     return myWrapWhenTypingReachesRightMargin != null ?
            myWrapWhenTypingReachesRightMargin.booleanValue() :
-           CodeStyleFacade.getInstance(project).isWrapWhenTypingReachesRightMargin();
+           CodeStyleFacade.getInstance(project).isWrapOnTyping(myLanguage);
   }
 
   @Override
@@ -307,29 +325,59 @@ public class SettingsImpl implements EditorSettings {
   }
 
   public void setSoftWrapAppliancePlace(SoftWrapAppliancePlaces softWrapAppliancePlace) {
-    mySoftWrapAppliancePlace = softWrapAppliancePlace;
+    if (softWrapAppliancePlace != mySoftWrapAppliancePlace) {
+      mySoftWrapAppliancePlace = softWrapAppliancePlace;
+      fireEditorRefresh();
+    }
+  }
+
+  public SoftWrapAppliancePlaces getSoftWrapAppliancePlace() {
+    return mySoftWrapAppliancePlace;
   }
 
   public void reinitSettings() {
     myCachedTabSize = null;
+    reinitDocumentIndentOptions();
+  }
+
+  private void reinitDocumentIndentOptions() {
+    if (myEditor == null || myEditor.isViewer()) return;
+    final Project project = myEditor.getProject();
+    final DocumentEx document = myEditor.getDocument();
+
+    if (project == null || project.isDisposed()) return;
+
+    final PsiDocumentManager psiManager = PsiDocumentManager.getInstance(project);
+    final PsiFile file = psiManager.getPsiFile(document);
+    if (file == null) return;
+
+    CodeStyleSettingsManager.updateDocumentIndentOptions(project, document);
   }
 
   @Override
   public int getTabSize(Project project) {
     if (myTabSize != null) return myTabSize.intValue();
     if (myCachedTabSize != null) return myCachedTabSize.intValue();
-    int tabSize = 0;
-    if (project != null && !project.isDisposed()) {
+    int tabSize;
+    if (project == null || project.isDisposed()) {
+      tabSize = CodeStyleSettingsManager.getSettings(null).getTabSize(null);
+    }
+    else  {
       PsiFile file = getPsiFile(project);
-      tabSize = CodeStyleSettingsManager.getSettings(project).getIndentOptionsByFile(file).TAB_SIZE;
+      if (myEditor != null && myEditor.isViewer()) {
+        FileType fileType = file != null ? file.getFileType() : null;
+        tabSize = CodeStyleSettingsManager.getSettings(project).getIndentOptions(fileType).TAB_SIZE; 
+      } else {
+        tabSize = CodeStyleSettingsManager.getSettings(project).getIndentOptionsByFile(file).TAB_SIZE;
+      }
     }
     myCachedTabSize = Integer.valueOf(tabSize);
     return tabSize;
   }
 
   @Nullable
-  private PsiFile getPsiFile(@NotNull Project project) {
-    if (myEditor != null) {
+  private PsiFile getPsiFile(@Nullable Project project) {
+    if (project != null && myEditor != null) {
       return PsiDocumentManager.getInstance(project).getPsiFile(myEditor.getDocument());
     }
     return null;

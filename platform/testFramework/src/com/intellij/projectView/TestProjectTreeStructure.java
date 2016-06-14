@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ public class TestProjectTreeStructure extends AbstractProjectTreeStructure imple
   protected boolean myShowMembers = false;
   protected boolean myHideEmptyMiddlePackages;
   protected boolean myFlattenPackages;
+  protected boolean myShowLibraryContents = true;
 
   public TestProjectTreeStructure(Project project, Disposable parentDisposable) {
     super(project);
@@ -36,9 +37,6 @@ public class TestProjectTreeStructure extends AbstractProjectTreeStructure imple
   }
 
   public void checkNavigateFromSourceBehaviour(PsiElement element, VirtualFile virtualFile, AbstractProjectViewPSIPane pane) {
-    Disposer.dispose(pane);
-    pane.createComponent();
-    Disposer.register(this, pane);
     Assert.assertNull(ProjectViewTestUtil.getNodeForElement(element, pane));
     pane.select(element, virtualFile, true);
     Assert.assertTrue(ProjectViewTestUtil.isExpanded(element, pane));
@@ -73,7 +71,7 @@ public class TestProjectTreeStructure extends AbstractProjectTreeStructure imple
 
   @Override
   public boolean isShowLibraryContents() {
-    return true;
+    return myShowLibraryContents;
   }
 
   @Override
@@ -91,6 +89,10 @@ public class TestProjectTreeStructure extends AbstractProjectTreeStructure imple
 
   public void setFlattenPackages(boolean flattenPackages) {
     myFlattenPackages = flattenPackages;
+  }
+
+  public void setShowLibraryContents(boolean showLibraryContents) {
+    myShowLibraryContents = showLibraryContents;
   }
 
   @Override

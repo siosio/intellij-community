@@ -35,9 +35,10 @@ import com.intellij.testIntegration.TestFinderHelper;
 import com.intellij.testIntegration.TestFramework;
 import com.intellij.ui.components.JBList;
 import com.intellij.util.IncorrectOperationException;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.List;
+import java.util.Collection;
 
 public class GenerateMissedTestsAction extends PsiElementBaseIntentionAction {
 
@@ -71,7 +72,7 @@ public class GenerateMissedTestsAction extends PsiElementBaseIntentionAction {
 
     if (srcClass == null) return;
 
-    final List<PsiElement> testClasses = TestFinderHelper.findTestsForClass(srcClass);
+    final Collection<PsiElement> testClasses = TestFinderHelper.findTestsForClass(srcClass);
     
     if (testClasses.isEmpty()) {
       HintManager.getInstance().showErrorHint(editor, "No tests found.");
@@ -79,38 +80,28 @@ public class GenerateMissedTestsAction extends PsiElementBaseIntentionAction {
     }
     
     if (testClasses.size() == 1) {
-      generateMissedTests((PsiClass)testClasses.get(0), srcClass, editor);
+      generateMissedTests((PsiClass)ContainerUtil.getFirstItem(testClasses), srcClass, editor);
       return;
     }
 
     final JBList list = new JBList(testClasses);
-    list.setCellRenderer(new PsiClassListCellRenderer());
+    list.setCellRenderer(PsiClassListCellRenderer.INSTANCE);
     JBPopupFactory.getInstance().createListPopupBuilder(list)
-      .setItemChoosenCallback(new Runnable() {
-      @Override
-      public void run() {
-        generateMissedTests((PsiClass)list.getSelectedValue(), srcClass, editor);
-      }
-    })
+      .setItemChoosenCallback(() -> generateMissedTests((PsiClass)list.getSelectedValue(), srcClass, editor))
       .setTitle("Choose Test")
       .createPopup().showInBestPositionFor(editor);
   }
 
-  private static void generateMissedTests(final PsiClass testClass, PsiClass srcClass, Editor srcEditor) {
+  private static void generateMissedTests(final PsiClass testClass, final PsiClass srcClass, Editor srcEditor) {
     if (testClass != null) {
       final TestFramework framework = TestFrameworks.detectFramework(testClass);
       if (framework != null) {
         final Project project = testClass.getProject();
-        final Editor editor = CodeInsightUtil.positionCursor(project, testClass.getContainingFile(), testClass.getLBrace());
+        final Editor editor = CodeInsightUtil.positionCursorAtLBrace(project, testClass.getContainingFile(), testClass);
         if (!FileModificationService.getInstance().preparePsiElementsForWrite(testClass)) return;
         final MissedTestsDialog dialog = new MissedTestsDialog(project, srcClass, testClass, framework);
         if (dialog.showAndGet()) {
-          WriteCommandAction.runWriteCommandAction(project, new Runnable() {
-            @Override
-            public void run() {
-              JavaTestGenerator.addTestMethods(editor, testClass, framework, dialog.getSelectedMethods(), false, false);
-            }
-          });
+          WriteCommandAction.runWriteCommandAction(project, () -> JavaTestGenerator.addTestMethods(editor, testClass, srcClass, framework, dialog.getSelectedMethods(), false, false));
         }
       }
       else {

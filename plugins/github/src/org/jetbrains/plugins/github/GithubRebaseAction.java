@@ -26,11 +26,10 @@ import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.util.ThrowableConvertor;
-import git4idea.GitPlatformFacade;
 import git4idea.GitUtil;
 import git4idea.actions.BasicAction;
 import git4idea.commands.*;
+import git4idea.config.GitVcsSettings;
 import git4idea.rebase.GitRebaseProblemDetector;
 import git4idea.rebase.GitRebaser;
 import git4idea.repo.GitRepository;
@@ -43,13 +42,13 @@ import icons.GithubIcons;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.github.api.GithubApiUtil;
-import org.jetbrains.plugins.github.api.GithubConnection;
 import org.jetbrains.plugins.github.api.GithubFullPath;
 import org.jetbrains.plugins.github.api.GithubRepoDetailed;
 import org.jetbrains.plugins.github.util.*;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.List;
 
 import static git4idea.commands.GitLocalChangesWouldBeOverwrittenDetector.Operation.CHECKOUT;
 import static org.jetbrains.plugins.github.util.GithubUtil.setVisibleEnabled;
@@ -199,14 +198,8 @@ public class GithubRebaseAction extends DumbAwareAction {
     }
 
     try {
-      return GithubUtil.runTask(project, GithubAuthDataHolder.createFromSettings(), indicator,
-                                new ThrowableConvertor<GithubConnection, GithubRepoDetailed, IOException>() {
-                                  @NotNull
-                                  @Override
-                                  public GithubRepoDetailed convert(@NotNull GithubConnection connection) throws IOException {
-                                    return GithubApiUtil.getDetailedRepoInfo(connection, userAndRepo.getUser(), userAndRepo.getRepository());
-                                  }
-                                });
+      return GithubUtil.runTask(project, GithubAuthDataHolder.createFromSettings(), indicator, connection ->
+        GithubApiUtil.getDetailedRepoInfo(connection, userAndRepo.getUser(), userAndRepo.getRepository()));
     }
     catch (IOException e) {
       GithubNotifications.showError(project, "Can't load repository info", e);
@@ -229,18 +222,14 @@ public class GithubRebaseAction extends DumbAwareAction {
                                           @NotNull final GitRepository gitRepository,
                                           @NotNull final ProgressIndicator indicator) {
     final Git git = ServiceManager.getService(project, Git.class);
-    final GitPlatformFacade facade = ServiceManager.getService(project, GitPlatformFacade.class);
     AccessToken token = DvcsUtil.workingTreeChangeStarted(project);
     try {
-      GitPreservingProcess process =
-        new GitPreservingProcess(project, facade, git, Collections.singletonList(gitRepository), "Rebasing", "upstream/master", indicator,
-                                 new Runnable() {
-                                   @Override
-                                   public void run() {
-                                     doRebaseCurrentBranch(project, gitRepository.getRoot(), indicator);
-                                   }
-                                 }
-        );
+      List<VirtualFile> rootsToSave = Collections.singletonList(gitRepository.getRoot());
+      GitPreservingProcess process = new GitPreservingProcess(project, git, rootsToSave, "Rebasing", "upstream/master",
+                                                              GitVcsSettings.UpdateChangesPolicy.STASH, indicator,
+                                                              () -> {
+                                                                doRebaseCurrentBranch(project, gitRepository.getRoot(), indicator);
+                                                              });
       process.execute();
     }
     finally {
@@ -252,8 +241,8 @@ public class GithubRebaseAction extends DumbAwareAction {
                                             @NotNull final VirtualFile root,
                                             @NotNull final ProgressIndicator indicator) {
     final GitRepositoryManager repositoryManager = GitUtil.getRepositoryManager(project);
-
-    final GitRebaser rebaser = new GitRebaser(project, ServiceManager.getService(Git.class), indicator);
+    Git git = ServiceManager.getService(Git.class);
+    final GitRebaser rebaser = new GitRebaser(project, git, indicator);
 
     final GitLineHandler handler = new GitLineHandler(project, root, GitCommand.REBASE);
     handler.setStdoutSuppressed(false);
@@ -267,29 +256,25 @@ public class GithubRebaseAction extends DumbAwareAction {
     final GitLocalChangesWouldBeOverwrittenDetector localChangesDetector = new GitLocalChangesWouldBeOverwrittenDetector(root, CHECKOUT);
     handler.addLineListener(untrackedFilesDetector);
     handler.addLineListener(localChangesDetector);
+    handler.addLineListener(GitStandardProgressAnalyzer.createListener(indicator));
 
-    GitTask pullTask = new GitTask(project, handler, "Rebasing from upstream/master");
-    pullTask.setProgressIndicator(indicator);
-    pullTask.setProgressAnalyzer(new GitStandardProgressAnalyzer());
-    pullTask.execute(true, false, new GitTaskResultHandlerAdapter() {
-      @Override
-      protected void onSuccess() {
-        root.refresh(false, true);
-        repositoryManager.updateRepository(root);
+    String oldText = indicator.getText();
+    indicator.setText("Rebasing from upstream/master...");
+    GitCommandResult rebaseResult = git.runCommand(handler);
+    indicator.setText(oldText);
+    repositoryManager.updateRepository(root);
+    if (rebaseResult.success()) {
+      root.refresh(false, true);
+      GithubNotifications.showInfo(project, "Success", "Successfully rebased GitHub fork");
+    }
+    else {
+      GitUpdateResult result = rebaser.handleRebaseFailure(handler, root, rebaseConflictDetector,
+                                                           untrackedFilesDetector, localChangesDetector);
+      if (result == GitUpdateResult.NOTHING_TO_UPDATE ||
+          result == GitUpdateResult.SUCCESS ||
+          result == GitUpdateResult.SUCCESS_WITH_RESOLVED_CONFLICTS) {
         GithubNotifications.showInfo(project, "Success", "Successfully rebased GitHub fork");
       }
-
-      @Override
-      protected void onFailure() {
-        GitUpdateResult result = rebaser.handleRebaseFailure(handler, root, rebaseConflictDetector,
-                                                             untrackedFilesDetector, localChangesDetector);
-        repositoryManager.updateRepository(root);
-        if (result == GitUpdateResult.NOTHING_TO_UPDATE ||
-            result == GitUpdateResult.SUCCESS ||
-            result == GitUpdateResult.SUCCESS_WITH_RESOLVED_CONFLICTS) {
-          GithubNotifications.showInfo(project, "Success", "Successfully rebased GitHub fork");
-        }
-      }
-    });
+    }
   }
 }

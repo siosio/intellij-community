@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,12 +41,7 @@ public class MvcUpgradeAction extends MvcActionBase {
   protected void actionPerformed(@NotNull AnActionEvent e, @NotNull final Module module, @NotNull final MvcFramework framework) {
     final GroovyLibraryDescription description = framework.createLibraryDescription();
     final AddCustomLibraryDialog dialog =
-      AddCustomLibraryDialog.createDialog(description, module, new ParameterizedRunnable<ModifiableRootModel>() {
-        @Override
-        public void run(ModifiableRootModel modifiableRootModel) {
-          removeOldMvcSdk(framework, modifiableRootModel);
-        }
-      });
+      AddCustomLibraryDialog.createDialog(description, module, modifiableRootModel -> removeOldMvcSdk(framework, modifiableRootModel));
     dialog.setTitle("Change " + framework.getDisplayName() + " SDK version");
     if (dialog.showAndGet()) {
       module.putUserData(MvcFramework.UPGRADE, Boolean.TRUE);
@@ -54,7 +49,7 @@ public class MvcUpgradeAction extends MvcActionBase {
     }
   }
 
-  private static void removeOldMvcSdk(MvcFramework framework, ModifiableRootModel model) {
+  public static void removeOldMvcSdk(MvcFramework framework, ModifiableRootModel model) {
     final LibraryPresentationManager presentationManager = LibraryPresentationManager.getInstance();
     for (OrderEntry entry : model.getOrderEntries()) {
       if (entry instanceof LibraryOrderEntry) {
@@ -72,6 +67,7 @@ public class MvcUpgradeAction extends MvcActionBase {
 
   @Override
   protected void updateView(AnActionEvent event, @NotNull MvcFramework framework, @NotNull Module module) {
+    event.getPresentation().setEnabledAndVisible(framework.isUpgradeActionSupported(module));
     event.getPresentation().setIcon(framework.getIcon());
   }
 }

@@ -16,18 +16,19 @@
 package com.intellij.lang.properties;
 
 import com.intellij.lang.properties.psi.PropertiesFile;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.psi.PsiDirectory;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
 import com.intellij.refactoring.move.moveFilesOrDirectories.MoveFilesOrDirectoriesProcessor;
+import com.intellij.refactoring.move.moveFilesOrDirectories.MoveFilesOrDirectoriesUtil;
 import com.intellij.testFramework.fixtures.LightPlatformCodeInsightFixtureTestCase;
 import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Locale;
 
 import static com.intellij.util.containers.ContainerUtil.list;
 import static com.intellij.util.containers.ContainerUtil.map;
@@ -141,7 +142,8 @@ public class CustomResourceBundleTest extends LightPlatformCodeInsightFixtureTes
     final PsiDirectory newDir = PsiManager.getInstance(getProject()).findDirectory(
       myFixture.getTempDirFixture().findOrCreateDir("new-resources-dir"));
     new MoveFilesOrDirectoriesProcessor(getProject(), new PsiElement[] {file2.getContainingFile()}, newDir, false, false, null, null).run();
-    file3.getContainingFile().delete();
+    ApplicationManager.getApplication().runWriteAction(() -> file3.getContainingFile().delete());
+
 
     assertSize(2, file.getResourceBundle().getPropertiesFiles());
 
@@ -155,12 +157,78 @@ public class CustomResourceBundleTest extends LightPlatformCodeInsightFixtureTes
     final PsiFile file = myFixture.addFileToProject("Base_Page.properties", "");
     final PsiFile file2 = myFixture.addFileToProject("Base_Page_en.properties", "");
     final String baseName =
-      PropertiesUtil.getDefaultBaseName(map(list(file, file2), new Function<PsiFile, PropertiesFile>() {
-        @Override
-        public PropertiesFile fun(PsiFile psiFile) {
-          return PropertiesImplUtil.getPropertiesFile(file);
-        }
-      }));
+      PropertiesUtil.getDefaultBaseName(map(list(file, file2), psiFile -> PropertiesImplUtil.getPropertiesFile(file)));
     assertEquals("Base_Page", baseName);
+  }
+
+  public void testResourceBundleManagerUpdatesProperlyWhileDirRemoval() {
+    myFixture.addFileToProject("qwe/asd/p.properties", "");
+    final PsiFile file = myFixture.addFileToProject("qwe/asd/p_en.properties", "");
+    final PropertiesFile propertiesFile = PropertiesImplUtil.getPropertiesFile(file);
+    assertNotNull(propertiesFile);
+    final ResourceBundleManager resourceBundleManager = ResourceBundleManager.getInstance(getProject());
+    resourceBundleManager.dissociateResourceBundle(propertiesFile.getResourceBundle());
+
+    final PropertiesFile propFile1 = PropertiesImplUtil.getPropertiesFile(myFixture.addFileToProject("qwe1/asd1/p.properties", ""));
+    final PropertiesFile propFile2 = PropertiesImplUtil.getPropertiesFile(myFixture.addFileToProject("qwe1/asd1/p_abc.properties", ""));
+    assertNotNull(propFile1);
+    assertNotNull(propFile2);
+    resourceBundleManager.combineToResourceBundle(ContainerUtil.newArrayList(propFile1, propFile2), "p");
+
+    final PsiFile someFile = myFixture.addFileToProject("to_remove/asd.txt", "");
+    final PsiDirectory toRemove = someFile.getParent();
+    assertNotNull(toRemove);
+    ApplicationManager.getApplication().runWriteAction(() -> toRemove.delete());
+
+    final ResourceBundleManagerState state = resourceBundleManager.getState();
+    assertNotNull(state);
+    assertSize(1, state.getCustomResourceBundles());
+    assertSize(2, state.getDissociatedFiles());
+
+    final PsiDirectory directory = propertiesFile.getParent().getParent();
+    assertNotNull(directory);
+    ApplicationManager.getApplication().runWriteAction(() -> directory.delete());
+
+    assertSize(1, state.getCustomResourceBundles());
+    assertSize(0, state.getDissociatedFiles());
+
+    final PsiDirectory directory1 = propFile1.getParent().getParent();
+    assertNotNull(directory1);
+    ApplicationManager.getApplication().runWriteAction(() -> directory1.delete());
+
+    assertSize(0, state.getCustomResourceBundles());
+    assertSize(0, state.getDissociatedFiles());
+  }
+
+  public void testResourceBundleManagerUpdatesProperlyWhileDirMove() {
+    final PropertiesFile propFile1 = PropertiesImplUtil.getPropertiesFile(myFixture.addFileToProject("qwe/p.properties", ""));
+    final PropertiesFile propFile2 = PropertiesImplUtil.getPropertiesFile(myFixture.addFileToProject("qwe/p_abc.properties", ""));
+    assertNotNull(propFile1);
+    assertNotNull(propFile2);
+    myFixture.addFileToProject("qwe/q.properties", "");
+    final PropertiesFile propertiesFile = PropertiesImplUtil.getPropertiesFile(myFixture.addFileToProject("qwe/q_fr.properties", ""));
+    assertNotNull(propertiesFile);
+    assertSize(2, propertiesFile.getResourceBundle().getPropertiesFiles());
+
+    final ResourceBundleManager resourceBundleManager = ResourceBundleManager.getInstance(getProject());
+    resourceBundleManager.combineToResourceBundle(ContainerUtil.newArrayList(propFile1, propFile2), "p");
+    resourceBundleManager.dissociateResourceBundle(propertiesFile.getResourceBundle());
+    assertSize(1, propertiesFile.getResourceBundle().getPropertiesFiles());
+    assertSize(2, propFile2.getResourceBundle().getPropertiesFiles());
+
+    final PsiDirectory toMove = myFixture.addFileToProject("asd/temp.txt", "").getParent();
+    assertNotNull(toMove);
+    ApplicationManager.getApplication().runWriteAction(() -> MoveFilesOrDirectoriesUtil.doMoveDirectory(propFile1.getParent(), toMove));
+
+    final PsiDirectory movedDir = toMove.findSubdirectory("qwe");
+    assertNotNull(movedDir);
+
+    final PropertiesFile newPropFile1 = PropertiesImplUtil.getPropertiesFile(movedDir.findFile("p.properties"));
+    assertNotNull(newPropFile1);
+    assertSize(2, newPropFile1.getResourceBundle().getPropertiesFiles());
+
+    final PropertiesFile newPropertiesFile = PropertiesImplUtil.getPropertiesFile(movedDir.findFile("q_fr.properties"));
+    assertNotNull(newPropertiesFile);
+    assertSize(1, newPropertiesFile.getResourceBundle().getPropertiesFiles());
   }
 }

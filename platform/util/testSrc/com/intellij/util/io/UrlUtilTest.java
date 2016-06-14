@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,11 +23,15 @@
 package com.intellij.util.io;
 
 import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.vfs.CharsetToolkit;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.junit.Test;
 
-import static org.hamcrest.CoreMatchers.equalTo;
+import java.util.regex.Matcher;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.*;
 
 public class UrlUtilTest {
@@ -45,6 +49,19 @@ public class UrlUtilTest {
 
     assertPair(URLUtil.splitJarUrl("jar:file:/path/to/jar.jar!/resource.xml"), "/path/to/jar.jar", "resource.xml");
     assertPair(URLUtil.splitJarUrl("jar:file:///path/to/jar.jar!/resource.xml"), "/path/to/jar.jar", "resource.xml");
+
+    if (SystemInfo.isWindows) {
+      assertPair(URLUtil.splitJarUrl("file:/C:/path/to/jar.jar!/resource.xml"), "C:/path/to/jar.jar", "resource.xml");
+      assertPair(URLUtil.splitJarUrl("file:////HOST/share/path/to/jar.jar!/resource.xml"), "//HOST/share/path/to/jar.jar", "resource.xml");
+    }
+    else {
+      assertPair(URLUtil.splitJarUrl("file:/C:/path/to/jar.jar!/resource.xml"), "/C:/path/to/jar.jar", "resource.xml");
+      assertPair(URLUtil.splitJarUrl("file:////HOST/share/path/to/jar.jar!/resource.xml"), "/HOST/share/path/to/jar.jar", "resource.xml");
+    }
+
+    assertPair(URLUtil.splitJarUrl("file:/path/to/jar%20with%20spaces.jar!/resource.xml"), "/path/to/jar with spaces.jar", "resource.xml");
+
+    assertPair(URLUtil.splitJarUrl("file:/path/to/jar with spaces.jar!/resource.xml"), "/path/to/jar with spaces.jar", "resource.xml");
   }
 
   private static void assertPair(@Nullable Pair<String, String> pair, String expected1, String expected2) {
@@ -76,8 +93,53 @@ public class UrlUtilTest {
   @Test
   public void testDataUri() {
     byte[] test = "test".getBytes(CharsetToolkit.UTF8_CHARSET);
-    assertThat(URLUtil.getBytesFromDataUri("data:text/plain;charset=utf-8;base64,dGVzdA=="), equalTo(test));
+    assertThat(URLUtil.getBytesFromDataUri("data:text/plain;charset=utf-8;base64,dGVzdA==")).isEqualTo(test);
     // https://youtrack.jetbrains.com/issue/WEB-14581#comment=27-1014790
-    assertThat(URLUtil.getBytesFromDataUri("data:text/plain;charset:utf-8;base64,dGVzdA=="), equalTo(test));
+    assertThat(URLUtil.getBytesFromDataUri("data:text/plain;charset:utf-8;base64,dGVzdA==")).isEqualTo(test);
+  }
+
+  private static void doUrlTest(@NotNull final String line, @Nullable final String expectedUrl) {
+    final Matcher matcher = URLUtil.URL_PATTERN.matcher(line);
+    boolean found = matcher.find();
+    if (expectedUrl == null) {
+      if (found) {
+        fail("No URL expected in [" + line + "], detected: " + matcher.group());
+      }
+      return;
+    }
+
+    if (!URLUtil.canContainUrl(line) && found) {
+      fail("canContainUrl returns false for " + line);
+    }
+
+    assertTrue("Expected URL (" + expectedUrl + ") is not detected in [" + line + "]", found);
+    assertEquals("Text: [" + line + "]", expectedUrl, matcher.group());
+  }
+
+  @Test
+  public void testUrlParsing() throws Exception {
+    doUrlTest("not detecting jetbrains.com", null);
+    doUrlTest("mailto:admin@jetbrains.com;", "mailto:admin@jetbrains.com");
+    doUrlTest("news://jetbrains.com is good", "news://jetbrains.com");
+    doUrlTest("see http://www.jetbrains.com", "http://www.jetbrains.com");
+    doUrlTest("https://www.jetbrains.com;", "https://www.jetbrains.com");
+    doUrlTest("(ftp://jetbrains.com)", "ftp://jetbrains.com");
+    doUrlTest("[ftps://jetbrains.com]", "ftps://jetbrains.com");
+    doUrlTest("Is it good site:http://jetbrains.com?", "http://jetbrains.com");
+    doUrlTest("And http://jetbrains.com?a=@#/%?=~_|!:,.;&b=20,", "http://jetbrains.com?a=@#/%?=~_|!:,.;&b=20");
+    doUrlTest("site:www.jetbrains.com.", "www.jetbrains.com");
+    doUrlTest("site (www.jetbrains.com)", "www.jetbrains.com");
+    doUrlTest("site [www.jetbrains.com]", "www.jetbrains.com");
+    doUrlTest("site <www.jetbrains.com>", "www.jetbrains.com");
+    doUrlTest("site {www.jetbrains.com}", "www.jetbrains.com");
+    doUrlTest("site 'www.jetbrains.com'", "www.jetbrains.com");
+    doUrlTest("site \"www.jetbrains.com\"", "www.jetbrains.com");
+    doUrlTest("site=www.jetbrains.com!", "www.jetbrains.com");
+    doUrlTest("site *www.jetbrains.com*", "www.jetbrains.com");
+    doUrlTest("site `www.jetbrains.com`", "www.jetbrains.com");
+    doUrlTest("not a site _www.jetbrains.com", null);
+    doUrlTest("not a site 1www.jetbrains.com", null);
+    doUrlTest("not a site wwww.jetbrains.com", null);
+    doUrlTest("not a site xxx.www.jetbrains.com", null);
   }
 }

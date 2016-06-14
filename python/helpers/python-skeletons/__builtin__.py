@@ -382,7 +382,7 @@ class enumerate(object):
 
         :type iterable: collections.Iterable[T]
         :type start: numbers.Integral
-        :rtype: enumerate[int, T]
+        :rtype: enumerate[T]
         """
         pass
 
@@ -396,7 +396,7 @@ class enumerate(object):
     def __iter__(self):
         """x.__iter__() <==> iter(x).
 
-        :rtype: enumerate[int, T]
+        :rtype: collections.Iterator[(int, T)]
         """
         return self
 
@@ -1351,6 +1351,13 @@ class str(basestring):
         """
         return 0
 
+    def format(self, *args, **kwargs):
+        """Perform a string formatting operation.
+
+        :rtype: string
+        """
+        return ''
+
     def index(self, sub, start=None, end=None):
         """Like find(), but raise ValueError when the substring is not
         found.
@@ -1734,6 +1741,13 @@ class unicode(basestring):
         """
         return 0
 
+    def format(self, *args, **kwargs):
+        """Perform a string formatting operation.
+
+        :rtype: unicode
+        """
+        return ''
+
     def index(self, sub, start=None, end=None):
         """Like find(), but raise ValueError when the substring is not
         found.
@@ -2026,11 +2040,17 @@ class list(object):
         """
         return []
 
-    def __getitem__(self, y):
-        """y-th item of x, origin 0.
+    def __iter__(self):
+        """
+        :rtype: collections.Iterator[T]
+        """
+        return []
 
-        :type y: numbers.Integral
-        :rtype: T
+    def __getitem__(self, y):
+        """y-th item of x or sublist, origin 0.
+
+        :type y: numbers.Integral | slice
+        :rtype: T | list[T]
         """
         pass
 
@@ -2149,10 +2169,10 @@ class tuple(object):
         pass
 
     def __getitem__(self, y):
-        """y-th item of x, origin 0.
+        """y-th item of x or subtuple, origin 0.
 
-        :type y: numbers.Integral
-        :rtype: object | unknown
+        :type y: numbers.Integral | slice
+        :rtype: object | tuple | unknown
         """
         pass
 
@@ -2370,7 +2390,7 @@ class file(object):
     def next(self):
         """Returns the next input line.
 
-        :rtype: bytes | unicode
+        :rtype: bytes
         """
         return ''
 
@@ -2379,7 +2399,7 @@ class file(object):
         before obtaining size bytes).
 
         :type size: numbers.Integral
-        :rtype: bytes | unicode
+        :rtype: bytes
         """
         return ''
 
@@ -2387,7 +2407,7 @@ class file(object):
         """Read one entire line from the file.
 
         :type size: numbers.Integral
-        :rtype: bytes | unicode
+        :rtype: bytes
         """
         return ''
 
@@ -2396,14 +2416,14 @@ class file(object):
         lines thus read.
 
         :type sizehint: numbers.Integral
-        :rtype: list[bytes | unicode]
+        :rtype: list[bytes]
         """
         return []
 
     def xreadlines(self):
         """This method returns the same thing as iter(f).
 
-        :rtype: collections.Iterable[bytes | unicode]
+        :rtype: collections.Iterable[bytes]
         """
         return []
 
@@ -2434,7 +2454,7 @@ class file(object):
     def write(self, str):
         """"Write a string to the file.
 
-        :type str: bytes | unicode
+        :type str: bytes
         :rtype: None
         """
         pass
@@ -2442,7 +2462,7 @@ class file(object):
     def writelines(self, sequence):
         """Write a sequence of strings to the file.
 
-        :type sequence: collections.Iterable[bytes | unicode]
+        :type sequence: collections.Iterable[bytes]
         :rtype: None
         """
         pass
@@ -2450,18 +2470,20 @@ class file(object):
 
 class __generator(object):
     """A mock class representing the generator function type."""
-    def __init__(self, value):
+    def __init__(self):
         """Create a generator object.
 
-        :type value: T
-        :rtype: __generator[T]
+        :rtype: __generator[T, U, V]
         """
         self.gi_code = None
         self.gi_frame = None
         self.gi_running = 0
 
     def __iter__(self):
-        """Defined to support iteration over container."""
+        """Defined to support iteration over container.
+
+        :rtype: collections.Iterator[T]
+        """
         pass
 
     def next(self):
@@ -2483,7 +2505,8 @@ class __generator(object):
         """Resumes the generator and "sends" a value that becomes the
         result of the current yield-expression.
 
-        :rtype: T
+        :type value: U
+        :rtype: None
         """
         pass
 
@@ -2493,6 +2516,7 @@ class __generator(object):
         :rtype: None
         """
         pass
+
 
 class __function(object):
     """A mock class representing function type."""

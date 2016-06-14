@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,9 @@ package com.intellij.packageDependencies;
 
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.IdeBundle;
-import com.intellij.openapi.components.*;
+import com.intellij.openapi.components.MainConfigurationStateSplitter;
+import com.intellij.openapi.components.State;
+import com.intellij.openapi.components.Storage;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.NotNullLazyValue;
@@ -38,10 +40,7 @@ import java.util.*;
 
 @State(
   name = "DependencyValidationManager",
-  storages = {
-    @Storage(file = StoragePathMacros.PROJECT_FILE),
-    @Storage(file = StoragePathMacros.PROJECT_CONFIG_DIR + "/scopes/", scheme = StorageScheme.DIRECTORY_BASED,
-      stateSplitter = DependencyValidationManagerImpl.ScopesStateSplitter.class)}
+  storages = @Storage(value = "scopes", stateSplitter = DependencyValidationManagerImpl.ScopesStateSplitter.class)
 )
 public class DependencyValidationManagerImpl extends DependencyValidationManager {
   private static final NotNullLazyValue<Icon> ourSharedScopeIcon = new NotNullLazyValue<Icon>() {
@@ -84,7 +83,7 @@ public class DependencyValidationManagerImpl extends DependencyValidationManager
     final List<NamedScope> predefinedScopes = new ArrayList<NamedScope>();
     final CustomScopesProvider[] scopesProviders = CustomScopesProvider.CUSTOM_SCOPES_PROVIDER.getExtensions(myProject);
     for (CustomScopesProvider scopesProvider : scopesProviders) {
-      predefinedScopes.addAll(scopesProvider.getCustomScopes());
+      predefinedScopes.addAll(scopesProvider.getFilteredScopes());
     }
     return predefinedScopes;
   }
@@ -95,7 +94,7 @@ public class DependencyValidationManagerImpl extends DependencyValidationManager
     for (CustomScopesProvider scopesProvider : scopesProviders) {
       final NamedScope scope = scopesProvider instanceof CustomScopesProviderEx
                                ? ((CustomScopesProviderEx)scopesProvider).getCustomScope(name)
-                               : CustomScopesProviderEx.findPredefinedScope(name, scopesProvider.getCustomScopes());
+                               : CustomScopesProviderEx.findPredefinedScope(name, scopesProvider.getFilteredScopes());
       if (scope != null) {
         return scope;
       }
@@ -212,19 +211,16 @@ public class DependencyValidationManagerImpl extends DependencyValidationManager
 
     super.loadState(element);
     final NamedScope[] scopes = getEditableScopes();
-    Arrays.sort(scopes, new Comparator<NamedScope>() {
-      @Override
-      public int compare(NamedScope s1, NamedScope s2) {
-        final String name1 = s1.getName();
-        final String name2 = s2.getName();
-        if (Comparing.equal(name1, name2)){
-          return 0;
-        }
-        final List<String> order = myNamedScopeManager.myOrderState.myOrder;
-        final int i1 = order.indexOf(name1);
-        final int i2 = order.indexOf(name2);
-        return i1 > i2 ? 1 : -1;
+    Arrays.sort(scopes, (s1, s2) -> {
+      final String name1 = s1.getName();
+      final String name2 = s2.getName();
+      if (Comparing.equal(name1, name2)){
+        return 0;
       }
+      final List<String> order = myNamedScopeManager.myOrderState.myOrder;
+      final int i1 = order.indexOf(name1);
+      final int i2 = order.indexOf(name2);
+      return i1 > i2 ? 1 : -1;
     });
     super.setScopes(scopes);
     myUnnamedScopes.clear();
@@ -344,20 +340,17 @@ public class DependencyValidationManagerImpl extends DependencyValidationManager
     }
   }
 
-  private final List<Pair<NamedScope, NamedScopesHolder>> myScopes = ContainerUtil.createLockFreeCopyOnWriteList();
+  private final List<Pair<NamedScope, NamedScopesHolder>> myScopePairs = ContainerUtil.createLockFreeCopyOnWriteList();
 
   private void reloadScopes() {
-    UIUtil.invokeLaterIfNeeded(new Runnable() {
-      @Override
-      public void run() {
-        if (getProject().isDisposed()) return;
-        List<Pair<NamedScope, NamedScopesHolder>> scopeList = new ArrayList<Pair<NamedScope, NamedScopesHolder>>();
-        addScopesToList(scopeList, DependencyValidationManagerImpl.this);
-        addScopesToList(scopeList, myNamedScopeManager);
-        myScopes.clear();
-        myScopes.addAll(scopeList);
-        reloadRules();
-      }
+    UIUtil.invokeLaterIfNeeded(() -> {
+      if (getProject().isDisposed()) return;
+      List<Pair<NamedScope, NamedScopesHolder>> scopeList = new ArrayList<Pair<NamedScope, NamedScopesHolder>>();
+      addScopesToList(scopeList, DependencyValidationManagerImpl.this);
+      addScopesToList(scopeList, myNamedScopeManager);
+      myScopePairs.clear();
+      myScopePairs.addAll(scopeList);
+      reloadRules();
     });
   }
 
@@ -370,7 +363,7 @@ public class DependencyValidationManagerImpl extends DependencyValidationManager
 
   @NotNull
   public List<Pair<NamedScope, NamedScopesHolder>> getScopeBasedHighlightingCachedScopes() {
-    return myScopes;
+    return myScopePairs;
   }
 
   @Override

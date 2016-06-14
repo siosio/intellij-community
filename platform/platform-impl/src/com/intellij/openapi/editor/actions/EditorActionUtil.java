@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -363,15 +363,19 @@ public class EditorActionUtil {
     else {
       LogicalPosition logLineEndLog = editor.offsetToLogicalPosition(document.getLineEndOffset(logLineToUse));
       VisualPosition logLineEndVis = editor.logicalToVisualPosition(logLineEndLog);
-      if (logLineEndLog.softWrapLinesOnCurrentLogicalLine > 0) {
-        moveCaretToStartOfSoftWrappedLine(editor, logLineEndVis, logLineEndLog.softWrapLinesOnCurrentLogicalLine);
+      int softWrapCount = EditorUtil.getSoftWrapCountAfterLineStart(editor, logLineEndLog);
+      if (softWrapCount > 0) {
+        moveCaretToStartOfSoftWrappedLine(editor, logLineEndVis, softWrapCount);
       }
       else {
         int line = logLineEndVis.line;
-        if (currentVisCaret.column == 0 && editorSettings.isSmartHome()) {
-          findSmartIndentColumn(editor, line);
-        }
         int column = 0;
+        if (currentVisCaret.column > 0) {
+          int firstNonSpaceColumnOnTheLine = findFirstNonSpaceColumnOnTheLine(editor, currentVisCaret.line);
+          if (firstNonSpaceColumnOnTheLine < currentVisCaret.column) {
+            column = firstNonSpaceColumnOnTheLine;
+          }
+        }
         caretModel.moveToVisualPosition(new VisualPosition(line, column));
       }
     }
@@ -447,12 +451,14 @@ public class EditorActionUtil {
     int logLineEndOffset = document.getLineEndOffset(logLine);
     LogicalPosition logLineStart = editor.offsetToLogicalPosition(logLineStartOffset);
     VisualPosition visLineStart = editor.logicalToVisualPosition(logLineStart);
+    boolean newRendering = editor instanceof EditorImpl && ((EditorImpl)editor).myUseNewRendering;
 
     boolean softWrapIntroducedLine = visLineStart.line != visualLineNumber;
     if (!softWrapIntroducedLine) {
       int offset = findFirstNonSpaceOffsetInRange(document.getCharsSequence(), logLineStartOffset, logLineEndOffset);
       if (offset >= 0) {
-        return EditorUtil.calcColumnNumber(editor, document.getCharsSequence(), logLineStartOffset, offset);
+        return newRendering ? editor.offsetToVisualPosition(offset).column : 
+               EditorUtil.calcColumnNumber(editor, document.getCharsSequence(), logLineStartOffset, offset);
       }
       else {
         return -1;
@@ -487,6 +493,7 @@ public class EditorActionUtil {
 
         int end = findFirstNonSpaceOffsetInRange(softWrapText, j, softWrapTextLength);
         if (end >= 0) {
+          assert !newRendering : "Unexpected soft wrap text";
           // Non space symbol is contained at soft wrap text after offset that corresponds to the target visual line start.
           if (nextSoftWrapLineFeedOffset < 0 || end < nextSoftWrapLineFeedOffset) {
             return EditorUtil.calcColumnNumber(editor, softWrapText, j, end);
@@ -503,7 +510,8 @@ public class EditorActionUtil {
       }
       int end = findFirstNonSpaceOffsetInRange(document.getCharsSequence(), softWrap.getStart(), logLineEndOffset);
       if (end >= 0) {
-        return EditorUtil.calcColumnNumber(editor, document.getCharsSequence(), softWrap.getStart(), end);
+        return newRendering ? editor.offsetToVisualPosition(end).column : 
+               EditorUtil.calcColumnNumber(editor, document.getCharsSequence(), softWrap.getStart(), end);
       }
       else {
         return -1;
@@ -814,7 +822,7 @@ public class EditorActionUtil {
     CaretModel caretModel = editor.getCaretModel();
     LogicalPosition blockSelectionStart = caretModel.getLogicalPosition();
     Rectangle visibleArea = editor.getScrollingModel().getVisibleArea();
-    int lineNumber = (visibleArea.y + visibleArea.height) / lineHeight - 1;
+    int lineNumber = Math.max(0, (visibleArea.y + visibleArea.height) / lineHeight - 1);
     VisualPosition pos = new VisualPosition(lineNumber, editor.getCaretModel().getVisualPosition().column);
     editor.getCaretModel().moveToVisualPosition(pos);
     setupSelection(editor, isWithSelection, selectionStart, blockSelectionStart);
@@ -854,6 +862,7 @@ public class EditorActionUtil {
   }
 
   public static boolean isHumpBound(@NotNull CharSequence editorText, int offset, boolean start) {
+    if (offset <= 0 || offset >= editorText.length()) return false;
     final char prevChar = editorText.charAt(offset - 1);
     final char curChar = editorText.charAt(offset);
     final char nextChar = offset + 1 < editorText.length() ? editorText.charAt(offset + 1) : 0; // 0x00 is not lowercase.
@@ -884,12 +893,7 @@ public class EditorActionUtil {
     FoldRegion collapsedRegionAtOffset;
     while ((collapsedRegionAtOffset  = foldingModel.getCollapsedRegionAtOffset(offset)) != null) {
       final FoldRegion region = collapsedRegionAtOffset;
-      foldingModel.runBatchFoldingOperation(new Runnable() {
-        @Override
-        public void run() {
-          region.setExpanded(true);
-        }
-      });
+      foldingModel.runBatchFoldingOperation(() -> region.setExpanded(true));
     }
   }
 

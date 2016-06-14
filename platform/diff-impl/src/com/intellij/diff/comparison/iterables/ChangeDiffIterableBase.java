@@ -20,10 +20,7 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.Iterator;
 
-@SuppressWarnings("ConstantConditions")
 abstract class ChangeDiffIterableBase extends DiffIterableBase {
-  // TODO: non-abstract implementation could be faster
-
   private final int myLength1;
   private final int myLength2;
 

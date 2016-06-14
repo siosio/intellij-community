@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import com.intellij.execution.process.ProcessOutputTypes;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.io.BaseOutputReader;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.idea.svn.SvnUtil;
 
@@ -38,8 +39,8 @@ public class TerminalProcessHandler extends SvnProcessHandler {
   private final StringBuilder outputLine = new StringBuilder();
   private final StringBuilder errorLine = new StringBuilder();
 
-  public TerminalProcessHandler(@NotNull Process process, boolean forceUtf8, boolean forceBinary) {
-    super(process, forceUtf8, forceBinary);
+  public TerminalProcessHandler(@NotNull Process process, @NotNull String commandLine, boolean forceUtf8, boolean forceBinary) {
+    super(process, commandLine, forceUtf8, forceBinary);
   }
 
   public void addInteractiveListener(@NotNull InteractiveCommandListener listener) {
@@ -57,23 +58,34 @@ public class TerminalProcessHandler extends SvnProcessHandler {
     process.destroy();
   }
 
+  @NotNull
+  @Override
+  protected BaseOutputReader.Options readerOptions() {
+    return BaseOutputReader.Options.BLOCKING;
+  }
+
   @Override
   public void notifyTextAvailable(String text, Key outputType) {
-    terminalOutputCapturer.onTextAvailable(new ProcessEvent(this, text), outputType);
+    if (ProcessOutputTypes.SYSTEM.equals(outputType)) {
+      super.notifyTextAvailable(text, outputType);
+    }
+    else {
+      terminalOutputCapturer.onTextAvailable(new ProcessEvent(this, text), outputType);
 
-    text = filterText(text);
+      text = filterText(text);
 
-    if (!StringUtil.isEmpty(text)) {
-      StringBuilder lastLine = getLastLineFor(outputType);
-      String currentLine = lastLine.append(text).toString();
-      lastLine.setLength(0);
+      if (!StringUtil.isEmpty(text)) {
+        StringBuilder lastLine = getLastLineFor(outputType);
+        String currentLine = lastLine.append(text).toString();
+        lastLine.setLength(0);
 
-      currentLine = filterCombinedText(currentLine);
+        currentLine = filterCombinedText(currentLine);
 
-      // check if current line presents some interactive output
-      boolean handled = handlePrompt(currentLine, outputType);
-      if (!handled) {
-        notify(currentLine, outputType, lastLine);
+        // check if current line presents some interactive output
+        boolean handled = handlePrompt(currentLine, outputType);
+        if (!handled) {
+          notify(currentLine, outputType, lastLine);
+        }
       }
     }
   }

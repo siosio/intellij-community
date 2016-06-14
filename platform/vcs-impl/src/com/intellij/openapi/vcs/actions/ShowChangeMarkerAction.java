@@ -55,11 +55,6 @@ public abstract class ShowChangeMarkerAction extends AbstractVcsAction {
     };
   }
 
-  @Override
-  protected boolean forceSyncUpdate(final AnActionEvent e) {
-    return true;
-  }
-
   public ShowChangeMarkerAction() {
     myChangeMarkerContext = new ChangeMarkerContext() {
       @Override
@@ -96,6 +91,12 @@ public abstract class ShowChangeMarkerAction extends AbstractVcsAction {
 
   @Override
   protected void update(VcsContext context, Presentation presentation) {
+    LineStatusTracker tracker = myChangeMarkerContext.getLineStatusTracker(context);
+    if (tracker == null || !tracker.isValid() || tracker.isSilentMode()) {
+      presentation.setEnabledAndVisible(false);
+      return;
+    }
+
     boolean active = isActive(context);
     presentation.setEnabled(active);
     presentation.setVisible(myChangeMarkerContext.getEditor(context) != null || ActionPlaces.isToolbarPlace(context.getPlace()));
@@ -110,6 +111,11 @@ public abstract class ShowChangeMarkerAction extends AbstractVcsAction {
 
 
     LineStatusTrackerDrawing.moveToRange(range, editor, lineStatusTracker);
+  }
+
+  @Override
+  protected boolean forceSyncUpdate(final AnActionEvent e) {
+    return true;
   }
 
   protected interface ChangeMarkerContext {

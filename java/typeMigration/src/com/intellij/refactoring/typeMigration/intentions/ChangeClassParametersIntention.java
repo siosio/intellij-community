@@ -7,6 +7,7 @@ import com.intellij.codeInsight.intention.PsiElementBaseIntentionAction;
 import com.intellij.codeInsight.intention.impl.TypeExpression;
 import com.intellij.codeInsight.template.*;
 import com.intellij.codeInsight.template.impl.TemplateState;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
@@ -91,10 +92,12 @@ public class ChangeClassParametersIntention extends PsiElementBaseIntentionActio
             myNewType = value != null ? value.getText() : "";
             final int segmentsCount = state.getSegmentsCount();
             final Document document = state.getEditor().getDocument();
-            for (int i = 0; i < segmentsCount; i++) {
-              final TextRange segmentRange = state.getSegmentRange(i);
-              document.replaceString(segmentRange.getStartOffset(), segmentRange.getEndOffset(), oldTypeText);
-            }
+            ApplicationManager.getApplication().runWriteAction(() -> {
+              for (int i = 0; i < segmentsCount; i++) {
+                final TextRange segmentRange = state.getSegmentRange(i);
+                document.replaceString(segmentRange.getStartOffset(), segmentRange.getEndOffset(), oldTypeText);
+              }
+            });
           }
 
           @Override
@@ -102,7 +105,7 @@ public class ChangeClassParametersIntention extends PsiElementBaseIntentionActio
             if (!brokenOff) {
               final PsiElementFactory elementFactory = JavaPsiFacade.getElementFactory(project);
               try {
-                final PsiType targetParam = elementFactory.createTypeFromText(myNewType, typeElement);
+                final PsiType targetParam = elementFactory.createTypeFromText(myNewType, aClass);
                 if (!(targetParam instanceof PsiClassType)) {
                   HintManager.getInstance().showErrorHint(editor,
                                                           JavaErrorMessages.message("generics.type.argument.cannot.be.of.primitive.type"));
@@ -115,13 +118,12 @@ public class ChangeClassParametersIntention extends PsiElementBaseIntentionActio
                                                                                             classType.getPresentableText()));
                   return;
                 }
-                final TypeMigrationRules myRules = new TypeMigrationRules(((PsiAnonymousClass)aClass).getBaseClassType());
+                final TypeMigrationRules myRules = new TypeMigrationRules();
                 final PsiSubstitutor substitutor = result.getSubstitutor().put(typeParameter, targetParam);
                 final PsiType targetClassType = elementFactory.createType(baseClass, substitutor);
-                myRules.setMigrationRootType(targetClassType);
                 myRules.setBoundScope(new LocalSearchScope(aClass));
                 TypeMigrationProcessor.runHighlightingTypeMigration(project, editor, myRules,
-                                                                    ((PsiAnonymousClass)aClass).getBaseClassReference().getParameterList());
+                                                                    ((PsiAnonymousClass)aClass).getBaseClassReference().getParameterList(), targetClassType);
               }
               catch (IncorrectOperationException e) {
                 HintManager.getInstance().showErrorHint(editor, "Incorrect type");

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -145,9 +145,8 @@ public class ChunkExtractor {
 
     int lineNumber = myDocument.getLineNumber(absoluteStartOffset);
     int visibleLineNumber = visibleDocument.getLineNumber(visibleStartOffset);
-    int visibleColumnNumber = visibleStartOffset - visibleDocument.getLineStartOffset(visibleLineNumber);
-    final List<TextChunk> result = new ArrayList<TextChunk>();
-    appendPrefix(result, visibleLineNumber, visibleColumnNumber);
+    List<TextChunk> result = new ArrayList<TextChunk>();
+    appendPrefix(result, visibleLineNumber);
 
     int fragmentToShowStart = myDocument.getLineStartOffset(lineNumber);
     int fragmentToShowEnd = fragmentToShowStart < myDocument.getTextLength() ? myDocument.getLineEndOffset(lineNumber) : 0;
@@ -246,25 +245,22 @@ public class ChunkExtractor {
     }
 
     final int[] lastOffset = {hiStart};
-    usageInfo2UsageAdapter.processRangeMarkers(new Processor<Segment>() {
-      @Override
-      public boolean process(Segment segment) {
-        int usageStart = segment.getStartOffset();
-        int usageEnd = segment.getEndOffset();
-        if (rangeIntersect(lastOffset[0], hiEnd, usageStart, usageEnd)) {
-          addChunk(chars, lastOffset[0], Math.max(lastOffset[0], usageStart), originalAttrs, false, null, result);
+    usageInfo2UsageAdapter.processRangeMarkers(segment -> {
+      int usageStart = segment.getStartOffset();
+      int usageEnd = segment.getEndOffset();
+      if (rangeIntersect(lastOffset[0], hiEnd, usageStart, usageEnd)) {
+        addChunk(chars, lastOffset[0], Math.max(lastOffset[0], usageStart), originalAttrs, false, null, result);
 
-          UsageType usageType = isHighlightedAsString(tokenHighlights)
-                           ? UsageType.LITERAL_USAGE
-                           : isHighlightedAsComment(tokenHighlights) ? UsageType.COMMENT_USAGE : null;
-          addChunk(chars, Math.max(lastOffset[0], usageStart), Math.min(hiEnd, usageEnd), originalAttrs, selectUsageWithBold, usageType, result);
-          lastOffset[0] = usageEnd;
-          if (usageEnd > hiEnd) {
-            return false;
-          }
+        UsageType usageType = isHighlightedAsString(tokenHighlights)
+                         ? UsageType.LITERAL_USAGE
+                         : isHighlightedAsComment(tokenHighlights) ? UsageType.COMMENT_USAGE : null;
+        addChunk(chars, Math.max(lastOffset[0], usageStart), Math.min(hiEnd, usageEnd), originalAttrs, selectUsageWithBold, usageType, result);
+        lastOffset[0] = usageEnd;
+        if (usageEnd > hiEnd) {
+          return false;
         }
-        return true;
       }
+      return true;
     });
     if (lastOffset[0] < hiEnd) {
       addChunk(chars, lastOffset[0], hiEnd, originalAttrs, false, null, result);
@@ -274,11 +270,8 @@ public class ChunkExtractor {
   public static boolean isHighlightedAsComment(TextAttributesKey... keys) {
     for (TextAttributesKey key : keys) {
       if (key == DefaultLanguageHighlighterColors.DOC_COMMENT ||
-          key == SyntaxHighlighterColors.DOC_COMMENT ||
           key == DefaultLanguageHighlighterColors.LINE_COMMENT ||
-          key == SyntaxHighlighterColors.LINE_COMMENT ||
-          key == DefaultLanguageHighlighterColors.BLOCK_COMMENT ||
-          key == SyntaxHighlighterColors.JAVA_BLOCK_COMMENT
+          key == DefaultLanguageHighlighterColors.BLOCK_COMMENT
         ) {
         return true;
       }
@@ -293,7 +286,7 @@ public class ChunkExtractor {
 
   public static boolean isHighlightedAsString(TextAttributesKey... keys) {
     for (TextAttributesKey key : keys) {
-      if (key == DefaultLanguageHighlighterColors.STRING || key == SyntaxHighlighterColors.STRING) {
+      if (key == DefaultLanguageHighlighterColors.STRING) {
         return true;
       }
       if (key == null) continue;
@@ -341,9 +334,7 @@ public class ChunkExtractor {
     return attrs;
   }
 
-  private void appendPrefix(@NotNull List<TextChunk> result, int lineNumber, int columnNumber) {
-    String prefix = "(" + (lineNumber + 1) + ": " + (columnNumber + 1) + ") ";
-    TextChunk prefixChunk = new TextChunk(myColorsScheme.getAttributes(UsageTreeColors.USAGE_LOCATION), prefix);
-    result.add(prefixChunk);
+  private void appendPrefix(@NotNull List<TextChunk> result, int lineNumber) {
+    result.add(new TextChunk(myColorsScheme.getAttributes(UsageTreeColors.USAGE_LOCATION), String.valueOf(lineNumber + 1)));
   }
 }

@@ -123,10 +123,10 @@ public class JUnitRerunFailedTestsTest extends LightCodeInsightFixtureTestCase  
     final Project project = getProject();
     final GlobalSearchScope searchScope = GlobalSearchScope.projectScope(project);
     testProxy.setLocator(JavaTestLocator.INSTANCE);
-    WriteCommandAction.runWriteCommandAction(project, new Runnable() {
-      public void run() {
-        baseClass.getMethods()[0].setName("testName2");
-      }
+    final String presentation = TestMethods.getTestPresentation(testProxy, project, searchScope);
+    assertEquals("ChildTest,testMe", presentation);
+    WriteCommandAction.runWriteCommandAction(project, () -> {
+      baseClass.getMethods()[0].setName("testName2");
     });
     assertNull(TestMethods.getTestPresentation(testProxy, project, searchScope));
   }

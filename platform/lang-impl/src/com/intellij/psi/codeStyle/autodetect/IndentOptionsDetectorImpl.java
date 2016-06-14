@@ -15,112 +15,94 @@
  */
 package com.intellij.psi.codeStyle.autodetect;
 
-import com.intellij.lang.Language;
-import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.formatting.Block;
+import com.intellij.formatting.FormattingModel;
+import com.intellij.formatting.FormattingModelBuilder;
+import com.intellij.lang.LanguageFormatting;
 import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.registry.Registry;
+import com.intellij.openapi.util.io.FileUtilRt;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
+import com.intellij.psi.codeStyle.CodeStyleSettings;
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
 
 import java.util.List;
 
 import static com.intellij.psi.codeStyle.CommonCodeStyleSettings.IndentOptions;
 
 public class IndentOptionsDetectorImpl implements IndentOptionsDetector {
-  private static Logger LOG = Logger.getInstance("#com.intellij.psi.codeStyle.CommonCodeStyleSettings.IndentOptionsDetector");
-
-  private static final double RATE_THRESHOLD = 0.8;
-  private static final int MAX_INDENT_TO_DETECT = 8;
-
   private final PsiFile myFile;
   private final Project myProject;
   private final Document myDocument;
-  private final Language myLanguage;
-  private final boolean myUseFormatterBasedLineIndentBuilder;
+  private final ProgressIndicator myProgressIndicator;
 
-  public IndentOptionsDetectorImpl(@NotNull PsiFile file) {
+  public IndentOptionsDetectorImpl(@NotNull PsiFile file, @NotNull ProgressIndicator indicator) {
     myFile = file;
-    myLanguage = file.getLanguage();
     myProject = file.getProject();
     myDocument = PsiDocumentManager.getInstance(myProject).getDocument(myFile);
-    myUseFormatterBasedLineIndentBuilder = Registry.is("editor.detect.indent.by.formatter");
+    myProgressIndicator = indicator;
   }
-
+  
+  @TestOnly
+  public IndentOptionsDetectorImpl(@NotNull PsiFile file) {
+    myFile = file;
+    myProject = file.getProject();
+    myDocument = PsiDocumentManager.getInstance(myProject).getDocument(myFile);
+    myProgressIndicator = null;
+  }
+  
+  @Override
+  @Nullable
+  public IndentOptionsAdjuster getIndentOptionsAdjuster() {
+    List<LineIndentInfo> linesInfo = calcLineIndentInfo(myProgressIndicator);
+    if (linesInfo != null) {
+      IndentUsageStatistics stats = new IndentUsageStatisticsImpl(linesInfo);
+      return new IndentOptionsAdjusterImpl(stats);
+    }
+    return null;
+  }
+  
   @Override
   @NotNull
   public IndentOptions getIndentOptions() {
-    IndentOptions indentOptions = (IndentOptions)CodeStyleSettingsManager.getSettings(myProject).getIndentOptions(myFile.getFileType()).clone();
+    IndentOptions indentOptions =
+      (IndentOptions)CodeStyleSettingsManager.getSettings(myProject).getIndentOptions(myFile.getFileType()).clone();
 
-    List<LineIndentInfo> linesInfo = calcLineIndentInfo();
-    if (linesInfo != null) {
-      IndentUsageStatistics stats = new IndentUsageStatisticsImpl(linesInfo);
-      adjustIndentOptions(indentOptions, stats);
+    IndentOptionsAdjuster adjuster = getIndentOptionsAdjuster();
+    if (adjuster != null) {
+      adjuster.adjust(indentOptions);
     }
 
     return indentOptions;
   }
 
-  private List<LineIndentInfo> calcLineIndentInfo() {
-    if (myDocument == null) return null;
-    if (myUseFormatterBasedLineIndentBuilder) {
-      return new FormatterBasedLineIndentInfoBuilder(myFile).build();
+  @Nullable
+  private List<LineIndentInfo> calcLineIndentInfo(@Nullable ProgressIndicator indicator) {
+    if (myDocument == null || myDocument.getLineCount() < 3 || isFileBigToDetect()) {
+      return null;
     }
-    return new LineIndentInfoBuilder(myDocument.getCharsSequence(), myLanguage).build();
+
+    CodeStyleSettings settings = CodeStyleSettingsManager.getSettings(myProject);
+    FormattingModelBuilder modelBuilder = LanguageFormatting.INSTANCE.forContext(myFile);
+    if (modelBuilder == null) return null;
+
+    FormattingModel model = modelBuilder.createModel(myFile, settings);
+    Block rootBlock = model.getRootBlock();
+    return new FormatterBasedLineIndentInfoBuilder(myDocument, rootBlock, indicator).build();
   }
 
-  private void adjustIndentOptions(@NotNull IndentOptions indentOptions, @NotNull IndentUsageStatistics stats) {
-    int linesWithTabs = stats.getTotalLinesWithLeadingTabs();
-    int linesWithWhiteSpaceIndent = stats.getTotalLinesWithLeadingSpaces();
-
-    if (linesWithTabs > linesWithWhiteSpaceIndent) {
-      setUseTabs(indentOptions, true);
-      indentOptions.INDENT_SIZE = indentOptions.TAB_SIZE;
-      indentOptions.CONTINUATION_INDENT_SIZE = indentOptions.TAB_SIZE * 2;
+  private boolean isFileBigToDetect() {
+    VirtualFile file = myFile.getVirtualFile();
+    if (file != null && file.getLength() > FileUtilRt.MEGABYTE) {
+      return true;
     }
-    else if (linesWithWhiteSpaceIndent > linesWithTabs) {
-      setUseTabs(indentOptions, false);
-
-      int newIndentSize = getPositiveIndentSize(stats);
-      if (newIndentSize > 0) {
-        if (indentOptions.INDENT_SIZE != newIndentSize) {
-          indentOptions.INDENT_SIZE = newIndentSize;
-          LOG.debug("Detected indent size: " + newIndentSize + " for file " + myFile);
-        }
-      }
-    }
-  }
-
-  private void setUseTabs(@NotNull IndentOptions indentOptions, boolean useTabs) {
-    if (indentOptions.USE_TAB_CHARACTER != useTabs) {
-      indentOptions.USE_TAB_CHARACTER = useTabs;
-      LOG.debug("Tab usage set to " + useTabs + " for file " + myFile);
-    }
-  }
-
-  private static int getPositiveIndentSize(@NotNull IndentUsageStatistics stats) {
-    int totalIndentSizesDetected = stats.getTotalIndentSizesDetected();
-    if (totalIndentSizesDetected == 0) return -1;
-
-    IndentUsageInfo maxUsedIndentInfo = stats.getKMostUsedIndentInfo(0);
-    int maxUsedIndentSize = maxUsedIndentInfo.getIndentSize();
-
-    if (maxUsedIndentSize == 0) {
-      if (totalIndentSizesDetected < 2) return -1;
-
-      maxUsedIndentInfo = stats.getKMostUsedIndentInfo(1);
-      maxUsedIndentSize = maxUsedIndentInfo.getIndentSize();
-    }
-
-    if (maxUsedIndentSize <= MAX_INDENT_TO_DETECT) {
-      double usageRate = (double)maxUsedIndentInfo.getTimesUsed() / stats.getTotalLinesWithLeadingSpaces();
-      if (usageRate > RATE_THRESHOLD) {
-        return maxUsedIndentSize;
-      }
-    }
-
-    return -1;
+    return false;
   }
 }
+

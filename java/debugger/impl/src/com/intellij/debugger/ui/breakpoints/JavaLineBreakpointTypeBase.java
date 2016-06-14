@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -60,7 +60,7 @@ public abstract class JavaLineBreakpointTypeBase<P extends JavaBreakpointPropert
   @Nullable
   @Override
   public final XBreakpointCustomPropertiesPanel<XLineBreakpoint<P>> createCustomRightPropertiesPanel(@NotNull Project project) {
-    return new JavaBreakpointFiltersPanel<P, XLineBreakpoint<P>>(project);
+    return new JavaBreakpointFiltersPanel<>(project);
   }
 
   @Nullable
@@ -81,7 +81,7 @@ public abstract class JavaLineBreakpointTypeBase<P extends JavaBreakpointPropert
   }
 
   @Override
-  public final boolean canPutAt(@NotNull final VirtualFile file, final int line, @NotNull Project project) {
+  public boolean canPutAt(@NotNull final VirtualFile file, final int line, @NotNull Project project) {
     final PsiFile psiFile = PsiManager.getInstance(project).findFile(file);
     // JSPX supports jvm debugging, but not in XHTML files
     if (psiFile == null || psiFile.getViewProvider().getFileType() == StdFileTypes.XHTML) {
@@ -95,56 +95,53 @@ public abstract class JavaLineBreakpointTypeBase<P extends JavaBreakpointPropert
     final Document document = FileDocumentManager.getInstance().getDocument(file);
     if (document == null) return false;
     final Ref<Class<? extends JavaLineBreakpointTypeBase>> result = Ref.create();
-    XDebuggerUtil.getInstance().iterateLine(project, document, line, new Processor<PsiElement>() {
-      @Override
-      public boolean process(PsiElement element) {
-        // avoid comments
-        if ((element instanceof PsiWhiteSpace)
-            || (PsiTreeUtil.getParentOfType(element, PsiComment.class, PsiImportStatementBase.class, PsiPackageStatement.class) != null)) {
-          return true;
-        }
-        PsiElement parent = element;
-        while(element != null) {
-          // skip modifiers
-          if (element instanceof PsiModifierList) {
-            element = element.getParent();
-            continue;
-          }
-
-          final int offset = element.getTextOffset();
-          if (offset >= 0) {
-            if (document.getLineNumber(offset) != line) {
-              break;
-            }
-          }
-          parent = element;
-          element = element.getParent();
-        }
-
-        if(parent instanceof PsiMethod) {
-          if (parent.getTextRange().getEndOffset() >= document.getLineEndOffset(line)) {
-            PsiCodeBlock body = ((PsiMethod)parent).getBody();
-            if (body != null) {
-              PsiStatement[] statements = body.getStatements();
-              if (statements.length > 0 && document.getLineNumber(statements[0].getTextOffset()) == line) {
-                result.set(JavaLineBreakpointType.class);
-              }
-            }
-          }
-          if (result.isNull()) {
-            result.set(JavaMethodBreakpointType.class);
-          }
-        }
-        else if (parent instanceof PsiField) {
-          if (result.isNull()) {
-            result.set(JavaFieldBreakpointType.class);
-          }
-        }
-        else {
-          result.set(JavaLineBreakpointType.class);
-        }
+    XDebuggerUtil.getInstance().iterateLine(project, document, line, element -> {
+      // avoid comments
+      if ((element instanceof PsiWhiteSpace)
+          || (PsiTreeUtil.getParentOfType(element, PsiComment.class, PsiImportStatementBase.class, PsiPackageStatement.class) != null)) {
         return true;
       }
+      PsiElement parent = element;
+      while(element != null) {
+        // skip modifiers
+        if (element instanceof PsiModifierList) {
+          element = element.getParent();
+          continue;
+        }
+
+        final int offset = element.getTextOffset();
+        if (offset >= 0) {
+          if (document.getLineNumber(offset) != line) {
+            break;
+          }
+        }
+        parent = element;
+        element = element.getParent();
+      }
+
+      if(parent instanceof PsiMethod) {
+        if (parent.getTextRange().getEndOffset() >= document.getLineEndOffset(line)) {
+          PsiCodeBlock body = ((PsiMethod)parent).getBody();
+          if (body != null) {
+            PsiStatement[] statements = body.getStatements();
+            if (statements.length > 0 && document.getLineNumber(statements[0].getTextOffset()) == line) {
+              result.set(JavaLineBreakpointType.class);
+            }
+          }
+        }
+        if (result.isNull()) {
+          result.set(JavaMethodBreakpointType.class);
+        }
+      }
+      else if (parent instanceof PsiField) {
+        if (result.isNull()) {
+          result.set(JavaFieldBreakpointType.class);
+        }
+      }
+      else {
+        result.set(JavaLineBreakpointType.class);
+      }
+      return true;
     });
     return result.get() == getClass();
   }

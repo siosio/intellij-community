@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,11 +18,11 @@ package com.intellij.testFramework.fixtures;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.roots.LanguageLevelProjectExtension;
+import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.JavaPsiFacade;
 import com.intellij.psi.PsiElementFactory;
-import com.intellij.psi.PsiManager;
 import com.intellij.psi.impl.PsiManagerEx;
-import com.intellij.testFramework.IdeaTestCase;
 import com.intellij.testFramework.UsefulTestCase;
 import com.intellij.testFramework.builders.JavaModuleFixtureBuilder;
 import org.jetbrains.annotations.NonNls;
@@ -35,11 +35,6 @@ import java.io.File;
 public abstract class JavaCodeInsightFixtureTestCase extends UsefulTestCase{
   protected JavaCodeInsightTestFixture myFixture;
   protected Module myModule;
-
-  @SuppressWarnings({"JUnitTestCaseWithNonTrivialConstructors"})
-  protected JavaCodeInsightFixtureTestCase() {
-    IdeaTestCase.initPlatformPrefix();
-  }
 
   @Override
   protected void setUp() throws Exception {
@@ -58,6 +53,7 @@ public abstract class JavaCodeInsightFixtureTestCase extends UsefulTestCase{
     myFixture.setUp();
     myFixture.setTestDataPath(getTestDataPath());
     myModule = moduleFixtureBuilder.getFixture().getModule();
+    LanguageLevelProjectExtension.getInstance(getProject()).setLanguageLevel(LanguageLevel.JDK_1_6);
   }
 
   protected boolean toAddSourceRoot() {
@@ -107,7 +103,7 @@ public abstract class JavaCodeInsightFixtureTestCase extends UsefulTestCase{
   }
 
   protected PsiManagerEx getPsiManager() {
-    return (PsiManagerEx)PsiManager.getInstance(getProject());
+    return PsiManagerEx.getInstanceEx(getProject());
   }
 
   public PsiElementFactory getElementFactory() {

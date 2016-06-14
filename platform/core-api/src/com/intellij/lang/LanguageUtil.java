@@ -17,13 +17,18 @@
 package com.intellij.lang;
 
 import com.intellij.lexer.Lexer;
+import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.fileTypes.LanguageFileType;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.FileViewProvider;
+import com.intellij.psi.LanguageSubstitutors;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.templateLanguages.TemplateLanguage;
+import com.intellij.testFramework.LightVirtualFile;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -40,9 +45,34 @@ public final class LanguageUtil {
   public static final Comparator<Language> LANGUAGE_COMPARATOR = new Comparator<Language>() {
     @Override
     public int compare(Language o1, Language o2) {
-      return o1.getDisplayName().compareToIgnoreCase(o2.getDisplayName());
+      return StringUtil.naturalCompare(o1.getDisplayName(), o2.getDisplayName());
     }
   };
+
+
+  @Nullable
+  public static Language getLanguageForPsi(@NotNull Project project, @Nullable VirtualFile file) {
+    Language language = getFileLanguage(file);
+    if (language == null) return null;
+    return LanguageSubstitutors.INSTANCE.substituteLanguage(language, file, project);
+  }
+
+  @Nullable
+  public static Language getFileLanguage(@Nullable VirtualFile file) {
+    if (file == null) return null;
+    Language l = file instanceof LightVirtualFile? ((LightVirtualFile)file).getLanguage() : null;
+    return l != null ? l : getFileTypeLanguage(file.getFileType());
+  }
+
+  @Nullable
+  public static Language getFileTypeLanguage(@Nullable FileType fileType) {
+    return fileType instanceof LanguageFileType ? ((LanguageFileType)fileType).getLanguage() : null;
+  }
+
+  @Nullable
+  public static FileType getLanguageFileType(@Nullable Language language) {
+    return language == null ? null : language.getAssociatedFileType();
+  }
 
   public static ParserDefinition.SpaceRequirements canStickTokensTogetherByLexer(ASTNode left, ASTNode right, Lexer lexer) {
     String textStr = left.getText() + right.getText();

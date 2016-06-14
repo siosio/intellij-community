@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,6 +38,7 @@ import com.jetbrains.python.psi.PyUtil;
 import com.jetbrains.python.psi.search.PyClassInheritorsSearch;
 import com.jetbrains.python.psi.search.PyOverridingMethodsSearch;
 import com.jetbrains.python.psi.search.PySuperMethodsSearch;
+import com.jetbrains.python.psi.types.TypeEvalContext;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -61,44 +62,36 @@ public class PyLineMarkerProvider implements LineMarkerProvider, PyLineSeparator
     }
   }
 
-  private static final Function<PyClass, String> ourSubclassTooltipProvider = new Function<PyClass, String>() {
-    public String fun(PyClass pyClass) {
-      final StringBuilder builder = new StringBuilder("<html>Is subclassed by:");
-      final AtomicInteger count = new AtomicInteger();
-      PyClassInheritorsSearch.search(pyClass, true).forEach(new Processor<PyClass>() {
-        public boolean process(PyClass pyClass) {
-          if (count.incrementAndGet() >= 10) {
-            builder.setLength(0);
-            builder.append("Has subclasses");
-            return false;
-          }
-          builder.append("<br>&nbsp;&nbsp;").append(pyClass.getName());
-          return true;
-        }
-      });
-      return builder.toString();
-    }
+  private static final Function<PyClass, String> ourSubclassTooltipProvider = pyClass -> {
+    final StringBuilder builder = new StringBuilder("<html>Is subclassed by:");
+    final AtomicInteger count = new AtomicInteger();
+    PyClassInheritorsSearch.search(pyClass, true).forEach(pyClass1 -> {
+      if (count.incrementAndGet() >= 10) {
+        builder.setLength(0);
+        builder.append("Has subclasses");
+        return false;
+      }
+      builder.append("<br>&nbsp;&nbsp;").append(pyClass1.getName());
+      return true;
+    });
+    return builder.toString();
   };
 
-  private static final Function<PyFunction, String> ourOverridingMethodTooltipProvider = new Function<PyFunction, String>() {
-    public String fun(final PyFunction pyFunction) {
-      final StringBuilder builder = new StringBuilder("<html>Is overridden in:");
-      final AtomicInteger count = new AtomicInteger();
-      PyClassInheritorsSearch.search(pyFunction.getContainingClass(), true).forEach(new Processor<PyClass>() {
-        public boolean process(PyClass pyClass) {
-          if (count.incrementAndGet() >= 10) {
-            builder.setLength(0);
-            builder.append("Has overridden methods");
-            return false;
-          }
-          if (pyClass.findMethodByName(pyFunction.getName(), false) != null) {
-            builder.append("<br>&nbsp;&nbsp;").append(pyClass.getName());
-          }
-          return true;
-        }
-      });
-      return builder.toString();
-    }
+  private static final Function<PyFunction, String> ourOverridingMethodTooltipProvider = pyFunction -> {
+    final StringBuilder builder = new StringBuilder("<html>Is overridden in:");
+    final AtomicInteger count = new AtomicInteger();
+    PyClassInheritorsSearch.search(pyFunction.getContainingClass(), true).forEach(pyClass -> {
+      if (count.incrementAndGet() >= 10) {
+        builder.setLength(0);
+        builder.append("Has overridden methods");
+        return false;
+      }
+      if (pyClass.findMethodByName(pyFunction.getName(), false, null) != null) {
+        builder.append("<br>&nbsp;&nbsp;").append(pyClass.getName());
+      }
+      return true;
+    });
+    return builder.toString();
   };
 
   private static final PyLineMarkerNavigator<PsiElement> ourSuperMethodNavigator = new PyLineMarkerNavigator<PsiElement>() {
@@ -107,9 +100,9 @@ public class PyLineMarkerProvider implements LineMarkerProvider, PyLineSeparator
     }
 
     @Nullable
-    protected Query<PsiElement> search(final PsiElement elt) {
+    protected Query<PsiElement> search(final PsiElement elt, @NotNull final TypeEvalContext context) {
       if (!(elt.getParent() instanceof PyFunction)) return null;
-      return PySuperMethodsSearch.search((PyFunction)elt.getParent());
+      return PySuperMethodsSearch.search((PyFunction)elt.getParent(), context);
     }
   };
 
@@ -119,12 +112,12 @@ public class PyLineMarkerProvider implements LineMarkerProvider, PyLineSeparator
     }
 
     @Nullable
-    protected Query<PsiElement> search(final PsiElement elt) {
+    protected Query<PsiElement> search(final PsiElement elt, @NotNull final TypeEvalContext context) {
       List<PsiElement> result = new ArrayList<PsiElement>();
       PyClass containingClass = PsiTreeUtil.getParentOfType(elt, PyClass.class);
       if (containingClass != null && elt instanceof PyTargetExpression) {
-        for (PyClass ancestor : containingClass.getAncestorClasses()) {
-          final PyTargetExpression attribute = ancestor.findClassAttribute(((PyTargetExpression)elt).getReferencedName(), false);
+        for (PyClass ancestor : containingClass.getAncestorClasses(context)) {
+          final PyTargetExpression attribute = ancestor.findClassAttribute(((PyTargetExpression)elt).getReferencedName(), false, context);
           if (attribute != null) {
             result.add(attribute);
           }
@@ -136,10 +129,10 @@ public class PyLineMarkerProvider implements LineMarkerProvider, PyLineSeparator
 
   private static final PyLineMarkerNavigator<PyClass> ourSubclassNavigator = new PyLineMarkerNavigator<PyClass>() {
     protected String getTitle(final PyClass elt) {
-      return "Choose Subclass of "+ elt.getName();
+      return "Choose Subclass of " + elt.getName();
     }
 
-    protected Query<PyClass> search(final PyClass elt) {
+    protected Query<PyClass> search(final PyClass elt, @NotNull TypeEvalContext context) {
       return PyClassInheritorsSearch.search(elt, true);
     }
   };
@@ -149,7 +142,7 @@ public class PyLineMarkerProvider implements LineMarkerProvider, PyLineSeparator
       return "Choose Overriding Method of " + elt.getName();
     }
 
-    protected Query<PyFunction> search(final PyFunction elt) {
+    protected Query<PyFunction> search(final PyFunction elt, @NotNull TypeEvalContext context) {
       return PyOverridingMethodsSearch.search(elt, true);
     }
   };
@@ -161,7 +154,7 @@ public class PyLineMarkerProvider implements LineMarkerProvider, PyLineSeparator
       return getMethodMarker(element, function);
     }
     if (element instanceof PyTargetExpression && PyUtil.isClassAttribute(element)) {
-      return getAttributeMarker((PyTargetExpression) element);
+      return getAttributeMarker((PyTargetExpression)element);
     }
     if (DaemonCodeAnalyzerSettings.getInstance().SHOW_METHOD_SEPARATORS && isSeparatorAllowed(element)) {
       return PyLineSeparatorUtil.addLineSeparatorIfNeeded(this, element);
@@ -176,16 +169,18 @@ public class PyLineMarkerProvider implements LineMarkerProvider, PyLineSeparator
   @Nullable
   private static LineMarkerInfo<PsiElement> getMethodMarker(final PsiElement element, final PyFunction function) {
     if (PyNames.INIT.equals(function.getName())) {
-      return null;      
+      return null;
     }
-    final PsiElement superMethod = PySuperMethodsSearch.search(function).findFirst();
+    final TypeEvalContext context = TypeEvalContext.codeAnalysis(element.getProject(), (function != null ? function.getContainingFile() : null));
+    final PsiElement superMethod = PySuperMethodsSearch.search(function, context).findFirst();
     if (superMethod != null) {
       PyClass superClass = null;
       if (superMethod instanceof PyFunction) {
         superClass = ((PyFunction)superMethod).getContainingClass();
       }
       // TODO: show "implementing" instead of "overriding" icon for Python implementations of Java interface methods
-      return new LineMarkerInfo<PsiElement>(element, element.getTextRange().getStartOffset(), AllIcons.Gutter.OverridingMethod, Pass.UPDATE_ALL,
+      return new LineMarkerInfo<PsiElement>(element, element.getTextRange().getStartOffset(), AllIcons.Gutter.OverridingMethod,
+                                            Pass.UPDATE_ALL,
                                             superClass == null ? null : new TooltipProvider("Overrides method in " + superClass.getName()),
                                             ourSuperMethodNavigator);
     }
@@ -200,8 +195,9 @@ public class PyLineMarkerProvider implements LineMarkerProvider, PyLineSeparator
     }
     PyClass containingClass = PsiTreeUtil.getParentOfType(element, PyClass.class);
     if (containingClass == null) return null;
-    for (PyClass ancestor : containingClass.getAncestorClasses()) {
-      final PyTargetExpression ancestorAttr = ancestor.findClassAttribute(name, false);
+    for (PyClass ancestor : containingClass
+      .getAncestorClasses(TypeEvalContext.codeAnalysis(element.getProject(), element.getContainingFile()))) {
+      final PyTargetExpression ancestorAttr = ancestor.findClassAttribute(name, false, null);
       if (ancestorAttr != null) {
         return new LineMarkerInfo<PsiElement>(element, element.getTextRange().getStartOffset(),
                                               AllIcons.Gutter.OverridingMethod, Pass.UPDATE_ALL,
@@ -214,9 +210,9 @@ public class PyLineMarkerProvider implements LineMarkerProvider, PyLineSeparator
 
   public void collectSlowLineMarkers(@NotNull final List<PsiElement> elements, @NotNull final Collection<LineMarkerInfo> result) {
     Set<PyFunction> functions = new HashSet<PyFunction>();
-    for(PsiElement element: elements) {
+    for (PsiElement element : elements) {
       if (element instanceof PyClass) {
-        collectInheritingClasses((PyClass) element, result);
+        collectInheritingClasses((PyClass)element, result);
       }
       else if (element instanceof PyFunction) {
         functions.add((PyFunction)element);
@@ -227,15 +223,16 @@ public class PyLineMarkerProvider implements LineMarkerProvider, PyLineSeparator
 
   private static void collectInheritingClasses(final PyClass element, final Collection<LineMarkerInfo> result) {
     if (PyClassInheritorsSearch.search(element, false).findFirst() != null) {
-      result.add(new LineMarkerInfo<PyClass>(element, element.getTextOffset(), AllIcons.Gutter.OverridenMethod, Pass.UPDATE_OVERRIDEN_MARKERS,
-                                             ourSubclassTooltipProvider, ourSubclassNavigator));
+      result
+        .add(new LineMarkerInfo<PyClass>(element, element.getTextOffset(), AllIcons.Gutter.OverridenMethod, Pass.UPDATE_OVERRIDDEN_MARKERS,
+                                         ourSubclassTooltipProvider, ourSubclassNavigator));
     }
   }
 
   private static void collectOverridingMethods(final Set<PyFunction> functions, final Collection<LineMarkerInfo> result) {
     Set<PyClass> classes = new HashSet<PyClass>();
     final MultiMap<PyClass, PyFunction> candidates = new MultiMap<PyClass, PyFunction>();
-    for(PyFunction function: functions) {
+    for (PyFunction function : functions) {
       PyClass pyClass = function.getContainingClass();
       if (pyClass != null && function.getName() != null) {
         classes.add(pyClass);
@@ -243,23 +240,21 @@ public class PyLineMarkerProvider implements LineMarkerProvider, PyLineSeparator
       }
     }
     final Set<PyFunction> overridden = new HashSet<PyFunction>();
-    for(final PyClass pyClass: classes) {
-      PyClassInheritorsSearch.search(pyClass, true).forEach(new Processor<PyClass>() {
-        public boolean process(final PyClass inheritor) {
-          for (Iterator<PyFunction> it = candidates.get(pyClass).iterator(); it.hasNext();) {
-            PyFunction func = it.next();
-            if (inheritor.findMethodByName(func.getName(), false) != null) {
-              overridden.add(func);
-              it.remove();
-            }
+    for (final PyClass pyClass : classes) {
+      PyClassInheritorsSearch.search(pyClass, true).forEach(inheritor -> {
+        for (Iterator<PyFunction> it = candidates.get(pyClass).iterator(); it.hasNext(); ) {
+          PyFunction func = it.next();
+          if (inheritor.findMethodByName(func.getName(), false, null) != null) {
+            overridden.add(func);
+            it.remove();
           }
-          return !candidates.isEmpty();
         }
+        return !candidates.isEmpty();
       });
       if (candidates.isEmpty()) break;
     }
-    for(PyFunction func: overridden) {
-      result.add(new LineMarkerInfo<PyFunction>(func, func.getTextOffset(), AllIcons.Gutter.OverridenMethod, Pass.UPDATE_OVERRIDEN_MARKERS,
+    for (PyFunction func : overridden) {
+      result.add(new LineMarkerInfo<PyFunction>(func, func.getTextOffset(), AllIcons.Gutter.OverridenMethod, Pass.UPDATE_OVERRIDDEN_MARKERS,
                                                 ourOverridingMethodTooltipProvider,
                                                 ourOverridingMethodNavigator));
     }

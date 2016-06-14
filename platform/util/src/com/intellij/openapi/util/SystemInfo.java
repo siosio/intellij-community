@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,6 +49,7 @@ public class SystemInfo extends SystemInfoRt {
   public static final boolean isAppleJvm = isAppleJvm();
   public static final boolean isOracleJvm = isOracleJvm();
   public static final boolean isSunJvm = isSunJvm();
+  public static final boolean isIbmJvm = isIbmJvm();
   public static final boolean isJetbrainsJvm = isJetbrainsJvm();
 
   public static boolean isOsVersionAtLeast(@NotNull String version) {
@@ -57,14 +58,17 @@ public class SystemInfo extends SystemInfoRt {
 
   // version numbers from http://msdn.microsoft.com/en-us/library/windows/desktop/ms724832.aspx
   public static final boolean isWin2kOrNewer = isWindows && isOsVersionAtLeast("5.0");
+  public static final boolean isWinXpOrNewer = isWindows && isOsVersionAtLeast("5.1");
   public static final boolean isWinVistaOrNewer = isWindows && isOsVersionAtLeast("6.0");
   public static final boolean isWin7OrNewer = isWindows && isOsVersionAtLeast("6.1");
-  public static final boolean isWindowsXP = isWindows && (OS_VERSION.equals("5.1") || OS_VERSION.equals("5.2"));
+  public static final boolean isWin8OrNewer = isWindows && isOsVersionAtLeast("6.2");
 
   public static final boolean isXWindow = isUnix && !isMac;
+  // https://userbase.kde.org/KDE_System_Administration/Environment_Variables#KDE_FULL_SESSION
+  public static final boolean isKDE = !StringUtil.isEmpty(System.getenv("KDE_FULL_SESSION"));
 
   // http://www.freedesktop.org/software/systemd/man/os-release.html
-  private static NotNullLazyValue<Map<String, String>> ourOsReleaseInfo = new AtomicNotNullLazyValue<Map<String, String>>() {
+  private static final NotNullLazyValue<Map<String, String>> ourOsReleaseInfo = new AtomicNotNullLazyValue<Map<String, String>>() {
     @NotNull
     @Override
     protected Map<String, String> compute() {
@@ -106,29 +110,28 @@ public class SystemInfo extends SystemInfoRt {
 
   public static final boolean is32Bit = ARCH_DATA_MODEL == null || ARCH_DATA_MODEL.equals("32");
   public static final boolean is64Bit = !is32Bit;
-  public static final boolean isAMD64 = "amd64".equals(OS_ARCH);
   public static final boolean isMacIntel64 = isMac && "x86_64".equals(OS_ARCH);
 
   private static final NotNullLazyValue<Boolean> ourHasXdgOpen = new AtomicNotNullLazyValue<Boolean>() {
     @NotNull
     @Override
     protected Boolean compute() {
-      return isUnix && new File("/usr/bin/xdg-open").canExecute();
+      return new File("/usr/bin/xdg-open").canExecute();
     }
   };
   public static boolean hasXdgOpen() {
-    return ourHasXdgOpen.getValue();
+    return isXWindow && ourHasXdgOpen.getValue();
   }
 
   private static final NotNullLazyValue<Boolean> ourHasXdgMime = new AtomicNotNullLazyValue<Boolean>() {
     @NotNull
     @Override
     protected Boolean compute() {
-      return isUnix && new File("/usr/bin/xdg-mime").canExecute();
+      return new File("/usr/bin/xdg-mime").canExecute();
     }
   };
   public static boolean hasXdgMime() {
-    return ourHasXdgOpen.getValue();
+    return isXWindow && ourHasXdgMime.getValue();
   }
 
   public static final boolean isMacOSTiger = isMac && isOsVersionAtLeast("10.4");
@@ -138,6 +141,7 @@ public class SystemInfo extends SystemInfoRt {
   public static final boolean isMacOSMountainLion = isMac && isOsVersionAtLeast("10.8");
   public static final boolean isMacOSMavericks = isMac && isOsVersionAtLeast("10.9");
   public static final boolean isMacOSYosemite = isMac && isOsVersionAtLeast("10.10");
+  public static final boolean isMacOSElCapitan = isMac && isOsVersionAtLeast("10.11");
 
   @NotNull
   public static String getMacOSMajorVersion() {
@@ -217,6 +221,11 @@ public class SystemInfo extends SystemInfoRt {
     return vendor != null && StringUtil.containsIgnoreCase(vendor, "Sun") && StringUtil.containsIgnoreCase(vendor, "Microsystems");
   }
 
+  private static boolean isIbmJvm() {
+    final String vendor = SystemProperties.getJavaVmVendor();
+    return vendor != null && StringUtil.containsIgnoreCase(vendor, "IBM");
+  }
+
   private static boolean isAppleJvm() {
     final String vendor = SystemProperties.getJavaVmVendor();
     return vendor != null && StringUtil.containsIgnoreCase(vendor, "Apple");
@@ -226,4 +235,12 @@ public class SystemInfo extends SystemInfoRt {
     final String vendor = SystemProperties.getJavaVendor();
     return vendor != null && StringUtil.containsIgnoreCase(vendor, "jetbrains");
   }
+
+  /** @deprecated use {@link #isWinXpOrNewer} (to be removed in IDEA 17) */
+  @SuppressWarnings("unused")
+  public static final boolean isWindowsXP = isWindows && (OS_VERSION.equals("5.1") || OS_VERSION.equals("5.2"));
+
+  /** @deprecated use {@link #is32Bit} or {@link #is64Bit} (to be removed in IDEA 17) */
+  @SuppressWarnings("unused")
+  public static final boolean isAMD64 = "amd64".equals(OS_ARCH);
 }

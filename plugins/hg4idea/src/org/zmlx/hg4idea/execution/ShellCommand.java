@@ -14,15 +14,13 @@ package org.zmlx.hg4idea.execution;
 
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.GeneralCommandLine;
-import com.intellij.execution.process.CapturingProcessAdapter;
-import com.intellij.execution.process.ProcessEvent;
-import com.intellij.execution.process.ProcessOutput;
-import com.intellij.execution.process.ProcessOutputTypes;
+import com.intellij.execution.process.*;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.vcs.LineHandlerHelper;
+import com.intellij.vcs.VcsLocaleHelper;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -32,11 +30,10 @@ import java.util.Iterator;
 import java.util.List;
 
 public final class ShellCommand {
-
   private final GeneralCommandLine myCommandLine;
 
-  public ShellCommand(@Nullable List<String> commandLine, @Nullable String dir, @Nullable Charset charset) {
-    if (commandLine == null || commandLine.isEmpty()) {
+  public ShellCommand(@NotNull List<String> commandLine, @Nullable String dir, @Nullable Charset charset) {
+    if (commandLine.isEmpty()) {
       throw new IllegalArgumentException("commandLine is empty");
     }
     myCommandLine = new GeneralCommandLine(commandLine);
@@ -50,15 +47,14 @@ public final class ShellCommand {
       //ignore all hg config files except current repository config
       myCommandLine.getEnvironment().put("HGRCPATH", "");
     }
+    myCommandLine.withEnvironment(VcsLocaleHelper.getDefaultLocaleEnvironmentVars("hg"));
   }
 
   @NotNull
   public HgCommandResult execute(final boolean showTextOnIndicator, boolean isBinary) throws ShellCommandException, InterruptedException {
     final ProgressIndicator indicator = ProgressManager.getInstance().getProgressIndicator();
     try {
-      final Process process = myCommandLine.createProcess();
-      HgCommandProcessHandler processHandler =
-        new HgCommandProcessHandler(process, myCommandLine.toString(), myCommandLine.getCharset(), isBinary);
+      OSProcessHandler processHandler = isBinary ? new BinaryOSProcessHandler(myCommandLine) : new OSProcessHandler(myCommandLine);
       CapturingProcessAdapter outputAdapter = new CapturingProcessAdapter() {
 
         @Override
@@ -88,7 +84,7 @@ public final class ShellCommand {
         }
       }
       ProcessOutput output = outputAdapter.getOutput();
-      return new HgCommandResult(output, processHandler.getBinaryOutput());
+      return isBinary ? new HgCommandResult(output, ((BinaryOSProcessHandler)processHandler).getOutput()) : new HgCommandResult(output);
     }
     catch (ExecutionException e) {
       throw new ShellCommandException(e);

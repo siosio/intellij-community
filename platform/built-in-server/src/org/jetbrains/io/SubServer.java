@@ -17,8 +17,9 @@ package org.jetbrains.io;
 
 import com.intellij.ide.XmlRpcServer;
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Disposer;
-import com.intellij.util.net.NetUtils;
+import com.intellij.util.net.NetKt;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandler;
@@ -30,7 +31,6 @@ import io.netty.handler.codec.http.QueryStringDecoder;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.ide.CustomPortServerManager;
 
-import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.Map;
 
@@ -57,7 +57,7 @@ public final class SubServer implements CustomPortServerManager.CustomPortServic
       channelRegistrar = new ChannelRegistrar();
     }
 
-    ServerBootstrap bootstrap = NettyUtil.nioServerBootstrap(server.getEventLoopGroup());
+    ServerBootstrap bootstrap = NettyKt.serverBootstrap(server.getEventLoopGroup());
     Map<String, Object> xmlRpcHandlers = user.createXmlRpcHandlers();
     if (xmlRpcHandlers == null) {
       BuiltInServer.configureChildHandler(bootstrap, channelRegistrar, null);
@@ -75,13 +75,13 @@ public final class SubServer implements CustomPortServerManager.CustomPortServic
     }
 
     try {
-      bootstrap.localAddress(user.isAvailableExternally() ? new InetSocketAddress(port) : new InetSocketAddress(NetUtils.getLoopbackAddress(), port));
+      bootstrap.localAddress(user.isAvailableExternally() ? new InetSocketAddress(port) : NetKt.loopbackSocketAddress(port));
       channelRegistrar.add(bootstrap.bind().syncUninterruptibly().channel());
       return true;
     }
     catch (Exception e) {
       try {
-        NettyUtil.log(e, BuiltInServer.LOG);
+        NettyUtil.log(e, Logger.getInstance(BuiltInServer.class));
       }
       finally {
         user.cannotBind(e, port);
@@ -122,7 +122,7 @@ public final class SubServer implements CustomPortServerManager.CustomPortServic
     }
 
     @Override
-    protected boolean process(@NotNull ChannelHandlerContext context, @NotNull FullHttpRequest request, @NotNull QueryStringDecoder urlDecoder) throws IOException {
+    protected boolean process(@NotNull ChannelHandlerContext context, @NotNull FullHttpRequest request, @NotNull QueryStringDecoder urlDecoder) {
       if (handlers.isEmpty()) {
         // not yet initialized, for example, P2PTransport could add handlers after we bound.
         return false;

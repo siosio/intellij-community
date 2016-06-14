@@ -15,6 +15,7 @@
  */
 package com.intellij.diagnostic.logging;
 
+import com.intellij.execution.CommonProgramRunConfigurationParameters;
 import com.intellij.execution.configurations.RunConfigurationBase;
 import com.intellij.execution.filters.Filter;
 import com.intellij.execution.filters.HyperlinkInfo;
@@ -52,14 +53,29 @@ public class OutputFileUtil {
   private OutputFileUtil() {
   }
 
-  public static void attachDumpListener(@NotNull final RunConfigurationBase configuration, @NotNull final ProcessHandler startedProcess, @Nullable ExecutionConsole console) {
+  public static File getOutputFile(@NotNull final RunConfigurationBase configuration) {
+    String outputFilePath = configuration.getOutputFilePath();
+    if (outputFilePath != null) {
+      final String filePath = FileUtil.toSystemDependentName(outputFilePath);
+      File file = new File(filePath);
+      if (configuration instanceof CommonProgramRunConfigurationParameters && !FileUtil.isAbsolute(filePath)) {
+        String directory = ((CommonProgramRunConfigurationParameters)configuration).getWorkingDirectory();
+        if (directory != null) {
+          file = new File(new File(directory), filePath);
+        }
+      }
+      return file;
+    }
+    return null;
+  }
+
+  public static void attachDumpListener(@NotNull final RunConfigurationBase configuration, @NotNull final ProcessHandler startedProcess, @Nullable final ExecutionConsole console) {
     if (!configuration.isSaveOutputToFile()) {
       return;
     }
 
-    String outputFilePath = configuration.getOutputFilePath();
-    if (outputFilePath != null) {
-      final String filePath = FileUtil.toSystemDependentName(outputFilePath);
+    final File file = getOutputFile(configuration);
+    if (file != null) {
       startedProcess.addProcessListener(new ProcessAdapter() {
         private PrintStream myOutput;
         @Override
@@ -72,11 +88,11 @@ public class OutputFileUtil {
         @Override
         public void startNotified(ProcessEvent event) {
           try {
-            myOutput = new PrintStream(new FileOutputStream(new File(filePath)));
+            myOutput = new PrintStream(new FileOutputStream(file));
           }
           catch (FileNotFoundException ignored) {
           }
-          startedProcess.notifyTextAvailable(CONSOLE_OUTPUT_FILE_MESSAGE + filePath + "\n", ProcessOutputTypes.SYSTEM);
+          startedProcess.notifyTextAvailable(CONSOLE_OUTPUT_FILE_MESSAGE + FileUtil.toSystemDependentName(file.getAbsolutePath()) + "\n", ProcessOutputTypes.SYSTEM);
         }
 
         @Override
@@ -113,11 +129,8 @@ public class OutputFileUtil {
 
             if (file != null) {
               file.refresh(false, false);
-              ApplicationManager.getApplication().runReadAction(new Runnable() {
-                @Override
-                public void run() {
-                  FileEditorManager.getInstance(project).openTextEditor(new OpenFileDescriptor(project, file), true);
-                }
+              ApplicationManager.getApplication().runReadAction(() -> {
+                FileEditorManager.getInstance(project).openTextEditor(new OpenFileDescriptor(project, file), true);
               });
             }
           }

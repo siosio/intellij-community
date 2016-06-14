@@ -35,6 +35,7 @@ import com.jetbrains.python.codeInsight.editorActions.smartEnter.fixers.*;
 import com.jetbrains.python.psi.PyFile;
 import com.jetbrains.python.psi.PyStatement;
 import com.jetbrains.python.psi.PyStatementList;
+import com.jetbrains.python.psi.impl.PyPsiUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -51,6 +52,7 @@ public class PySmartEnterProcessor extends SmartEnterProcessor {
   private static final Logger LOG = Logger.getInstance("#com.jetbrains.python.codeInsight.editorActions.smartEnter.PySmartEnterProcessor");
   private static final List<PyFixer> ourFixers = ImmutableList.<PyFixer>builder()
     .add(new PyStringLiteralFixer())
+    .add(new GoogleDocStringSectionFixer())
     .add(new PyParenthesizedFixer())
     .add(new PyMissingBracesFixer())
     .add(new PyConditionalStatementPartFixer())
@@ -153,6 +155,7 @@ public class PySmartEnterProcessor extends SmartEnterProcessor {
           if (LookupManager.getInstance(project).getActiveLookup() != null) {
             return;
           }
+          PyPsiUtils.assertValid(element);
           if (isUncommited(project) || !element.isValid()) {
             process(project, editor, psiFile, attempt + 1);
             return;

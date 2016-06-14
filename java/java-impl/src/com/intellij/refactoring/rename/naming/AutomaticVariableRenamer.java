@@ -19,18 +19,21 @@ import com.intellij.lang.ASTNode;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.JavaCodeStyleManager;
+import com.intellij.psi.impl.search.JavaFunctionalExpressionSearcher;
 import com.intellij.psi.impl.source.tree.JavaElementType;
 import com.intellij.psi.impl.source.tree.StdTokenSets;
 import com.intellij.psi.impl.source.tree.TreeUtil;
 import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.util.PsiUtil;
 import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.usageView.UsageInfo;
 import com.intellij.util.containers.HashSet;
+import org.jetbrains.annotations.NotNull;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
-import java.util.ArrayList;
 
 /**
  * @author dsl
@@ -40,9 +43,11 @@ public class AutomaticVariableRenamer extends AutomaticRenamer {
 
   public AutomaticVariableRenamer(PsiClass aClass, String newClassName, Collection<UsageInfo> usages) {
     final String oldClassName = aClass.getName();
+    final Set<PsiFile> files = new HashSet<>();
     for (final UsageInfo info : usages) {
       final PsiElement element = info.getElement();
       if (!(element instanceof PsiJavaCodeReferenceElement)) continue;
+      files.add(element.getContainingFile());
       final PsiDeclarationStatement statement = PsiTreeUtil.getParentOfType(element, PsiDeclarationStatement.class);
       if (statement != null) {
         for(PsiElement declaredElement: statement.getDeclaredElements()) {
@@ -63,6 +68,23 @@ public class AutomaticVariableRenamer extends AutomaticRenamer {
         }
       }
     }
+
+    if (files.size() < JavaFunctionalExpressionSearcher.SMART_SEARCH_THRESHOLD && oldClassName != null) {
+      for (PsiFile file : files) {
+        for (PsiLambdaExpression expression : SyntaxTraverser.psiTraverser().withRoot(file).filter(PsiLambdaExpression.class)) {
+          final PsiParameter[] parameters = expression.getParameterList().getParameters();
+          for (PsiParameter parameter : parameters) {
+            if (aClass.equals(PsiUtil.resolveClassInType(parameter.getType()))) {
+              final String parameterName = parameter.getName();
+              if (parameterName != null && StringUtil.containsIgnoreCase(parameterName, oldClassName)) {
+                myElements.add(parameter);
+              }
+            }
+          }
+        }
+      }
+    }
+
     suggestAllNames(oldClassName, newClassName);
   }
 
@@ -123,7 +145,7 @@ public class AutomaticVariableRenamer extends AutomaticRenamer {
     return RefactoringBundle.message("entity.name.variable");
   }
 
-  public String nameToCanonicalName(String name, PsiNamedElement psiVariable) {
+  public String nameToCanonicalName(@NotNull String name, PsiNamedElement psiVariable) {
     final JavaCodeStyleManager codeStyleManager = JavaCodeStyleManager.getInstance(psiVariable.getProject());
     final String propertyName = codeStyleManager.variableNameToPropertyName(name, codeStyleManager.getVariableKind((PsiVariable)psiVariable));
     if (myToUnpluralize.contains(psiVariable)) {

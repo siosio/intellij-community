@@ -21,6 +21,7 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.options.colors.ColorSettingsPage;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.ui.GuiUtils;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
@@ -35,6 +36,7 @@ public class NewColorAndFontPanel extends JPanel {
   private final SchemesPanel mySchemesPanel;
   private final OptionsPanel myOptionsPanel;
   private final PreviewPanel myPreviewPanel;
+  private final AbstractAction myCopyAction;
   private final String myCategory;
   private final Collection<String> myOptionList;
 
@@ -56,7 +58,7 @@ public class NewColorAndFontPanel extends JPanel {
     top.add(myOptionsPanel.getPanel(), BorderLayout.CENTER);
     if (optionsPanel instanceof ConsoleFontOptions) {
       JPanel wrapper = new JPanel(new FlowLayout(FlowLayout.TRAILING));
-      wrapper.add(new JButton(new AbstractAction(ApplicationBundle.message("action.apply.editor.font.settings")) {
+      myCopyAction = new AbstractAction(ApplicationBundle.message("action.apply.editor.font.settings")) {
         @Override
         public void actionPerformed(ActionEvent e) {
           EditorColorsScheme scheme = ((ConsoleFontOptions)myOptionsPanel).getCurrentScheme();
@@ -67,14 +69,22 @@ public class NewColorAndFontPanel extends JPanel {
           myOptionsPanel.updateOptionsList();
           myPreviewPanel.updateView();
         }
-      }));
+      };
+      wrapper.add(new JButton(myCopyAction));
       top.add(wrapper, BorderLayout.SOUTH);
+    }
+    else {
+      myCopyAction = null;
     }
 
     // We don't want to show non-used preview panel (it's considered to be not in use if it doesn't contain text).
     if (myPreviewPanel.getPanel() != null && (page == null || !StringUtil.isEmptyOrSpaces(page.getDemoText()))) {
-      add(top, BorderLayout.NORTH);
-      add(myPreviewPanel.getPanel(), BorderLayout.CENTER);
+      @SuppressWarnings("SuspiciousNameCombination")
+      JSplitPane splitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT, top, myPreviewPanel.getPanel());
+      splitPane.setBorder(BorderFactory.createEmptyBorder());
+      splitPane.setContinuousLayout(true);
+      add(splitPane);
+      GuiUtils.replaceJSplitPaneWithIDEASplitter(splitPane);
     }
     else {
       add(top, BorderLayout.CENTER);
@@ -109,6 +119,11 @@ public class NewColorAndFontPanel extends JPanel {
       public void schemeChanged(final Object source) {
         myOptionsPanel.updateOptionsList();
         myPreviewPanel.updateView();
+        if (optionsPanel instanceof ConsoleFontOptions) {
+          ConsoleFontOptions options = (ConsoleFontOptions)optionsPanel;
+          boolean readOnly = ColorAndFontOptions.isReadOnly(options.getCurrentScheme());
+          myCopyAction.setEnabled(!readOnly);
+        }
       }
     });
 

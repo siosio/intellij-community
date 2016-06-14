@@ -1,3 +1,18 @@
+/*
+ * Copyright 2000-2016 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.intellij.codeInsight.completion;
 
 import com.intellij.codeInsight.lookup.LookupElementPresentation;
@@ -16,13 +31,13 @@ public class MemberLookupHelper {
   private final PsiMember myMember;
   private final boolean myMergedOverloads;
   @Nullable private final PsiClass myContainingClass;
-  private boolean myShouldImport = false;
+  private boolean myShouldImport;
 
   public MemberLookupHelper(List<PsiMethod> overloads, PsiClass containingClass, boolean shouldImport) {
     this(overloads.get(0), containingClass, shouldImport, true);
   }
 
-  public MemberLookupHelper(PsiMember member, PsiClass containingClass, boolean shouldImport, final boolean mergedOverloads) {
+  public MemberLookupHelper(PsiMember member, @Nullable PsiClass containingClass, boolean shouldImport, final boolean mergedOverloads) {
     myMember = member;
     myContainingClass = containingClass;
     myShouldImport = shouldImport;
@@ -46,11 +61,11 @@ public class MemberLookupHelper {
     return myShouldImport;
   }
 
-  public void renderElement(LookupElementPresentation presentation, @Nullable Boolean qualify, PsiSubstitutor substitutor) {
+  public void renderElement(LookupElementPresentation presentation, boolean showClass, boolean showPackage, PsiSubstitutor substitutor) {
     final String className = myContainingClass == null ? "???" : myContainingClass.getName();
 
     final String memberName = myMember.getName();
-    if (!Boolean.FALSE.equals(qualify) && (!myShouldImport && StringUtil.isNotEmpty(className) || Boolean.TRUE.equals(qualify))) {
+    if (showClass && StringUtil.isNotEmpty(className)) {
       presentation.setItemText(className + "." + memberName);
     } else {
       presentation.setItemText(memberName);
@@ -58,7 +73,7 @@ public class MemberLookupHelper {
 
     final String qname = myContainingClass == null ? "" : myContainingClass.getQualifiedName();
     String pkg = qname == null ? "" : StringUtil.getPackageName(qname);
-    String location = Boolean.FALSE.equals(qualify) || StringUtil.isEmpty(pkg) ? "" : " (" + pkg + ")";
+    String location = showPackage && StringUtil.isNotEmpty(pkg) ? " (" + pkg + ")" : "";
 
     final String params = myMergedOverloads
                           ? "(...)"

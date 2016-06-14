@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,9 +40,13 @@ import com.intellij.ui.JBColor;
 import com.intellij.ui.PrevNextActionsDescriptor;
 import com.intellij.ui.SideBorder;
 import com.intellij.ui.TabbedPaneWrapper;
+import com.intellij.ui.components.panels.NonOpaquePanel;
 import com.intellij.ui.tabs.UiDecorator;
 import com.intellij.util.ArrayUtil;
+import com.intellij.util.ObjectUtils;
 import com.intellij.util.SmartList;
+import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.ui.JBSwingUtilities;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -92,6 +96,7 @@ public abstract class EditorComposite implements Disposable {
   private final FileEditorManagerEx myFileEditorManager;
   private final Map<FileEditor, JComponent> myTopComponents = new HashMap<FileEditor, JComponent>();
   private final Map<FileEditor, JComponent> myBottomComponents = new HashMap<FileEditor, JComponent>();
+  private final Map<FileEditor, String> myDisplayNames = ContainerUtil.newHashMap();
 
   /**
    * @param file <code>file</code> for which composite is being constructed
@@ -136,16 +141,13 @@ public abstract class EditorComposite implements Disposable {
         final VirtualFile oldFile = event.getOldFile();
         final VirtualFile newFile = event.getNewFile();
         if (Comparing.equal(oldFile, newFile) && Comparing.equal(getFile(), newFile)) {
-          Runnable runnable = new Runnable() {
-            @Override
-            public void run() {
-              final FileEditor oldEditor = event.getOldEditor();
-              if (oldEditor != null) oldEditor.deselectNotify();
-              final FileEditor newEditor = event.getNewEditor();
-              if (newEditor != null) newEditor.selectNotify();
-              ((FileEditorProviderManagerImpl)FileEditorProviderManager.getInstance()).providerSelected(EditorComposite.this);
-              ((IdeDocumentHistoryImpl)IdeDocumentHistory.getInstance(myFileEditorManager.getProject())).onSelectionChanged();
-            }
+          Runnable runnable = () -> {
+            final FileEditor oldEditor = event.getOldEditor();
+            if (oldEditor != null) oldEditor.deselectNotify();
+            final FileEditor newEditor = event.getNewEditor();
+            if (newEditor != null) newEditor.selectNotify();
+            ((FileEditorProviderManagerImpl)FileEditorProviderManager.getInstance()).providerSelected(EditorComposite.this);
+            ((IdeDocumentHistoryImpl)IdeDocumentHistory.getInstance(myFileEditorManager.getProject())).onSelectionChanged();
           };
           if (ApplicationManager.getApplication().isDispatchThread()) {
             CommandProcessor.getInstance().executeCommand(myFileEditorManager.getProject(), runnable, "Switch Active Editor", null);
@@ -171,9 +173,11 @@ public abstract class EditorComposite implements Disposable {
     });
     wrapper.getTabs().getComponent().setBorder(new EmptyBorder(0, 0, 1, 0));
 
+    boolean firstEditor = true;
     for (FileEditor editor : editors) {
-      JComponent component = myEditors.length == 1 && editor == myEditors[0] ? (JComponent)myComponent.getComponent(0) : createEditorComponent(editor);
-      wrapper.addTab(editor.getName(), component);
+      JComponent component = firstEditor && myComponent != null ? (JComponent)myComponent.getComponent(0) : createEditorComponent(editor);
+      wrapper.addTab(getDisplayName(editor), component);
+      firstEditor = false;
     }
     wrapper.addChangeListener(new MyChangeListener());
 
@@ -216,13 +220,10 @@ public abstract class EditorComposite implements Disposable {
 
   private void fireSelectedEditorChanged(final FileEditor oldSelectedEditor, final FileEditor newSelectedEditor){
     if ((!EventQueue.isDispatchThread() || !myFileEditorManager.isInsideChange()) && !Comparing.equal(oldSelectedEditor, newSelectedEditor)) {
-      myFileEditorManager.notifyPublisher(new Runnable() {
-        @Override
-        public void run() {
-          final FileEditorManagerEvent event = new FileEditorManagerEvent(myFileEditorManager, myFile, oldSelectedEditor, myFile, newSelectedEditor);
-          final FileEditorManagerListener publisher = myFileEditorManager.getProject().getMessageBus().syncPublisher(FileEditorManagerListener.FILE_EDITOR_MANAGER);
-          publisher.selectionChanged(event);
-        }
+      myFileEditorManager.notifyPublisher(() -> {
+        final FileEditorManagerEvent event = new FileEditorManagerEvent(myFileEditorManager, myFile, oldSelectedEditor, myFile, newSelectedEditor);
+        final FileEditorManagerListener publisher = myFileEditorManager.getProject().getMessageBus().syncPublisher(FileEditorManagerListener.FILE_EDITOR_MANAGER);
+        publisher.selectionChanged(event);
       });
       final JComponent component = newSelectedEditor.getComponent();
       final EditorWindowHolder holder = UIUtil.getParentOfType(EditorWindowHolder.class, component);
@@ -292,8 +293,8 @@ public abstract class EditorComposite implements Disposable {
     SmartList<JComponent> result = new SmartList<JComponent>();
     JComponent container = top ? myTopComponents.get(editor) : myBottomComponents.get(editor);
     for (Component each : container.getComponents()) {
-      if (each instanceof TopBottomComponentWrapper) {
-        result.add(((TopBottomComponentWrapper)each).getWrappee());
+      if (each instanceof NonOpaquePanel) {
+        result.add(((NonOpaquePanel)each).getTargetComponent());
       }
     }
     return Collections.unmodifiableList(result);
@@ -321,10 +322,28 @@ public abstract class EditorComposite implements Disposable {
 
     if (remove) {
       container.remove(component.getParent());
-    } else {
-      container.add(new TopBottomComponentWrapper(component, top));
+    }
+    else {
+      NonOpaquePanel wrapper = new NonOpaquePanel(component);
+      wrapper.setBorder(createTopBottomSideBorder(top));
+      container.add(wrapper);
     }
     container.revalidate();
+  }
+
+  public void setDisplayName(@NotNull FileEditor editor, @NotNull String name) {
+    int index = ContainerUtil.indexOfIdentity(ContainerUtil.immutableList(myEditors), editor);
+    assert index != -1;
+
+    myDisplayNames.put(editor, name);
+    if (myTabbedPaneWrapper != null) {
+      myTabbedPaneWrapper.setTitleAt(index, name);
+    }
+  }
+
+  @NotNull
+  protected String getDisplayName(@NotNull FileEditor editor) {
+    return ObjectUtils.notNull(myDisplayNames.get(editor), editor.getName());
   }
 
   /**
@@ -458,23 +477,23 @@ public abstract class EditorComposite implements Disposable {
 
   void addEditor(@NotNull FileEditor editor) {
     ApplicationManager.getApplication().assertIsDispatchThread();
-    FileEditor[] editors = ArrayUtil.append(myEditors, editor);
+    myEditors = ArrayUtil.append(myEditors, editor);
     if (myTabbedPaneWrapper == null) {
-      myTabbedPaneWrapper = createTabbedPaneWrapper(editors);
+      myTabbedPaneWrapper = createTabbedPaneWrapper(myEditors);
       myComponent.setComponent(myTabbedPaneWrapper.getComponent());
     }
     else {
       JComponent component = createEditorComponent(editor);
-      myTabbedPaneWrapper.addTab(editor.getName(), component);
+      myTabbedPaneWrapper.addTab(getDisplayName(editor), component);
     }
     myFocusWatcher.deinstall(myFocusWatcher.getTopComponent());
     myFocusWatcher.install(myComponent);
-    myEditors = editors;
   }
 
   private static class TopBottomPanel extends JPanel {
     private TopBottomPanel() {
       setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
+      setName("editor-part");
     }
 
     @Override
@@ -482,30 +501,21 @@ public abstract class EditorComposite implements Disposable {
       Color color = EditorColorsManager.getInstance().getGlobalScheme().getColor(EditorColors.GUTTER_BACKGROUND);
       return color == null ? EditorColors.GUTTER_BACKGROUND.getDefaultColor() : color;
     }
+
+    @Override
+    protected Graphics getComponentGraphics(Graphics graphics) {
+      return JBSwingUtilities.runGlobalCGTransform(this, super.getComponentGraphics(graphics));
+    }
   }
 
-  private static class TopBottomComponentWrapper extends JPanel {
-    private final JComponent myWrappee;
-
-    public TopBottomComponentWrapper(JComponent component, boolean top) {
-      super(new BorderLayout());
-      myWrappee = component;
-      setOpaque(false);
-
-      setBorder(new SideBorder(null, top ? SideBorder.BOTTOM : SideBorder.TOP) {
-        @Override
-        public Color getLineColor() {
-          Color result = EditorColorsManager.getInstance().getGlobalScheme().getColor(EditorColors.TEARLINE_COLOR);
-          return result == null ? JBColor.BLACK : result;
-        }
-      });
-
-      add(component);
-    }
-
-    @NotNull
-    public JComponent getWrappee() {
-      return myWrappee;
-    }
+  @NotNull
+  private static SideBorder createTopBottomSideBorder(boolean top) {
+    return new SideBorder(null, top ? SideBorder.BOTTOM : SideBorder.TOP) {
+      @Override
+      public Color getLineColor() {
+        Color result = EditorColorsManager.getInstance().getGlobalScheme().getColor(EditorColors.TEARLINE_COLOR);
+        return result == null ? JBColor.BLACK : result;
+      }
+    };
   }
 }

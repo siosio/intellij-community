@@ -21,6 +21,7 @@ import java.util.concurrent.Callable;
  * @author Sergey Simonchik
  */
 public class GithubDownloadUtil {
+  private static final String PROJECT_GENERATORS = "projectGenerators";
 
   private GithubDownloadUtil() {}
 
@@ -30,9 +31,26 @@ public class GithubDownloadUtil {
   }
 
   @NotNull
+  private static String formatGithubUserName(@NotNull String userName) {
+    return "github-" + userName;
+  }
+
+  @NotNull
   public static File getCacheDir(@NotNull String userName, @NotNull String repositoryName) {
-    File generatorsDir = new File(PathManager.getSystemPath(), "projectGenerators");
+    File generatorsDir = new File(PathManager.getSystemPath(), PROJECT_GENERATORS);
     String dirName = formatGithubRepositoryName(userName, repositoryName);
+    File dir = new File(generatorsDir, dirName);
+    try {
+      return dir.getCanonicalFile();
+    } catch (IOException e) {
+      return dir;
+    }
+  }
+
+  @NotNull
+  public static File getUserCacheDir(@NotNull String userName) {
+    File generatorsDir = new File(PathManager.getSystemPath(), PROJECT_GENERATORS);
+    String dirName = formatGithubUserName(userName);
     File dir = new File(generatorsDir, dirName);
     try {
       return dir.getCanonicalFile();
@@ -60,21 +78,15 @@ public class GithubDownloadUtil {
       project,
       progressTitle,
       "Downloading zip archive" + DownloadUtil.CONTENT_LENGTH_TEMPLATE + " ...",
-      new Callable<File>() {
-        @Override
-        public File call() throws Exception {
-          ProgressIndicator progress = ProgressManager.getInstance().getProgressIndicator();
-          downloadAtomically(progress, url, outputFile, userName, repositoryName);
-          return outputFile;
+      () -> {
+        ProgressIndicator progress = ProgressManager.getInstance().getProgressIndicator();
+        downloadAtomically(progress, url, outputFile, userName, repositoryName);
+        return outputFile;
+      }, () -> {
+        if (!retryOnError) {
+          return false;
         }
-      }, new Producer<Boolean>() {
-        @Override
-        public Boolean produce() {
-          if (!retryOnError) {
-            return false;
-          }
-          return IOExceptionDialog.showErrorDialog("Download Error", "Can not download '" + url + "'");
-        }
+        return IOExceptionDialog.showErrorDialog("Download Error", "Can not download '" + url + "'");
       }
     );
     File out = outcome.get();

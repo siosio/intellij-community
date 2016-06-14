@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -206,21 +206,18 @@ public class ManifestFileUtil {
 
     ManifestBuilder.setVersionAttribute(mainAttributes);
 
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      @Override
-      public void run() {
+    ApplicationManager.getApplication().runWriteAction(() -> {
+      try {
+        final OutputStream outputStream = file.getOutputStream(ManifestFileUtil.class);
         try {
-          final OutputStream outputStream = file.getOutputStream(ManifestFileUtil.class);
-          try {
-            manifest.write(outputStream);
-          }
-          finally {
-            outputStream.close();
-          }
+          manifest.write(outputStream);
         }
-        catch (IOException e) {
-          LOG.info(e);
+        finally {
+          outputStream.close();
         }
+      }
+      catch (IOException e) {
+        LOG.info(e);
       }
     });
   }
@@ -280,7 +277,7 @@ public class ManifestFileUtil {
     ApplicationManager.getApplication().assertIsDispatchThread();
     final Ref<IOException> exc = Ref.create(null);
     final VirtualFile file = new WriteAction<VirtualFile>() {
-      protected void run(final Result<VirtualFile> result) {
+      protected void run(@NotNull final Result<VirtualFile> result) {
         VirtualFile dir = directory;
         try {
           if (!dir.getName().equals(MANIFEST_DIR_NAME)) {
@@ -321,12 +318,10 @@ public class ManifestFileUtil {
 
   public static void addManifestFileToLayout(final @NotNull String path, final @NotNull ArtifactEditorContext context,
                                              final @NotNull CompositePackagingElement<?> element) {
-    context.editLayout(context.getArtifact(), new Runnable() {
-      public void run() {
-        final VirtualFile file = findManifestFile(element, context, context.getArtifactType());
-        if (file == null || !FileUtil.pathsEqual(file.getPath(), path)) {
-          PackagingElementFactory.getInstance().addFileCopy(element, MANIFEST_DIR_NAME, path, MANIFEST_FILE_NAME);
-        }
+    context.editLayout(context.getArtifact(), () -> {
+      final VirtualFile file = findManifestFile(element, context, context.getArtifactType());
+      if (file == null || !FileUtil.pathsEqual(file.getPath(), path)) {
+        PackagingElementFactory.getInstance().addFileCopy(element, MANIFEST_DIR_NAME, path, MANIFEST_FILE_NAME);
       }
     });
   }

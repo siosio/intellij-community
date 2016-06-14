@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.FileTypeUtils;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
+import com.intellij.util.BitUtil;
 import com.intellij.util.Processor;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -95,17 +96,16 @@ public class HighlightControlFlowUtil {
     // do not compute constant expressions for if() statement condition
     // see JLS 14.20 Unreachable Statements
     try {
-      final ControlFlow controlFlow = getControlFlowNoConstantEvaluate(codeBlock);
+      AllVariablesControlFlowPolicy policy = AllVariablesControlFlowPolicy.getInstance();
+      final ControlFlow controlFlow = ControlFlowFactory.getInstance(codeBlock.getProject()).getControlFlow(codeBlock, policy, false, false);
       final PsiElement unreachableStatement = ControlFlowUtil.getUnreachableStatement(controlFlow);
       if (unreachableStatement != null) {
         String description = JavaErrorMessages.message("unreachable.statement");
         return HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(unreachableStatement).descriptionAndTooltip(description).create();
       }
     }
-    catch (AnalysisCanceledException e) {
+    catch (AnalysisCanceledException | IndexNotReadyException e) {
       // incomplete code
-    }
-    catch (IndexNotReadyException ignored) {
     }
     return null;
   }
@@ -341,9 +341,8 @@ public class HighlightControlFlowUtil {
               PsiMethod redirectedConstructor = redirectedConstructors.get(j);
               // variable must be initialized before its usage
               if (offset < redirectedConstructor.getTextRange().getStartOffset()) continue;
-              PsiCodeBlock redirBody = redirectedConstructor.getBody();
-              if (redirBody != null
-                  && variableDefinitelyAssignedIn(variable, redirBody)) {
+              PsiCodeBlock redirectedBody = redirectedConstructor.getBody();
+              if (redirectedBody != null && variableDefinitelyAssignedIn(variable, redirectedBody)) {
                 return null;
               }
             }
@@ -375,10 +374,7 @@ public class HighlightControlFlowUtil {
         final ControlFlow controlFlow = getControlFlow(topBlock);
         codeBlockProblems = ControlFlowUtil.getReadBeforeWriteLocals(controlFlow);
       }
-      catch (AnalysisCanceledException e) {
-        codeBlockProblems = Collections.emptyList();
-      }
-      catch (IndexNotReadyException e) {
+      catch (AnalysisCanceledException | IndexNotReadyException e) {
         codeBlockProblems = Collections.emptyList();
       }
       uninitializedVarProblems.put(topBlock, codeBlockProblems);
@@ -402,8 +398,28 @@ public class HighlightControlFlowUtil {
   private static boolean inInnerClass(@NotNull PsiElement psiElement, @Nullable PsiClass containingClass, @NotNull PsiFile containingFile) {
     PsiElement element = psiElement;
     while (element != null) {
-      if (element instanceof PsiClass) return !containingFile.getManager().areElementsEquivalent(element, containingClass);
+      if (element instanceof PsiClass) {
+        final boolean innerClass = !containingFile.getManager().areElementsEquivalent(element, containingClass);
+        if (innerClass) {
+          final PsiLambdaExpression lambdaExpression = PsiTreeUtil.getParentOfType(psiElement, PsiLambdaExpression.class);
+          return lambdaExpression == null || !inLambdaInsideClassInitialization(containingClass, (PsiClass)element);
+        }
+        return false;
+      }
       element = element.getParent();
+    }
+    return false;
+  }
+
+  private static boolean inLambdaInsideClassInitialization(@Nullable PsiClass containingClass, PsiClass aClass) {
+    PsiMember member = aClass;
+    while (member != null) {
+      if (member.getContainingClass() == containingClass) {
+        return member instanceof PsiField ||
+               member instanceof PsiMethod && ((PsiMethod)member).isConstructor() ||
+               member instanceof PsiClassInitializer;
+      }
+      member = PsiTreeUtil.getParentOfType(member, PsiMember.class, true);
     }
     return false;
   }
@@ -682,10 +698,8 @@ public class HighlightControlFlowUtil {
         return null;
       }
       if (!isEffectivelyFinal(variable, lambdaExpression, context)) {
-        final HighlightInfo highlightInfo = HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR)
-          .range(context)
-          .descriptionAndTooltip("Variable used in lambda expression should be effectively final")
-          .create();
+        String text = JavaErrorMessages.message("lambda.variable.must.be.final");
+        HighlightInfo highlightInfo = HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(context).descriptionAndTooltip(text).create();
         QuickFixAction.registerQuickFixAction(highlightInfo, QUICK_FIX_FACTORY.createVariableAccessFromInnerClassFix(variable, lambdaExpression));
         return highlightInfo;
       }
@@ -780,7 +794,7 @@ public class HighlightControlFlowUtil {
     try {
       final ControlFlow controlFlow = getControlFlowNoConstantEvaluate(body);
       final int completionReasons = ControlFlowUtil.getCompletionReasons(controlFlow, 0, controlFlow.getSize());
-      if ((completionReasons & ControlFlowUtil.NORMAL_COMPLETION_REASON) == 0) {
+      if (!BitUtil.isSet(completionReasons, ControlFlowUtil.NORMAL_COMPLETION_REASON)) {
         String description = JavaErrorMessages.message("initializer.must.be.able.to.complete.normally");
         return HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(body).descriptionAndTooltip(description).create();
       }

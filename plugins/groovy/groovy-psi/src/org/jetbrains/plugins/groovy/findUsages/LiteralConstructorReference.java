@@ -61,13 +61,8 @@ public class LiteralConstructorReference extends PsiReferenceBase.Poly<GrListOrM
 
   @Nullable
   public PsiClassType getConstructedClassType() {
-    return CachedValuesManager.getCachedValue(getElement(), new CachedValueProvider<PsiClassType>() {
-      @Nullable
-      @Override
-      public Result<PsiClassType> compute() {
-        return Result.create(inferConversionType(), PsiModificationTracker.MODIFICATION_COUNT);
-      }
-    });
+    return CachedValuesManager.getCachedValue(getElement(), () -> CachedValueProvider.Result
+      .create(inferConversionType(), PsiModificationTracker.MODIFICATION_COUNT));
   }
 
   @Nullable
@@ -77,7 +72,7 @@ public class LiteralConstructorReference extends PsiReferenceBase.Poly<GrListOrM
     if (conversionType == null) return null;
     if (listOrMap.isEmpty()) {
       PsiType unboxed = TypesUtil.unboxPrimitiveTypeWrapper(conversionType);
-      if (PsiType.BOOLEAN == unboxed || PsiType.CHAR == unboxed) {
+      if (PsiType.BOOLEAN.equals(unboxed) || PsiType.CHAR.equals(unboxed)) {
         return null;
       }
     }
@@ -180,12 +175,7 @@ public class LiteralConstructorReference extends PsiReferenceBase.Poly<GrListOrM
   @NotNull
   private PsiType[] getCallArgumentTypes() {
     final GrExpression[] arguments = getCallArguments();
-    return ContainerUtil.map2Array(arguments, PsiType.class, new NullableFunction<GrExpression, PsiType>() {
-      @Override
-      public PsiType fun(GrExpression grExpression) {
-        return grExpression.getType();
-      }
-    });
+    return ContainerUtil.map2Array(arguments, PsiType.class, (NullableFunction<GrExpression, PsiType>)grExpression -> grExpression.getType());
   }
 
   @NotNull

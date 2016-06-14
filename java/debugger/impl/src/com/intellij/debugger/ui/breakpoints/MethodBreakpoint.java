@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -63,7 +63,6 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.java.debugger.breakpoints.properties.JavaMethodBreakpointProperties;
 
 import javax.swing.*;
-import java.util.Iterator;
 import java.util.Set;
 
 public class MethodBreakpoint extends BreakpointWithHighlighter<JavaMethodBreakpointProperties> {
@@ -127,8 +126,7 @@ public class MethodBreakpoint extends BreakpointWithHighlighter<JavaMethodBreakp
   protected void createRequestForPreparedClass(@NotNull DebugProcessImpl debugProcess, @NotNull ReferenceType classType) {
     try {
       boolean hasMethod = false;
-      for (Iterator iterator = classType.allMethods().iterator(); iterator.hasNext();) {
-        Method method = (Method)iterator.next();
+      for (Method method : classType.allMethods()) {
         String signature = method.signature();
         String name = method.name();
 
@@ -218,20 +216,12 @@ public class MethodBreakpoint extends BreakpointWithHighlighter<JavaMethodBreakp
     return getPsiClass();
   }
 
-  @NotNull
   protected Icon getDisabledIcon(boolean isMuted) {
     final Breakpoint master = DebuggerManagerEx.getInstanceEx(myProject).getBreakpointManager().findMasterBreakpoint(this);
-    if (isMuted) {
-      return master == null? AllIcons.Debugger.Db_muted_disabled_method_breakpoint : AllIcons.Debugger.Db_muted_dep_method_breakpoint;
+    if (master != null) {
+      return isMuted ? AllIcons.Debugger.Db_muted_dep_method_breakpoint : AllIcons.Debugger.Db_dep_method_breakpoint;
     }
-    else {
-      return master == null? AllIcons.Debugger.Db_disabled_method_breakpoint : AllIcons.Debugger.Db_dep_method_breakpoint;
-    }
-  }
-
-  @NotNull
-  protected Icon getSetIcon(boolean isMuted) {
-    return isMuted? AllIcons.Debugger.Db_muted_method_breakpoint : AllIcons.Debugger.Db_method_breakpoint;
+    return null;
   }
 
   @NotNull
@@ -334,8 +324,7 @@ public class MethodBreakpoint extends BreakpointWithHighlighter<JavaMethodBreakp
         int methodNameOffset = identifier != null? identifier.getTextOffset() : methodOffset;
         final MethodDescriptor descriptor =
           new MethodDescriptor();
-        //noinspection HardCodedStringLiteral
-        descriptor.methodName = method.isConstructor() ? "<init>" : method.getName();
+        descriptor.methodName = JVMNameUtil.getJVMMethodName(method);
         try {
           descriptor.methodSignature = JVMNameUtil.getJVMSignature(method);
           descriptor.isStatic = method.hasModifierProperty(PsiModifier.STATIC);
@@ -369,11 +358,11 @@ public class MethodBreakpoint extends BreakpointWithHighlighter<JavaMethodBreakp
     super.readExternal(breakpointNode);
     try {
       getProperties().WATCH_ENTRY = Boolean.valueOf(JDOMExternalizerUtil.readField(breakpointNode, "WATCH_ENTRY"));
-    } catch (Exception e) {
+    } catch (Exception ignored) {
     }
     try {
       getProperties().WATCH_EXIT = Boolean.valueOf(JDOMExternalizerUtil.readField(breakpointNode, "WATCH_EXIT"));
-    } catch (Exception e) {
+    } catch (Exception ignored) {
     }
   }
 

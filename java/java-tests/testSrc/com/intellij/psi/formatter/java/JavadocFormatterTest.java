@@ -43,6 +43,66 @@ public class JavadocFormatterTest extends AbstractJavaFormatterTest {
 
   }
 
+  public void test_NoFormatting_IfStartsWithLotsOfAsterisks() {
+    doTextTest(
+      "/****\n" +
+      " * description\n" +
+      " *\n" +
+      " *\n" +
+      " * xxxx\n" +
+      " */\n" +
+      "      class X {}",
+      "/****\n" +
+      " * description\n" +
+      " *\n" +
+      " *\n" +
+      " * xxxx\n" +
+      " */\n" +
+      "class X {\n" +
+      "}"
+    );
+  }
+  
+
+  public void testDoNotWrapLink() throws Exception {
+    getSettings().WRAP_LONG_LINES = true;
+    getSettings().RIGHT_MARGIN = 70;
+    doTextTest(
+      "/**\n" +
+      " * Some of the usl contained {@link sdfsdf.test.ttttttt.ssss.stttt.tttttttcom}\n" +
+      " */\n" +
+      "            public class X {\n" +
+      "}",
+      "/**\n" +
+      " * Some of the usl contained \n" +
+      " * {@link sdfsdf.test.ttttttt.ssss.stttt.tttttttcom}\n" +
+      " */\n" +
+      "public class X {\n" +
+      "}"
+    );
+  }
+
+
+  public void testDoNot() {
+    getSettings().WRAP_LONG_LINES = true;
+    getSettings().RIGHT_MARGIN = 70;
+
+    doTextTest(
+      "/**\n" +
+      " * Some of the usl contained <a href=\"http://martinfowler.com/articles/replaceThrowWithNotification.html\">\n" +
+      " */\n" +
+      "            public class X {\n" +
+      "}",
+      "/**\n" +
+      " * Some of the usl contained \n" +
+      " * <a href=\"http://martinfowler.com/articles/replaceThrowWithNotification.html\">\n" +
+      " */\n" +
+      "public class X {\n" +
+      "}"
+    );
+  }
+
+
   public void testPackageJavadoc() throws Exception {
     doTextTest(
       "/**\n" +
@@ -77,11 +137,11 @@ public class JavadocFormatterTest extends AbstractJavaFormatterTest {
 
   public void test_wrap_after_asterisks() {
     doTextTest(
-        "/******* hollla la\n" +
+        "/** hollla la\n" +
         " * I am javadoc comment\n" +
         " * heey ***********/\n" +
         "   class T {   }\n",
-        "/*******\n" +
+        "/**\n" +
         " * hollla la\n" +
         " * I am javadoc comment\n" +
         " * heey\n" +
@@ -93,10 +153,10 @@ public class JavadocFormatterTest extends AbstractJavaFormatterTest {
 
   public void test_strange_comment() {
     doTextTest(
-        "/******F*****/\n" +
+        "/**F*****/\n" +
         "public class T {\n" +
         "}",
-        "/******\n" +
+        "/**\n" +
         " * F\n" +
         " *****/\n" +
         "public class T {\n" +
@@ -188,9 +248,11 @@ public class JavadocFormatterTest extends AbstractJavaFormatterTest {
     getSettings().getRootSettings().ENABLE_JAVADOC_FORMATTING = true;
     getSettings().getRootSettings().WRAP_COMMENTS = true;
     getSettings().RIGHT_MARGIN = 20;
-    LanguageLevelProjectExtension.getInstance(getProject()).setLanguageLevel(LanguageLevel.JDK_1_7);
-
-    doTextTest("/**\n" + " * <p />\n" + " * Another paragraph of the description placed after blank line.\n" + " */\n" + "class A{}",
+    doTextTest("/**\n" + 
+               " * <p />\n" + 
+               " * Another paragraph of the description placed after blank line.\n" + 
+               " */\n" + 
+               "class A{}",
                "/**\n" +
                " * <p/>\n" +
                " * Another paragraph\n" +
@@ -201,26 +263,36 @@ public class JavadocFormatterTest extends AbstractJavaFormatterTest {
                "class A {\n" +
                "}");
   }
-
-  public void testSCR2632_JDK8_LanguageLevel() throws Exception {
+  
+  public void test_PreserveExistingSelfClosingTags_AndGenerateOnlyPTag() {
     getSettings().getRootSettings().ENABLE_JAVADOC_FORMATTING = true;
-    getSettings().getRootSettings().WRAP_COMMENTS = true;
-    getSettings().RIGHT_MARGIN = 20;
-    LanguageLevelProjectExtension.getInstance(getProject()).setLanguageLevel(LanguageLevel.JDK_1_8);
-
-    doTextTest("/**\n" + " * <p />\n" + " * Another paragraph of the description placed after blank line.\n" + " */\n" + "class A{}",
-               "/**\n" +
-               " * <p>\n" +
-               " * Another paragraph\n" +
-               " * of the description\n" +
-               " * placed after\n" +
-               " * blank line.\n" +
-               " */\n" +
-               "class A {\n" +
-               "}");
+    LanguageLevel before = LanguageLevelProjectExtension.getInstance(getProject()).getLanguageLevel();
+    LanguageLevelProjectExtension.getInstance(getProject()).setLanguageLevel(LanguageLevel.JDK_1_7);
+    try {
+      doTextTest(
+        "/**\n" +
+        " * My test comment\n" +
+        " * <p/>\n" +
+        " * \n" +
+        " * With empty line\n" +
+        " */\n" +
+        "class T {\n" +
+        "}",
+        "/**\n" +
+        " * My test comment\n" +
+        " * <p/>\n" +
+        " * <p>\n" +
+        " * With empty line\n" +
+        " */\n" +
+        "class T {\n" +
+        "}"
+      );
+    }
+    finally {
+      LanguageLevelProjectExtension.getInstance(getProject()).setLanguageLevel(before);
+    }
   }
-
-
+  
   public void testParagraphTagGeneration() {
     // Inspired by IDEA-61811
     getSettings().getRootSettings().ENABLE_JAVADOC_FORMATTING = true;
@@ -241,7 +313,7 @@ public class JavadocFormatterTest extends AbstractJavaFormatterTest {
       "}",
       "/**\n" +
       " * line 1\n" +
-      " * <p/>\n" +
+      " * <p>\n" +
       " * line 2\n" +
       " * <pre>\n" +
       " *   line 3\n" +
@@ -474,6 +546,30 @@ public class JavadocFormatterTest extends AbstractJavaFormatterTest {
                    "}";
 
     doClassTest(before, after);
+  }
+
+  public void testDoNotMergeCommentLines() {
+    getSettings().getRootSettings().ENABLE_JAVADOC_FORMATTING = true;
+    getSettings().getRootSettings().WRAP_COMMENTS = true;
+
+    doClassTest(
+      "/**\n" +
+      " * Some comment\n" +
+      " * 2016\n" +
+      " * Date: Mar 03, 2016\n" +
+      " *\n" +
+      " */\n" +
+      "     public class TestCase {\n" +
+      "}",
+      
+      "/**\n" +
+      " * Some comment\n" +
+      " * 2016\n" +
+      " * Date: Mar 03, 2016\n" +
+      " */\n" +
+      "public class TestCase {\n" +
+      "}"
+    );
   }
 
   public void testSeeTagAlignment() throws Exception {
@@ -754,7 +850,7 @@ public class JavadocFormatterTest extends AbstractJavaFormatterTest {
     doClassTest(before, after);
   }
 
-  public void testGenerateSelfClosingPTagIfLanguageLevelNotJava8() throws Exception {
+  public void testPTagIfLanguageLevelNotJava8() throws Exception {
     getSettings().getRootSettings().JD_P_AT_EMPTY_LINES = true;
     getSettings().getRootSettings().ENABLE_JAVADOC_FORMATTING = true;
     LanguageLevelProjectExtension.getInstance(getProject()).setLanguageLevel(LanguageLevel.JDK_1_7);
@@ -767,7 +863,7 @@ public class JavadocFormatterTest extends AbstractJavaFormatterTest {
                     "}\n";
     String after = "/**\n" +
                    " * Super method\n" +
-                   " * <p/>\n" +
+                   " * <p>\n" +
                    " * Super multiple times\n" +
                    " */\n" +
                    "public void voo() {\n" +

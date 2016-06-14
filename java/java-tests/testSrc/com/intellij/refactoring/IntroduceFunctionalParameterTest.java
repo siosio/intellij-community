@@ -16,8 +16,11 @@
 package com.intellij.refactoring;
 
 import com.intellij.JavaTestUtil;
+import com.intellij.openapi.editor.SelectionModel;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.pom.java.LanguageLevel;
+import com.intellij.psi.PsiElement;
+import com.intellij.refactoring.extractMethod.ExtractMethodHandler;
 import com.intellij.refactoring.introduceParameter.IntroduceParameterHandler;
 import com.intellij.testFramework.IdeaTestUtil;
 import com.intellij.testFramework.TestDataPath;
@@ -57,7 +60,15 @@ public class IntroduceFunctionalParameterTest extends LightRefactoringTestCase  
     doTest();
   }
 
+  public void testInsideForLoop() throws Exception {
+    doTest();
+  }
+
   public void testInsideAnonymous() throws Exception {
+    doTest();
+  }
+
+  public void testPartialString() throws Exception {
     doTest();
   }
 
@@ -87,7 +98,11 @@ public class IntroduceFunctionalParameterTest extends LightRefactoringTestCase  
       configureByFile("/refactoring/introduceFunctionalParameter/before" + getTestName(false) + ".java");
       enabled = myEditor.getSettings().isVariableInplaceRenameEnabled();
       myEditor.getSettings().setVariableInplaceRenameEnabled(false);
-      new IntroduceParameterHandler().introduceStrategy(getProject(), getEditor(), getFile());
+      final SelectionModel selectionModel = getEditor().getSelectionModel();
+      if (selectionModel.hasSelection()) {
+        PsiElement[] elements = ExtractMethodHandler.getElements(getProject(), getEditor(), getFile());
+        new IntroduceParameterHandler().introduceStrategy(getProject(), getEditor(), getFile(), elements);
+      }
       checkResultByFile("/refactoring/introduceFunctionalParameter/after" + getTestName(false) + ".java");
       if (conflict != null) {
         fail("Conflict expected");

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,7 +35,7 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.codeStyle.MinusculeMatcher;
 import com.intellij.psi.codeStyle.NameUtil;
-import com.intellij.ui.ListScrollingUtil;
+import com.intellij.ui.ScrollingUtil;
 import com.intellij.ui.components.JBList;
 import com.intellij.ui.popup.list.GroupedItemsListRenderer;
 import com.intellij.util.ui.update.LazyUiDisposable;
@@ -211,19 +211,15 @@ public abstract class FileTextFieldImpl implements FileLookup, Disposable, FileT
         result.myCompletionBase = completionBase;
         if (result.myCompletionBase == null) return;
         result.myFieldText = myPathTextField.getText();
-        ApplicationManager.getApplication().executeOnPooledThread(new Runnable() {
-          public void run() {
-            processCompletion(result);
-            SwingUtilities.invokeLater(new Runnable() {
-              public void run() {
-                if (!result.myCompletionBase.equals(getCompletionBase())) return;
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+          processCompletion(result);
+          SwingUtilities.invokeLater(() -> {
+            if (!result.myCompletionBase.equals(getCompletionBase())) return;
 
-                int pos = selectCompletionRemoveText(result, selectReplacedText);
+            int pos = selectCompletionRemoveText(result, selectReplacedText);
 
-                showCompletionPopup(result, pos, isExplicitCall);
-              }
-            });
-          }
+            showCompletionPopup(result, pos, isExplicitCall);
+          });
         });
       }
     });
@@ -382,24 +378,15 @@ public abstract class FileTextFieldImpl implements FileLookup, Disposable, FileT
     });
 
     myCurrentPopup =
-      builder.setRequestFocus(false).setAdText(getAdText(myCurrentCompletion)).setAutoSelectIfEmpty(false).setResizable(false).setCancelCallback(new Computable<Boolean>() {
-        public Boolean compute() {
+      builder.setRequestFocus(false).setAdText(getAdText(myCurrentCompletion)).setAutoSelectIfEmpty(false).setResizable(false).setCancelCallback(
+        () -> {
           final int caret = myPathTextField.getCaretPosition();
           myPathTextField.setSelectionStart(caret);
           myPathTextField.setSelectionEnd(caret);
           myPathTextField.setFocusTraversalKeysEnabled(true);
-          SwingUtilities.invokeLater(new Runnable() {
-            public void run() {
-              getField().requestFocus();
-            }
-          });
+          SwingUtilities.invokeLater(() -> getField().requestFocus());
           return Boolean.TRUE;
-        }
-      }).setItemChoosenCallback(new Runnable() {
-        public void run() {
-          processChosenFromCompletion(false);
-        }
-      }).setCancelKeyEnabled(false).setAlpha(0.1f).setFocusOwners(new Component[]{myPathTextField}).
+        }).setItemChoosenCallback(() -> processChosenFromCompletion(false)).setCancelKeyEnabled(false).setAlpha(0.1f).setFocusOwners(new Component[]{myPathTextField}).
           createPopup();
 
 
@@ -778,20 +765,20 @@ public abstract class FileTextFieldImpl implements FileLookup, Disposable, FileT
 
     if ("selectNextRow".equals(action)) {
       if (ensureSelectionExists()) {
-        ListScrollingUtil.moveDown(myList, e.getModifiersEx());
+        ScrollingUtil.moveDown(myList, e.getModifiersEx());
         e.consume();
       }
     }
     else if ("selectPreviousRow".equals(action)) {
-      ListScrollingUtil.moveUp(myList, e.getModifiersEx());
+      ScrollingUtil.moveUp(myList, e.getModifiersEx());
       e.consume();
     }
     else if ("scrollDown".equals(action)) {
-      ListScrollingUtil.movePageDown(myList);
+      ScrollingUtil.movePageDown(myList);
       e.consume();
     }
     else if ("scrollUp".equals(action)) {
-      ListScrollingUtil.movePageUp(myList);
+      ScrollingUtil.movePageUp(myList);
       e.consume();
     }
     else if (getSelectedFileFromCompletionPopup() != null && (e.getKeyCode() == KeyEvent.VK_ENTER || e.getKeyCode() == KeyEvent.VK_TAB) && e.getModifiers() == 0) {

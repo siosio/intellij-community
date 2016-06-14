@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,8 +28,6 @@ import com.intellij.openapi.keymap.impl.ui.ActionsTree;
 import com.intellij.openapi.keymap.impl.ui.ActionsTreeUtil;
 import com.intellij.openapi.keymap.impl.ui.Group;
 import com.intellij.openapi.options.ConfigurationException;
-import com.intellij.openapi.project.Project;
-import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.TextFieldWithBrowseButton;
@@ -40,15 +38,16 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.openapi.wm.ex.WindowManagerEx;
-import com.intellij.openapi.wm.impl.IdeFrameImpl;
 import com.intellij.packageDependencies.ui.TreeExpansionMonitor;
 import com.intellij.ui.DocumentAdapter;
 import com.intellij.ui.InsertPathAction;
+import com.intellij.ui.JBDefaultTreeCellRenderer;
 import com.intellij.ui.ScrollPaneFactory;
+import com.intellij.ui.TreeUIHelper;
 import com.intellij.ui.treeStructure.Tree;
 import com.intellij.util.ImageLoader;
 import com.intellij.util.ObjectUtils;
+import com.intellij.util.containers.Convertor;
 import com.intellij.util.ui.EmptyIcon;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.tree.TreeUtil;
@@ -83,23 +82,18 @@ public class CustomizableActionsPanel {
   private JTree myActionsTree;
   private JButton myAddSeparatorButton;
 
-  private final TreeExpansionMonitor myTreeExpansionMonitor;
-
   private CustomActionsSchema mySelectedSchema;
-
-
 
   private JButton myRestoreAllDefaultButton;
   private JButton myRestoreDefaultButton;
 
   public CustomizableActionsPanel() {
-
-
     //noinspection HardCodedStringLiteral
     Group rootGroup = new Group("root", null, null);
     final DefaultMutableTreeNode root = new DefaultMutableTreeNode(rootGroup);
     DefaultTreeModel model = new DefaultTreeModel(root);
     myActionsTree.setModel(model);
+    TreeUIHelper.getInstance().installTreeSpeedSearch(myActionsTree, new TreePathStringConvertor(), true);
 
     myActionsTree.setRootVisible(false);
     myActionsTree.setShowsRootHandles(true);
@@ -109,6 +103,7 @@ public class CustomizableActionsPanel {
     setButtonsDisabled();
     final ActionManager actionManager = ActionManager.getInstance();
     myActionsTree.getSelectionModel().addTreeSelectionListener(new TreeSelectionListener() {
+      @Override
       public void valueChanged(TreeSelectionEvent e) {
         final TreePath[] selectionPaths = myActionsTree.getSelectionPaths();
         final boolean isSingleSelection = selectionPaths != null && selectionPaths.length == 1;
@@ -118,8 +113,7 @@ public class CustomizableActionsPanel {
           String actionId = getActionId(node);
           if (actionId != null) {
             final AnAction action = actionManager.getAction(actionId);
-            myEditIconButton.setEnabled(action != null &&
-                                        action.getTemplatePresentation() != null);
+            myEditIconButton.setEnabled(action != null);
           }
           else {
             myEditIconButton.setEnabled(false);
@@ -132,7 +126,7 @@ public class CustomizableActionsPanel {
         myRemoveActionButton.setEnabled(selectionPaths != null);
         if (selectionPaths != null) {
           for (TreePath selectionPath : selectionPaths) {
-            if (selectionPath.getPath() != null && selectionPath.getPath().length <= 2) {
+            if (selectionPath.getPath().length <= 2) {
               setButtonsDisabled();
               return;
             }
@@ -145,6 +139,7 @@ public class CustomizableActionsPanel {
     });
 
     myAddActionButton.addActionListener(new ActionListener() {
+      @Override
       public void actionPerformed(ActionEvent e) {
         final List<TreePath> expandedPaths = TreeUtil.collectExpandedPaths(myActionsTree);
         final TreePath selectionPath = myActionsTree.getLeadSelectionPath();
@@ -173,6 +168,7 @@ public class CustomizableActionsPanel {
     });
 
     myEditIconButton.addActionListener(new ActionListener() {
+      @Override
       public void actionPerformed(ActionEvent e) {
         myRestoreAllDefaultButton.setEnabled(true);
         final List<TreePath> expandedPaths = TreeUtil.collectExpandedPaths(myActionsTree);
@@ -188,6 +184,7 @@ public class CustomizableActionsPanel {
     });
 
     myAddSeparatorButton.addActionListener(new ActionListener() {
+      @Override
       public void actionPerformed(ActionEvent e) {
         final List<TreePath> expandedPaths = TreeUtil.collectExpandedPaths(myActionsTree);
         final TreePath selectionPath = myActionsTree.getLeadSelectionPath();
@@ -205,6 +202,7 @@ public class CustomizableActionsPanel {
 
 
     myRemoveActionButton.addActionListener(new ActionListener() {
+      @Override
       public void actionPerformed(ActionEvent e) {
         final List<TreePath> expandedPaths = TreeUtil.collectExpandedPaths(myActionsTree);
         final TreePath[] selectionPath = myActionsTree.getSelectionPaths();
@@ -221,6 +219,7 @@ public class CustomizableActionsPanel {
     });
 
     myMoveActionUpButton.addActionListener(new ActionListener() {
+      @Override
       public void actionPerformed(ActionEvent e) {
         final List<TreePath> expandedPaths = TreeUtil.collectExpandedPaths(myActionsTree);
         final TreePath[] selectionPath = myActionsTree.getSelectionPaths();
@@ -243,6 +242,7 @@ public class CustomizableActionsPanel {
     });
 
     myMoveActionDownButton.addActionListener(new ActionListener() {
+      @Override
       public void actionPerformed(ActionEvent e) {
         final List<TreePath> expandedPaths = TreeUtil.collectExpandedPaths(myActionsTree);
         final TreePath[] selectionPath = myActionsTree.getSelectionPaths();
@@ -266,6 +266,7 @@ public class CustomizableActionsPanel {
     });
 
     myRestoreAllDefaultButton.addActionListener(new ActionListener() {
+      @Override
       public void actionPerformed(ActionEvent e) {
         mySelectedSchema.copyFrom(new CustomActionsSchema());
         patchActionsTreeCorrespondingToSchema(root);
@@ -274,6 +275,7 @@ public class CustomizableActionsPanel {
     });
 
     myRestoreDefaultButton.addActionListener(new ActionListener() {
+      @Override
       public void actionPerformed(ActionEvent e) {
         final List<ActionUrl> otherActions = new ArrayList<ActionUrl>(mySelectedSchema.getActions());
         otherActions.removeAll(findActionsUnderSelection());
@@ -290,7 +292,7 @@ public class CustomizableActionsPanel {
 
     patchActionsTreeCorrespondingToSchema(root);
 
-    myTreeExpansionMonitor = TreeExpansionMonitor.install(myActionsTree);
+    TreeExpansionMonitor.install(myActionsTree);
   }
 
   private List<ActionUrl> findActionsUnderSelection() {
@@ -323,9 +325,7 @@ public class CustomizableActionsPanel {
 
   private void editToolbarIcon(String actionId, DefaultMutableTreeNode node) {
     final AnAction anAction = ActionManager.getInstance().getAction(actionId);
-    if (isToolbarAction(node) &&
-        anAction.getTemplatePresentation() != null &&
-        anAction.getTemplatePresentation().getIcon() == null) {
+    if (isToolbarAction(node) && anAction.getTemplatePresentation().getIcon() == null) {
       final int exitCode = Messages.showOkCancelDialog(IdeBundle.message("error.adding.action.without.icon.to.toolbar"),
                                                        IdeBundle.message("title.unable.to.add.action.without.icon.to.toolbar"),
                                                        Messages.getInformationIcon());
@@ -336,7 +336,7 @@ public class CustomizableActionsPanel {
         anAction.setDefaultIcon(false);
         node.setUserObject(Pair.create(actionId, AllIcons.Toolbar.Unknown));
         myActionsTree.repaint();
-        setCustomizationSchemaForCurrentProjects();
+        CustomActionsSchema.setCustomizationSchemaForCurrentProjects();
       }
     }
   }
@@ -384,26 +384,6 @@ public class CustomizableActionsPanel {
     return myPanel;
   }
 
-  private static void setCustomizationSchemaForCurrentProjects() {
-    final Project[] openProjects = ProjectManager.getInstance().getOpenProjects();
-    for (Project project : openProjects) {
-      final IdeFrameImpl frame = WindowManagerEx.getInstanceEx().getFrame(project);
-      if (frame != null) {
-        frame.updateView();
-      }
-
-      //final FavoritesManager favoritesView = FavoritesManager.getInstance(project);
-      //final String[] availableFavoritesLists = favoritesView.getAvailableFavoritesLists();
-      //for (String favoritesList : availableFavoritesLists) {
-      //  favoritesView.getFavoritesTreeViewPanel(favoritesList).updateTreePopupHandler();
-      //}
-    }
-    final IdeFrameImpl frame = WindowManagerEx.getInstanceEx().getFrame(null);
-    if (frame != null) {
-      frame.updateView();
-    }
-  }
-
   public void apply() throws ConfigurationException {
     final List<TreePath> treePaths = TreeUtil.collectExpandedPaths(myActionsTree);
     if (mySelectedSchema != null) {
@@ -411,7 +391,7 @@ public class CustomizableActionsPanel {
     }
     restorePathsAfterTreeOptimization(treePaths);
     CustomActionsSchema.getInstance().copyFrom(mySelectedSchema);
-    setCustomizationSchemaForCurrentProjects();
+    CustomActionsSchema.setCustomizationSchemaForCurrentProjects();
   }
 
   private void restorePathsAfterTreeOptimization(final List<TreePath> treePaths) {
@@ -425,6 +405,7 @@ public class CustomizableActionsPanel {
     mySelectedSchema.copyFrom(CustomActionsSchema.getInstance());
     patchActionsTreeCorrespondingToSchema((DefaultMutableTreeNode)myActionsTree.getModel().getRoot());
     myRestoreAllDefaultButton.setEnabled(mySelectedSchema.isModified(new CustomActionsSchema()));
+    myActionsTree.setSelectionRow(0);
   }
 
   public boolean isModified() {
@@ -443,7 +424,35 @@ public class CustomizableActionsPanel {
     ((DefaultTreeModel)myActionsTree.getModel()).reload();
   }
 
-  private static class MyTreeCellRenderer extends DefaultTreeCellRenderer {
+  private static class TreePathStringConvertor implements Convertor<TreePath, String> {
+    @Override
+    public String convert(TreePath o) {
+      Object node = o.getLastPathComponent();
+      if (node instanceof DefaultMutableTreeNode) {
+        Object object = ((DefaultMutableTreeNode)node).getUserObject();
+        if (object instanceof Group) return ((Group)object).getName();
+        if (object instanceof QuickList) return ((QuickList)object).getName();
+        String actionId;
+        if (object instanceof String) {
+          actionId = (String)object;
+        }
+        else if (object instanceof Pair) {
+          actionId = (String)((Pair)object).first;
+        }
+        else {
+          return "";
+        }
+        AnAction action = ActionManager.getInstance().getAction(actionId);
+        if (action != null) {
+          return action.getTemplatePresentation().getText();
+        }
+      }
+      return "";
+    }
+  }
+
+  private static class MyTreeCellRenderer extends JBDefaultTreeCellRenderer {
+    @Override
     public Component getTreeCellRendererComponent(JTree tree,
                                                   Object value,
                                                   boolean sel,
@@ -451,7 +460,7 @@ public class CustomizableActionsPanel {
                                                   boolean leaf,
                                                   int row,
                                                   boolean hasFocus) {
-      super.getTreeCellRendererComponent(tree, value, sel, expanded, leaf, row, hasFocus);
+      super.getTreeCellRendererComponent(tree, value, sel, expanded, leaf, row, false);
       if (value instanceof DefaultMutableTreeNode) {
         Object userObject = ((DefaultMutableTreeNode)value).getUserObject();
         Icon icon = null;
@@ -486,7 +495,7 @@ public class CustomizableActionsPanel {
           setText(((QuickList)userObject).getName());
           icon = AllIcons.Actions.QuickList;
         }
-        else {
+        else if (userObject != null) {
           throw new IllegalArgumentException("unknown userObject: " + userObject);
         }
 
@@ -525,7 +534,7 @@ public class CustomizableActionsPanel {
     if (actionId == null) return false;
 
     final AnAction action = ActionManager.getInstance().getAction(actionId);
-    if (action != null && action.getTemplatePresentation() != null) {
+    if (action != null) {
       if (StringUtil.isNotEmpty(path)) {
         Image image = null;
         try {
@@ -564,6 +573,7 @@ public class CustomizableActionsPanel {
     textField.setPreferredSize(new Dimension(200, textField.getPreferredSize().height));
     textField.setMinimumSize(new Dimension(200, textField.getPreferredSize().height));
     final FileChooserDescriptor fileChooserDescriptor = new FileChooserDescriptor(true, false, false, false, false, false) {
+      @Override
       public boolean isFileSelectable(VirtualFile file) {
         //noinspection HardCodedStringLiteral
         return file.getName().endsWith(".png");
@@ -596,10 +606,12 @@ public class CustomizableActionsPanel {
       return myTextField.getChildComponent();
     }
 
+    @Override
     protected String getDimensionServiceKey() {
       return getClass().getName();
     }
 
+    @Override
     protected JComponent createCenterPanel() {
       myTextField = createBrowseField();
       JPanel northPanel = new JPanel(new BorderLayout());
@@ -607,6 +619,7 @@ public class CustomizableActionsPanel {
       return northPanel;
     }
 
+    @Override
     protected void doOKAction() {
       if (myNode != null) {
         if (!doSetIcon(myNode, myTextField.getText(), getContentPane())) {
@@ -623,7 +636,7 @@ public class CustomizableActionsPanel {
         }
         myActionsTree.repaint();
       }
-      setCustomizationSchemaForCurrentProjects();
+      CustomActionsSchema.setCustomizationSchemaForCurrentProjects();
       super.doOKAction();
     }
   }
@@ -652,11 +665,13 @@ public class CustomizableActionsPanel {
       init();
     }
 
+    @Override
     protected JComponent createCenterPanel() {
       Group rootGroup = ActionsTreeUtil.createMainGroup(null, null, QuickListsManager.getInstance().getAllQuickLists());
       DefaultMutableTreeNode root = ActionsTreeUtil.createNode(rootGroup);
       DefaultTreeModel model = new DefaultTreeModel(root);
       myTree = new Tree();
+      TreeUIHelper.getInstance().installTreeSpeedSearch(myTree, new TreePathStringConvertor(), true);
       myTree.setModel(model);
       myTree.setCellRenderer(new MyTreeCellRenderer());
       final ActionManager actionManager = ActionManager.getInstance();
@@ -664,6 +679,7 @@ public class CustomizableActionsPanel {
       mySetIconButton = new JButton(IdeBundle.message("button.set.icon"));
       mySetIconButton.setEnabled(false);
       mySetIconButton.addActionListener(new ActionListener() {
+        @Override
         public void actionPerformed(ActionEvent e) {
           final TreePath selectionPath = myTree.getSelectionPath();
           if (selectionPath != null) {
@@ -674,6 +690,7 @@ public class CustomizableActionsPanel {
       });
       myTextField = createBrowseField();
       myTextField.getTextField().getDocument().addDocumentListener(new DocumentAdapter() {
+        @Override
         protected void textChanged(DocumentEvent e) {
           enableSetIconButton(actionManager);
         }
@@ -690,6 +707,7 @@ public class CustomizableActionsPanel {
 
       panel.add(ScrollPaneFactory.createScrollPane(myTree), BorderLayout.CENTER);
       myTree.getSelectionModel().addTreeSelectionListener(new TreeSelectionListener() {
+        @Override
         public void valueChanged(TreeSelectionEvent e) {
           enableSetIconButton(actionManager);
           final TreePath selectionPath = myTree.getSelectionPath();
@@ -706,9 +724,11 @@ public class CustomizableActionsPanel {
       return panel;
     }
 
+    @Override
     protected void doOKAction() {
       final ActionManager actionManager = ActionManager.getInstance();
       TreeUtil.traverseDepth((TreeNode)myTree.getModel().getRoot(), new TreeUtil.Traverse() {
+        @Override
         public boolean accept(Object node) {
           if (node instanceof DefaultMutableTreeNode) {
             final DefaultMutableTreeNode mutableNode = (DefaultMutableTreeNode)node;
@@ -726,7 +746,7 @@ public class CustomizableActionsPanel {
         }
       });
       super.doOKAction();
-      setCustomizationSchemaForCurrentProjects();
+      CustomActionsSchema.setCustomizationSchemaForCurrentProjects();
     }
 
     protected void enableSetIconButton(ActionManager actionManager) {
@@ -736,9 +756,7 @@ public class CustomizableActionsPanel {
         userObject = ((DefaultMutableTreeNode)selectionPath.getLastPathComponent()).getUserObject();
         if (userObject instanceof String) {
           final AnAction action = actionManager.getAction((String)userObject);
-          if (action != null &&
-              action.getTemplatePresentation() != null &&
-              action.getTemplatePresentation().getIcon() != null) {
+          if (action != null && action.getTemplatePresentation().getIcon() != null) {
             mySetIconButton.setEnabled(true);
             return;
           }
@@ -767,6 +785,7 @@ public class CustomizableActionsPanel {
       return actions;
     }
 
+    @Override
     protected String getDimensionServiceKey() {
       return "#com.intellij.ide.ui.customization.CustomizableActionsPanel.FindAvailableActionsDialog";
     }

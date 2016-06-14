@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -123,6 +123,10 @@ public class IntroduceParameterProcessor extends BaseRefactoringProcessor implem
     myInitializerWrapper = expressionToSearch == null ? null : new JavaExpressionWrapper(expressionToSearch);
   }
 
+  public void setParameterInitializer(PsiExpression parameterInitializer) {
+    myParameterInitializer = parameterInitializer;
+  }
+
   @NotNull
   protected UsageViewDescriptor createUsageViewDescriptor(@NotNull UsageInfo[] usages) {
     return new IntroduceParameterViewDescriptor(myMethodToSearchFor);
@@ -150,7 +154,7 @@ public class IntroduceParameterProcessor extends BaseRefactoringProcessor implem
     ArrayList<UsageInfo> result = new ArrayList<UsageInfo>();
 
     PsiMethod[] overridingMethods =
-      OverridingMethodsSearch.search(myMethodToSearchFor, true).toArray(PsiMethod.EMPTY_ARRAY);
+      OverridingMethodsSearch.search(myMethodToSearchFor).toArray(PsiMethod.EMPTY_ARRAY);
     for (PsiMethod overridingMethod : overridingMethods) {
       result.add(new UsageInfo(overridingMethod));
     }
@@ -300,7 +304,7 @@ public class IntroduceParameterProcessor extends BaseRefactoringProcessor implem
   }
 
   public static class AnySupers extends JavaRecursiveElementWalkingVisitor {
-    private boolean myResult = false;
+    private boolean myResult;
     @Override public void visitSuperExpression(PsiSuperExpression expression) {
       myResult = true;
     }
@@ -315,7 +319,7 @@ public class IntroduceParameterProcessor extends BaseRefactoringProcessor implem
   }
 
   public class AnySameNameVariables extends JavaRecursiveElementWalkingVisitor {
-    private Pair<PsiElement, String> conflict = null;
+    private Pair<PsiElement, String> conflict;
 
     public Pair<PsiElement, String> getConflict() {
       return conflict;
@@ -449,12 +453,7 @@ public class IntroduceParameterProcessor extends BaseRefactoringProcessor implem
     }
 
     if (isReplaceDuplicates()) {
-      ApplicationManager.getApplication().invokeLater(new Runnable() {
-        @Override
-        public void run() {
-          processMethodsDuplicates();
-        }
-      }, ModalityState.NON_MODAL, myProject.getDisposed());
+      ApplicationManager.getApplication().invokeLater(() -> processMethodsDuplicates(), ModalityState.NON_MODAL, myProject.getDisposed());
     }
   }
 
@@ -463,19 +462,12 @@ public class IntroduceParameterProcessor extends BaseRefactoringProcessor implem
   }
 
   private void processMethodsDuplicates() {
-    final Runnable runnable = new Runnable() {
-      public void run() {
-        if (!myMethodToReplaceIn.isValid()) return;
-        MethodDuplicatesHandler.invokeOnScope(myProject, Collections.<PsiMember>singleton(myMethodToReplaceIn),
-                                              new AnalysisScope(myMethodToReplaceIn.getContainingFile()), true);
-      }
+    final Runnable runnable = () -> {
+      if (!myMethodToReplaceIn.isValid()) return;
+      MethodDuplicatesHandler.invokeOnScope(myProject, Collections.<PsiMember>singleton(myMethodToReplaceIn),
+                                            new AnalysisScope(myMethodToReplaceIn.getContainingFile()), true);
     };
-    ProgressManager.getInstance().runProcessWithProgressSynchronously(new Runnable() {
-      @Override
-      public void run() {
-        ApplicationManager.getApplication().runReadAction(runnable);
-      }
-    }, "Search method duplicates...", true, myProject);
+    ProgressManager.getInstance().runProcessWithProgressSynchronously(() -> ApplicationManager.getApplication().runReadAction(runnable), "Search method duplicates...", true, myProject);
   }
 
   private PsiMethod generateDelegate(final PsiMethod methodToReplaceIn) throws IncorrectOperationException {

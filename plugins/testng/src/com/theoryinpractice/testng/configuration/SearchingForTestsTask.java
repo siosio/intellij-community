@@ -41,7 +41,10 @@ import com.theoryinpractice.testng.model.TestType;
 import com.theoryinpractice.testng.util.TestNGUtil;
 import org.jetbrains.annotations.Nullable;
 import org.testng.TestNGXmlSuiteHelper;
-import org.testng.xml.*;
+import org.testng.xml.LaunchSuite;
+import org.testng.xml.Parser;
+import org.testng.xml.SuiteGenerator;
+import org.testng.xml.XmlSuite;
 
 import java.io.*;
 import java.net.ServerSocket;
@@ -144,14 +147,7 @@ public class SearchingForTestsTask extends SearchForTestsTask {
       }
     }
     // We have groups we wish to limit to.
-    Collection<String> groupNames = null;
-    if (TestType.GROUP.getType().equals(myData.TEST_OBJECT)) {
-      String groupName = myData.getGroupName();
-      if (groupName != null && groupName.length() > 0) {
-        groupNames = new HashSet<String>(1);
-        groupNames.add(groupName);
-      }
-    }
+    Collection<String> groupNames = myConfig.calculateGroupNames();
 
     Map<String, String> testParams = buildTestParameters();
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -496,7 +496,10 @@ public abstract class JavaFoldingBuilderBase extends CustomFoldingBuilder implem
       if (statements.length > 1) {
         final TextRange rangeToFold = getRangeToFold(importList);
         if (rangeToFold != null && rangeToFold.getLength() > 1) {
-          descriptors.add(new FoldingDescriptor(importList, rangeToFold));
+          FoldingDescriptor descriptor = new FoldingDescriptor(importList, rangeToFold);
+          // imports are often added/removed automatically, so we enable autoupdate of folded region for foldings even if it's collapsed
+          descriptor.setCanBeRemovedWhenCollapsed(true);
+          descriptors.add(descriptor);
         }
       }
     }
@@ -682,8 +685,15 @@ public abstract class JavaFoldingBuilderBase extends CustomFoldingBuilder implem
       return settings.isCollapseImports();
     }
     else if (element instanceof PsiMethod || element instanceof PsiClassInitializer || element instanceof PsiCodeBlock) {
-      if (element instanceof PsiMethod && isSimplePropertyAccessor((PsiMethod)element)) {
-        return settings.isCollapseAccessors();
+      if (element instanceof PsiMethod) {
+
+        if (!settings.isCollapseAccessors() && !settings.isCollapseMethods()) {
+          return false;
+        }
+
+        if (isSimplePropertyAccessor((PsiMethod)element)) {
+          return settings.isCollapseAccessors();
+        }
       }
       return settings.isCollapseMethods();
     }
@@ -796,8 +806,8 @@ public abstract class JavaFoldingBuilderBase extends CustomFoldingBuilder implem
         final PsiExpressionList argumentList = expression.getArgumentList();
         if (argumentList != null && argumentList.getExpressions().length == 0) {
           final PsiMethod[] methods = anonymousClass.getMethods();
-          PsiClass baseClass = anonymousClass.getBaseClassType().resolve();
-          if (hasOnlyOneLambdaMethod(anonymousClass, !quick) && seemsLikeLambda(baseClass) && !PsiUtil.isLanguageLevel8OrHigher(anonymousClass)) {
+          PsiClass baseClass = quick ? null : anonymousClass.getBaseClassType().resolve();
+          if (hasOnlyOneLambdaMethod(anonymousClass, !quick) && (quick || seemsLikeLambda(baseClass))) {
             final PsiMethod method = methods[0];
             final PsiCodeBlock body = method.getBody();
             if (body != null) {
@@ -830,6 +840,8 @@ public abstract class JavaFoldingBuilderBase extends CustomFoldingBuilder implem
 
               String type = quick ? "" : getOptionalLambdaType(anonymousClass, expression);
               String methodName = quick || !isImplementingLambdaMethod(baseClass) ? method.getName() : "";
+
+              if (StringUtil.isEmpty(methodName) && PsiUtil.isLanguageLevel8OrHigher(anonymousClass)) return false;
 
               final String params = StringUtil.join(method.getParameterList().getParameters(), new Function<PsiParameter, String>() {
                 @Override

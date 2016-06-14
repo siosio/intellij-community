@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,20 +46,14 @@ public class StringBuilderSpinAllocatorTest extends PlatformTestCase {
   }
 
   private static long concurrentTime(int count, final Runnable action) {
-    return time(count, new Runnable() {
-      @Override
-      public void run() {
-        boolean ok =
-          JobLauncher.getInstance().invokeConcurrentlyUnderProgress(Collections.nCopies(THREADS, null), null, true, new Processor<Object>() {
-            @Override
-            public boolean process(Object o) {
-              action.run();
-              return true;
-            }
-          });
+    return time(count, () -> {
+      boolean ok =
+        JobLauncher.getInstance().invokeConcurrentlyUnderProgress(Collections.nCopies(THREADS, null), null, true, o -> {
+          action.run();
+          return true;
+        });
 
-        assertTrue(ok);
-      }
+      assertTrue(ok);
     });
   }
 
@@ -103,10 +97,5 @@ public class StringBuilderSpinAllocatorTest extends PlatformTestCase {
     long spinTime = (System.nanoTime() - start) / 1000;
     randomField++;
     return spinTime;
-  }
-
-  @Override
-  protected boolean isRunInWriteAction() {
-    return false;
   }
 }

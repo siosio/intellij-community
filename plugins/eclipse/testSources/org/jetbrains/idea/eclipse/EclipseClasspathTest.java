@@ -35,6 +35,8 @@ import com.intellij.openapi.util.JDOMUtil;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.testFramework.IdeaTestCase;
 import com.intellij.util.Consumer;
 import org.jdom.Document;
@@ -58,8 +60,10 @@ public class EclipseClasspathTest extends IdeaTestCase {
     final File currentTestRoot = new File(testRoot, getTestName(true));
     assertTrue(currentTestRoot.getAbsolutePath(), currentTestRoot.isDirectory());
 
-    FileUtil.copyDir(currentTestRoot, new File(getProject().getBaseDir().getPath()));
+    final VirtualFile vTestRoot = LocalFileSystem.getInstance().findFileByIoFile(currentTestRoot);
+    copyDirContentsTo(vTestRoot, getProject().getBaseDir());
   }
+
 
   private void doTest() throws Exception {
     doTest("/test", getProject());
@@ -86,18 +90,15 @@ public class EclipseClasspathTest extends IdeaTestCase {
       }
     });
 
-    ModuleRootModificationUtil.updateModel(module, new Consumer<ModifiableRootModel>() {
-      @Override
-      public void consume(ModifiableRootModel model) {
-        try {
-          EclipseClasspathReader classpathReader = new EclipseClasspathReader(path, project, null);
-          classpathReader.init(model);
-          classpathReader.readClasspath(model, classpathElement);
-          new EclipseClasspathStorageProvider().assertCompatible(model);
-        }
-        catch (Exception e) {
-          throw new RuntimeException(e);
-        }
+    ModuleRootModificationUtil.updateModel(module, model -> {
+      try {
+        EclipseClasspathReader classpathReader = new EclipseClasspathReader(path, project, null);
+        classpathReader.init(model);
+        classpathReader.readClasspath(model, classpathElement);
+        new EclipseClasspathStorageProvider().assertCompatible(model);
+      }
+      catch (Exception e) {
+        throw new RuntimeException(e);
       }
     });
     return module;
@@ -147,6 +148,10 @@ public class EclipseClasspathTest extends IdeaTestCase {
   }
 
   public void testSrcBinJRESpecific() throws Exception {
+    doTest();
+  }
+
+  public void testNativeLibs() throws Exception {
     doTest();
   }
 

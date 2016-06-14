@@ -16,6 +16,7 @@
 package org.jetbrains.plugins.gradle.service.project;
 
 import org.gradle.initialization.BuildCancellationToken;
+import org.gradle.internal.Factory;
 import org.gradle.internal.UncheckedException;
 import org.gradle.internal.classpath.ClassPath;
 import org.gradle.internal.classpath.DefaultClassPath;
@@ -78,9 +79,8 @@ public class DistributionFactoryExt extends DistributionFactory {
       progressLogger.setDescription(String.format("Download %s", address));
       progressLogger.started();
       try {
-        new Download("Gradle Tooling API", GradleVersion.current().getVersion()).download(address, destination);
-      }
-      finally {
+        new Download(new Logger(false), "Gradle Tooling API", GradleVersion.current().getVersion()).download(address, destination);
+      } finally {
         progressLogger.completed();
       }
     }
@@ -141,9 +141,9 @@ public class DistributionFactoryExt extends DistributionFactory {
   private static class ZippedDistribution implements Distribution {
     private InstalledDistribution installedDistribution;
     private final WrapperConfiguration wrapperConfiguration;
-    private final ExecutorServiceFactory executorFactory;
+    private final Factory<? extends ExecutorService> executorFactory;
 
-    private ZippedDistribution(WrapperConfiguration wrapperConfiguration, ExecutorServiceFactory executorFactory) {
+    private ZippedDistribution(WrapperConfiguration wrapperConfiguration, Factory<? extends ExecutorService> executorFactory) {
       this.wrapperConfiguration = wrapperConfiguration;
       this.executorFactory = executorFactory;
     }
@@ -154,33 +154,30 @@ public class DistributionFactoryExt extends DistributionFactory {
 
     public ClassPath getToolingImplementationClasspath(final ProgressLoggerFactory progressLoggerFactory, final File userHomeDir, BuildCancellationToken cancellationToken) {
       if (installedDistribution == null) {
-        Callable<File> installDistroTask = new Callable<File>() {
-          public File call() throws Exception {
-            File installDir;
-            try {
-              File realUserHomeDir = userHomeDir != null ? userHomeDir : GradleUserHomeLookup.gradleUserHome();
-              Install install = new Install(new ProgressReportingDownload(progressLoggerFactory), new PathAssembler(realUserHomeDir));
-              installDir = install.createDist(wrapperConfiguration);
-            } catch (FileNotFoundException e) {
-              throw new IllegalArgumentException(String.format("The specified %s does not exist.", getDisplayName()), e);
-            } catch (CancellationException e) {
-              throw new BuildCancelledException(String.format("Distribution download cancelled. Using distribution from '%s'.", wrapperConfiguration.getDistribution()), e);
-            } catch (Exception e) {
-              throw new GradleConnectionException(String.format("Could not install Gradle distribution from '%s'.", wrapperConfiguration.getDistribution()), e);
-            }
-            return installDir;
+        Callable<File> installDistroTask = () -> {
+          File installDir;
+          try {
+            File realUserHomeDir = userHomeDir != null ? userHomeDir : GradleUserHomeLookup.gradleUserHome();
+            Install install =
+              new Install(new Logger(false), new ProgressReportingDownload(progressLoggerFactory), new PathAssembler(realUserHomeDir));
+            installDir = install.createDist(wrapperConfiguration);
+          } catch (FileNotFoundException e) {
+            throw new IllegalArgumentException(String.format("The specified %s does not exist.", getDisplayName()), e);
+          } catch (CancellationException e) {
+            throw new BuildCancelledException(String.format("Distribution download cancelled. Using distribution from '%s'.", wrapperConfiguration.getDistribution()), e);
+          } catch (Exception e) {
+            throw new GradleConnectionException(String.format("Could not install Gradle distribution from '%s'.", wrapperConfiguration.getDistribution()), e);
           }
+          return installDir;
         };
         File installDir;
         ExecutorService executor = null;
         try {
           executor = executorFactory.create();
           final Future<File> installDirFuture = executor.submit(installDistroTask);
-          cancellationToken.addCallback(new Runnable() {
-            public void run() {
-              // TODO(radim): better to close the connection too to allow quick finish of the task
-              installDirFuture.cancel(true);
-            }
+          cancellationToken.addCallback(() -> {
+            // TODO(radim): better to close the connection too to allow quick finish of the task
+            installDirFuture.cancel(true);
           });
           installDir = installDirFuture.get();
         } catch (CancellationException e) {

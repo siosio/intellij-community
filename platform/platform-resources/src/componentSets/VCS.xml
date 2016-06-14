@@ -1,16 +1,16 @@
-<components>
+<idea-plugin>
   <application-components>
     <component>
       <implementation-class>com.intellij.openapi.vcs.changes.VetoSavingCommittingDocumentsAdapter</implementation-class>
-    </component>
-    <component>
-      <implementation-class>com.intellij.openapi.vcs.changes.VcsDirtyScopeVfsListener</implementation-class>
     </component>
     <component>
       <implementation-class>com.intellij.lifecycle.PeriodicalTasksCloser</implementation-class>
     </component>
     <component>
       <implementation-class>com.intellij.openapi.vcs.changes.actions.migrate.MigrateDiffApplicationComponent</implementation-class>
+    </component>
+    <component>
+      <implementation-class>com.intellij.openapi.vcs.changes.patch.PatchClipboardTracker</implementation-class>
     </component>
   </application-components>
   <project-components>
@@ -20,17 +20,15 @@
       <option name="workspace" value="true"/>
       <loadForDefaultProject/>
     </component>
-    <component>
-      <interface-class>com.intellij.openapi.vcs.changes.VcsChangeDetailsManager</interface-class>
-      <implementation-class>com.intellij.openapi.vcs.changes.VcsChangeDetailsManager</implementation-class>
-      <option name="workspace" value="true"/>
-    </component>
     <!-- <component>
       <implementation-class>com.intellij.openapi.vcs.changes.dbCommitted.HistoryCacheManager</implementation-class>
       <option name="workspace" value="true"/>
     </component> -->
     <component>
       <implementation-class>com.intellij.openapi.vcs.changes.VcsEventWatcher</implementation-class>
+    </component>
+    <component>
+      <implementation-class>com.intellij.openapi.vcs.annotate.AnnotationsPreloader</implementation-class>
     </component>
     <component>
       <implementation-class>com.intellij.openapi.vcs.impl.VcsDirectoryMappingStorage</implementation-class>
@@ -50,11 +48,6 @@
       <interface-class>com.intellij.openapi.vcs.changes.ChangeListManager</interface-class>
       <implementation-class>com.intellij.openapi.vcs.changes.ChangeListManagerImpl</implementation-class>
       <option name="workspace" value="true"/>
-    </component>
-    <component>
-      <interface-class>com.intellij.openapi.vcs.impl.VcsGlobalMessageManager</interface-class>
-      <implementation-class>com.intellij.openapi.vcs.impl.VcsGlobalMessageManager</implementation-class>
-      <skipForDefaultProject/>
     </component>
     <component>
       <interface-class>com.intellij.openapi.vcs.changes.ChangesViewI</interface-class>
@@ -115,4 +108,4 @@
     <component><interface-class>com.intellij.openapi.vcs.contentAnnotation.ContentAnnotationCache</interface-class>
       <implementation-class>com.intellij.openapi.vcs.contentAnnotation.ContentAnnotationCacheImpl</implementation-class></component>
   </project-components>
-</components>
+</idea-plugin>

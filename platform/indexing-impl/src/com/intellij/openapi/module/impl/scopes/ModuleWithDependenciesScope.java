@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,10 +21,10 @@ import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiBundle;
 import com.intellij.psi.search.GlobalSearchScope;
+import com.intellij.util.BitUtil;
 import com.intellij.util.NotNullFunction;
 import com.intellij.util.Processor;
 import com.intellij.util.containers.ContainerUtil;
-import gnu.trove.THashSet;
 import gnu.trove.TObjectIntHashMap;
 import org.intellij.lang.annotations.MagicConstant;
 import org.jetbrains.annotations.NotNull;
@@ -50,7 +50,7 @@ public class ModuleWithDependenciesScope extends GlobalSearchScope {
 
   private final ProjectFileIndex myProjectFileIndex;
 
-  private final Set<Module> myModules;
+  private volatile Set<Module> myModules;
   private final TObjectIntHashMap<VirtualFile> myRoots = new TObjectIntHashMap<VirtualFile>();
 
   public ModuleWithDependenciesScope(@NotNull Module module, @ScopeConstant int options) {
@@ -60,7 +60,33 @@ public class ModuleWithDependenciesScope extends GlobalSearchScope {
 
     myProjectFileIndex = ProjectRootManager.getInstance(module.getProject()).getFileIndex();
 
-    OrderEnumerator en = ModuleRootManager.getInstance(module).orderEntries();
+    final LinkedHashSet<VirtualFile> roots = ContainerUtil.newLinkedHashSet();
+
+    if (hasOption(CONTENT)) {
+      Set<Module> modules = calcModules();
+      myModules = ContainerUtil.newTroveSet(modules);
+      for (Module m : modules) {
+        for (ContentEntry entry : ModuleRootManager.getInstance(m).getContentEntries()) {
+          ContainerUtil.addIfNotNull(entry.getFile(), roots);
+        }
+      }
+    }
+    else {
+      OrderEnumerator en = getOrderEnumeratorForOptions();
+      Collections.addAll(roots, en.roots(entry -> {
+        if (entry instanceof ModuleOrderEntry || entry instanceof ModuleSourceOrderEntry) return OrderRootType.SOURCES;
+        return OrderRootType.CLASSES;
+      }).getRoots());
+    }
+
+    int i = 1;
+    for (VirtualFile root : roots) {
+      myRoots.put(root, i++);
+    }
+  }
+
+  private OrderEnumerator getOrderEnumeratorForOptions() {
+    OrderEnumerator en = ModuleRootManager.getInstance(myModule).orderEntries();
     en.recursively();
 
     if (hasOption(COMPILE)) {
@@ -72,48 +98,25 @@ public class ModuleWithDependenciesScope extends GlobalSearchScope {
     if (!hasOption(LIBRARIES)) en.withoutLibraries().withoutSdk();
     if (!hasOption(MODULES)) en.withoutDepModules();
     if (!hasOption(TESTS)) en.productionOnly();
+    return en;
+  }
 
-    final LinkedHashSet<Module> modules = ContainerUtil.newLinkedHashSet();
-
-    en.forEach(new Processor<OrderEntry>() {
-      @Override
-      public boolean process(OrderEntry each) {
-        if (each instanceof ModuleOrderEntry) {
-          ContainerUtil.addIfNotNull(modules, ((ModuleOrderEntry)each).getModule());
-        }
-        else if (each instanceof ModuleSourceOrderEntry) {
-          ContainerUtil.addIfNotNull(modules, each.getOwnerModule());
-        }
-        return true;
+  @NotNull
+  private Set<Module> calcModules() {
+    // In the case that hasOption(CONTENT), the order of the modules set matters for
+    // ordering the content roots, so use a LinkedHashSet
+    final Set<Module> modules = ContainerUtil.newLinkedHashSet();
+    OrderEnumerator en = getOrderEnumeratorForOptions();
+    en.forEach(each -> {
+      if (each instanceof ModuleOrderEntry) {
+        ContainerUtil.addIfNotNull(modules, ((ModuleOrderEntry)each).getModule());
       }
+      else if (each instanceof ModuleSourceOrderEntry) {
+        ContainerUtil.addIfNotNull(modules, each.getOwnerModule());
+      }
+      return true;
     });
-
-    myModules = new THashSet<Module>(modules);
-
-    final LinkedHashSet<VirtualFile> roots = ContainerUtil.newLinkedHashSet();
-
-    if (hasOption(CONTENT)) {
-      for (Module m : modules) {
-        for (ContentEntry entry : ModuleRootManager.getInstance(m).getContentEntries()) {
-          ContainerUtil.addIfNotNull(entry.getFile(), roots);
-        }
-      }
-    }
-    else {
-      Collections.addAll(roots, en.roots(new NotNullFunction<OrderEntry, OrderRootType>() {
-        @NotNull
-        @Override
-        public OrderRootType fun(OrderEntry entry) {
-          if (entry instanceof ModuleOrderEntry || entry instanceof ModuleSourceOrderEntry) return OrderRootType.SOURCES;
-          return OrderRootType.CLASSES;
-        }
-      }).getRoots());
-    }
-
-    int i = 1;
-    for (VirtualFile root : roots) {
-      myRoots.put(root, i++);
-    }
+    return modules;
   }
 
   @NotNull
@@ -122,7 +125,7 @@ public class ModuleWithDependenciesScope extends GlobalSearchScope {
   }
 
   private boolean hasOption(@ScopeConstant int option) {
-    return (myOptions & option) != 0;
+    return BitUtil.isSet(myOptions, option);
   }
 
   @NotNull
@@ -134,7 +137,11 @@ public class ModuleWithDependenciesScope extends GlobalSearchScope {
 
   @Override
   public boolean isSearchInModuleContent(@NotNull Module aModule) {
-    return myModules.contains(aModule);
+    Set<Module> allModules = myModules;
+    if (allModules == null) {
+      myModules = allModules = ContainerUtil.newTroveSet(calcModules());
+    }
+    return allModules.contains(aModule);
   }
 
   @Override
@@ -184,12 +191,7 @@ public class ModuleWithDependenciesScope extends GlobalSearchScope {
   public Collection<VirtualFile> getRoots() {
     //noinspection unchecked
     List<VirtualFile> result = (List)ContainerUtil.newArrayList(myRoots.keys());
-    Collections.sort(result, new Comparator<VirtualFile>() {
-      @Override
-      public int compare(VirtualFile o1, VirtualFile o2) {
-        return myRoots.get(o1) - myRoots.get(o2);
-      }
-    });
+    Collections.sort(result, (o1, o2) -> myRoots.get(o1) - myRoots.get(o2));
     return result;
   }
 

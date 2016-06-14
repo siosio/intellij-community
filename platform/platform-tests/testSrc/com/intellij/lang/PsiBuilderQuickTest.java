@@ -483,6 +483,27 @@ public class PsiBuilderQuickTest extends LightPlatformTestCase {
            "      PsiWhiteSpace(' ')\n");
   }
 
+  public void testEmptyCollapsedNode() {
+    doTest("a<<b",
+           new Parser() {
+             @Override
+             public void parse(PsiBuilder builder) {
+               builder.advanceLexer();
+               builder.mark().collapse(COLLAPSED);
+               while (builder.getTokenType() != null) {
+                 builder.advanceLexer();
+               }
+             }
+           },
+           "Element(ROOT)\n" +
+           "  PsiElement(LETTER)('a')\n" +
+           "  PsiElement(COLLAPSED)('')\n" +
+           "  PsiElement(OTHER)('<')\n" +
+           "  PsiElement(OTHER)('<')\n" +
+           "  PsiElement(LETTER)('b')\n"
+    );
+  }
+
   private interface Parser {
     void parse(PsiBuilder builder);
   }
@@ -539,24 +560,21 @@ public class PsiBuilderQuickTest extends LightPlatformTestCase {
         public void nodeInserted(@NotNull ASTNode oldParent, @NotNull LighterASTNode newNode, int pos) {
           fail("inserted(" + oldParent + "," + newNode.getTokenType() + ")");
         }
-      }
-    );
+      },
+      root.getText());
   }
 
   private static void doFailTest(@NonNls final String text, final Parser parser, @NonNls final String expected) {
-    PlatformTestUtil.withStdErrSuppressed(new Runnable() {
-      @Override
-      public void run() {
-        try {
-          PsiBuilder builder = PsiBuilderFactory.getInstance().createBuilder(new PlainTextParserDefinition(), new MyTestLexer(), text);
-          builder.setDebugMode(true);
-          parser.parse(builder);
-          builder.getLightTree();
-          fail("should fail");
-        }
-        catch (AssertionError e) {
-          assertEquals(expected, e.getMessage());
-        }
+    PlatformTestUtil.withStdErrSuppressed(() -> {
+      try {
+        PsiBuilder builder = PsiBuilderFactory.getInstance().createBuilder(new PlainTextParserDefinition(), new MyTestLexer(), text);
+        builder.setDebugMode(true);
+        parser.parse(builder);
+        builder.getLightTree();
+        fail("should fail");
+      }
+      catch (AssertionError e) {
+        assertEquals(expected, e.getMessage());
       }
     });
   }

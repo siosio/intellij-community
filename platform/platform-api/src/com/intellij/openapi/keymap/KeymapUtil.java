@@ -32,6 +32,7 @@ import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.ActionListener;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
@@ -77,8 +78,7 @@ public class KeymapUtil {
       }
     }
     else if (shortcut instanceof MouseShortcut) {
-      MouseShortcut mouseShortcut = (MouseShortcut)shortcut;
-      s = getMouseShortcutText(mouseShortcut.getButton(), mouseShortcut.getModifiers(), mouseShortcut.getClickCount());
+      s = getMouseShortcutText((MouseShortcut)shortcut);
     }
     else if (shortcut instanceof KeyboardModifierGestureShortcut) {
       final KeyboardModifierGestureShortcut gestureShortcut = (KeyboardModifierGestureShortcut)shortcut;
@@ -103,6 +103,11 @@ public class KeymapUtil {
     }
   }
 
+  public static String getMouseShortcutText(@NotNull MouseShortcut shortcut) {
+    if (shortcut instanceof PressureShortcut) return shortcut.toString();
+    return getMouseShortcutText(shortcut.getButton(), shortcut.getModifiers(), shortcut.getClickCount());
+  }
+
   /**
    * @param button        target mouse button
    * @param modifiers     modifiers used within the target click
@@ -110,11 +115,22 @@ public class KeymapUtil {
    * @return string representation of passed mouse shortcut.
    */
   public static String getMouseShortcutText(int button, @JdkConstants.InputEventMask int modifiers, int clickCount) {
-    if (clickCount < 3) {
-      return KeyMapBundle.message("mouse." + (clickCount == 1? "" : "double.") + "click.shortcut.text", getModifiersText(mapNewModifiers(modifiers)), button);
+    String resource;
+    if (button == MouseShortcut.BUTTON_WHEEL_UP) {
+      resource = "mouse.wheel.rotate.up.shortcut.text";
+    }
+    else if (button == MouseShortcut.BUTTON_WHEEL_DOWN) {
+      resource = "mouse.wheel.rotate.down.shortcut.text";
+    }
+    else if (clickCount < 2) {
+      resource = "mouse.click.shortcut.text";
+    }
+    else if (clickCount < 3) {
+      resource = "mouse.double.click.shortcut.text";
     } else {
       throw new IllegalStateException("unknown clickCount: " + clickCount);
     }
+    return KeyMapBundle.message(resource, getModifiersText(mapNewModifiers(modifiers)), button);
   }
 
   @JdkConstants.InputEventMask
@@ -200,6 +216,13 @@ public class KeymapUtil {
     return shortcut == null ? "" : getShortcutText(shortcut);
   }
 
+  @NotNull
+  public static String getPreferredShortcutText(@NotNull Shortcut[] shortcuts) {
+    KeyboardShortcut shortcut = ContainerUtil.findInstance(shortcuts, KeyboardShortcut.class);
+    return shortcut != null ? getShortcutText(shortcut) :
+           shortcuts.length > 0 ? getShortcutText(shortcuts[0]) : "";
+  }
+
   public static String getShortcutsText(Shortcut[] shortcuts) {
     if (shortcuts.length == 0) {
       return "";
@@ -223,6 +246,11 @@ public class KeymapUtil {
    * @throws InvalidDataException if <code>keystrokeString</code> doesn't represent valid <code>MouseShortcut</code>.
    */
   public static MouseShortcut parseMouseShortcut(String keystrokeString) throws InvalidDataException {
+
+    if (Registry.is("ide.mac.forceTouch") && keystrokeString.startsWith("Force touch")) {
+      return new PressureShortcut(2);
+    }
+
     int button = -1;
     int modifiers = 0;
     int clickCount = 1;
@@ -401,7 +429,7 @@ public class KeymapUtil {
     if (keymap == null) {
       return false;
     }
-    int button = e.getButton();
+    int button = MouseShortcut.getButton(e);
     int modifiers = e.getModifiersEx();
     if (button == MouseEvent.NOBUTTON && e.getID() == MouseEvent.MOUSE_DRAGGED) {
       // mouse drag events don't have button field set due to some reason
@@ -421,5 +449,31 @@ public class KeymapUtil {
       }
     }
     return false;
+  }
+
+  /**
+   * @param component    target component to reassign previously mapped action (if any)
+   * @param oldKeyStroke previously mapped keystroke (e.g. standard one that you want to use in some different way)
+   * @param newKeyStroke new keystroke to be assigned. <code>null</code> value means 'just unregister previously mapped action'
+   * @param condition    one of
+   *                     <ul>
+   *                     <li>JComponent.WHEN_FOCUSED,</li>
+   *                     <li>JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT</li>
+   *                     <li>JComponent.WHEN_IN_FOCUSED_WINDOW</li>
+   *                     <li>JComponent.UNDEFINED_CONDITION</li>
+   *                     </ul>
+   * @return <code>true</code> if the action is reassigned successfully
+   */
+  public static boolean reassignAction(@NotNull JComponent component,
+                                       @NotNull KeyStroke oldKeyStroke,
+                                       @Nullable KeyStroke newKeyStroke,
+                                       int condition) {
+    ActionListener action = component.getActionForKeyStroke(oldKeyStroke);
+    if (action == null) return false;
+    if (newKeyStroke != null) {
+      component.registerKeyboardAction(action, newKeyStroke, condition);
+    }
+    component.unregisterKeyboardAction(oldKeyStroke);
+    return true;
   }
 }

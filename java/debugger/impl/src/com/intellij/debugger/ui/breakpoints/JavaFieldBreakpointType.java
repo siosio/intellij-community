@@ -41,7 +41,9 @@ import javax.swing.*;
  * @author Eugene Zhuravlev
  *         Date: Apr 26, 2005
  */
-public class JavaFieldBreakpointType extends JavaLineBreakpointTypeBase<JavaFieldBreakpointProperties> implements JavaBreakpointType {
+public class JavaFieldBreakpointType extends JavaLineBreakpointTypeBase<JavaFieldBreakpointProperties>
+                                     implements JavaBreakpointType<JavaFieldBreakpointProperties> {
+
   public JavaFieldBreakpointType() {
     super("java-field", DebuggerBundle.message("field.watchpoints.tab.title"));
   }
@@ -121,7 +123,7 @@ public class JavaFieldBreakpointType extends JavaLineBreakpointTypeBase<JavaFiel
   @Nullable
   @Override
   public XLineBreakpoint<JavaFieldBreakpointProperties> addBreakpoint(final Project project, JComponent parentComponent) {
-    final Ref<XLineBreakpoint> result = Ref.create(null);
+    final Ref<XLineBreakpoint<JavaFieldBreakpointProperties>> result = Ref.create(null);
     AddFieldBreakpointDialog dialog = new AddFieldBreakpointDialog(project) {
       protected boolean validateData() {
         final String className = getClassName();
@@ -144,13 +146,10 @@ public class JavaFieldBreakpointType extends JavaLineBreakpointTypeBase<JavaFiel
             PsiField field = psiClass.findFieldByName(fieldName, true);
             if(field != null) {
               final int line = document.getLineNumber(field.getTextOffset());
-              ApplicationManager.getApplication().runWriteAction(new Runnable() {
-                @Override
-                public void run() {
-                  XLineBreakpoint<JavaFieldBreakpointProperties> fieldBreakpoint = XDebuggerManager.getInstance(project).getBreakpointManager()
-                    .addLineBreakpoint(JavaFieldBreakpointType.this, psiFile.getVirtualFile().getUrl(), line, new JavaFieldBreakpointProperties(fieldName, className));
-                  result.set(fieldBreakpoint);
-                }
+              ApplicationManager.getApplication().runWriteAction(() -> {
+                XLineBreakpoint<JavaFieldBreakpointProperties> fieldBreakpoint = XDebuggerManager.getInstance(project).getBreakpointManager()
+                  .addLineBreakpoint(JavaFieldBreakpointType.this, psiFile.getVirtualFile().getUrl(), line, new JavaFieldBreakpointProperties(fieldName, className));
+                result.set(fieldBreakpoint);
               });
               return true;
             }
@@ -178,7 +177,7 @@ public class JavaFieldBreakpointType extends JavaLineBreakpointTypeBase<JavaFiel
 
   @NotNull
   @Override
-  public Breakpoint createJavaBreakpoint(Project project, XBreakpoint breakpoint) {
+  public Breakpoint<JavaFieldBreakpointProperties> createJavaBreakpoint(Project project, XBreakpoint breakpoint) {
     return new FieldBreakpoint(project, breakpoint);
   }
 

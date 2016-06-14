@@ -19,7 +19,6 @@ package com.intellij.util.containers;
 import com.intellij.openapi.util.Condition;
 import com.intellij.testFramework.PlatformTestUtil;
 import com.intellij.util.ArrayUtil;
-import com.intellij.util.ThrowableRunnable;
 import gnu.trove.TIntArrayList;
 import junit.framework.TestCase;
 
@@ -57,12 +56,7 @@ public class ContainerUtilTest extends TestCase {
   }
 
   public void testIterateWithCondition() throws Exception {
-    Condition<Integer> cond = new Condition<Integer>() {
-      @Override
-      public boolean value(Integer integer) {
-        return integer > 2;
-      }
-    };
+    Condition<Integer> cond = integer -> integer > 2;
 
     asserIterating(Arrays.asList(1, 4, 2, 5), cond, 4, 5);
     asserIterating(Arrays.asList(1, 2), cond);
@@ -228,19 +222,19 @@ public class ContainerUtilTest extends TestCase {
   }
 
   public void testCOWListPerformanceAdd() {
-    PlatformTestUtil.startPerformanceTest("COWList add", 3000, new ThrowableRunnable() {
-      @Override
-      public void run() throws Throwable {
-        List<Object> my = ContainerUtil.createLockFreeCopyOnWriteList();
-        long start = System.currentTimeMillis();
+    List<Object> my = ContainerUtil.createLockFreeCopyOnWriteList();
+    PlatformTestUtil.startPerformanceTest("COWList add", 3000, () -> {
+      List<Object> local = my;
+      for (int it=0; it<10; it++) {
+        local.clear();
         for (int i = 0; i < 15000; i++) {
-          my.add(i);
-          assertEquals(i, my.indexOf(i));
+          local.add(i);
         }
-        long elapsed = System.currentTimeMillis() - start;
-        System.out.println("elapsed = " + elapsed);
       }
-    }).assertTiming();
+    }).useLegacyScaling().assertTiming();
+    for (int i = 0; i < my.size(); i++) {
+      assertEquals(i, my.get(i));
+    }
   }
 
   private static void assertReallyEmpty(List<Object> my) {
@@ -251,6 +245,16 @@ public class ContainerUtilTest extends TestCase {
 
     Iterator<Object> iterator = my.iterator();
     assertSame(EmptyIterator.getInstance(), iterator);
+  }
+
+  public void testIdenticalItemsInLockFreeCOW() {
+    List<String> list = ContainerUtil.createLockFreeCopyOnWriteList(Arrays.asList("a", "b"));
+    list.add("a");
+    assertEquals(3, list.size());
+    list.remove("a");
+    assertEquals(2, list.size());
+    list.remove("a");
+    assertEquals(1, list.size());
   }
 
   public void testLockFreeCOWIteratorRemove() {

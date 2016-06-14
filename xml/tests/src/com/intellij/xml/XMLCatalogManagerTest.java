@@ -19,12 +19,10 @@ import com.intellij.codeInsight.daemon.impl.HighlightInfo;
 import com.intellij.javaee.ExternalResourceManagerEx;
 import com.intellij.javaee.XMLCatalogConfigurable;
 import com.intellij.javaee.XMLCatalogManager;
-import com.intellij.testFramework.IdeaTestCase;
 import com.intellij.testFramework.fixtures.LightPlatformCodeInsightFixtureTestCase;
 import org.apache.xml.resolver.CatalogManager;
 
 import java.io.File;
-import java.io.IOException;
 import java.net.URI;
 import java.util.List;
 import java.util.Vector;
@@ -84,11 +82,6 @@ public class XMLCatalogManagerTest extends LightPlatformCodeInsightFixtureTestCa
   }
 
   @Override
-  protected boolean isWriteActionRequired() {
-    return false;
-  }
-
-  @Override
   protected String getBasePath() {
     return "/xml/tests/testData/catalog/";
   }
@@ -96,10 +89,5 @@ public class XMLCatalogManagerTest extends LightPlatformCodeInsightFixtureTestCa
   @Override
   protected boolean isCommunity() {
     return true;
-  }
-
-  @SuppressWarnings("JUnitTestCaseWithNonTrivialConstructors")
-  public XMLCatalogManagerTest() {
-    IdeaTestCase.initPlatformPrefix();
   }
 }

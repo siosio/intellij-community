@@ -130,6 +130,21 @@ public interface GitBrancher {
   void merge(@NotNull String branchName, @NotNull DeleteOnMergeOption deleteOnMerge, @NotNull List<GitRepository> repositories);
 
   /**
+   * Call {@code git rebase <branchName>} for each of the given repositories.
+   */
+  void rebase(@NotNull List<GitRepository> repositories, @NotNull String branchName);
+
+  /**
+   * Call {@code git rebase <current branch> <branchName>} for each of the given repositories.
+   */
+  void rebaseOnCurrent(@NotNull List<GitRepository> repositories, @NotNull String branchName);
+
+  /**
+   * Renames the given branch.
+   */
+  void renameBranch(@NotNull String currentName, @NotNull String newName, @NotNull List<GitRepository> repositories);
+
+  /**
    * What should be done after successful merging a branch: delete the merged branch, propose to delete or do nothing.
    */
   enum DeleteOnMergeOption {

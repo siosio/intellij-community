@@ -16,14 +16,14 @@
 
 package com.intellij.util.indexing;
 
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.vfs.InvalidVirtualFileAccessException;
-import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.newvfs.FileAttribute;
-import com.intellij.openapi.vfs.newvfs.NewVirtualFile;
 import com.intellij.openapi.vfs.newvfs.persistent.FSRecords;
 import com.intellij.util.SmartList;
+import com.intellij.util.SystemProperties;
 import com.intellij.util.containers.ConcurrentIntObjectMap;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.io.DataInputOutputUtil;
@@ -40,6 +40,9 @@ import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * @author Eugene Zhuravlev
@@ -48,20 +51,19 @@ import java.util.concurrent.ConcurrentMap;
  * A file has three indexed states (per particular index): indexed (with particular index_stamp), outdated and (trivial) unindexed
  * if index version is advanced or we rebuild it then index_stamp is advanced, we rebuild everything
  * if we get remove file event -> we should remove all indexed state from indices data for it (if state is nontrivial)
- * and set its indexed state to unindexed
+ * and set its indexed state to outdated
  * if we get other event we set indexed state to outdated
  *
- * Index stamp is file timestamp of the index directory, it is assumed that index stamps are monotonically increasing, but
- * still << Long.MAX_VALUE: there are two negative special timestamps used for marking outdated / unindexed index state.
- * The code doesn't take overflow of real file timestaps (or their coincidence to negative special timestamps) into account because
+ * Index stamp is file modified timestamp of the index's version file, it is assumed that index stamps are monotonically increasing, but
+ * still << Long.MAX_VALUE: there is one negative special timestamp used for marking outdated index state.
+ * The code doesn't take overflow of real file timestamps (or their coincidence to negative special timestamps) into account because
  * it will happen (if time will go as forward as it does today) near year 292277094 (=new java.util.Date(Long.MAX_VALUE).getYear()).
  * At that time (if this code will be still actual) we can use positive small timestamps for special cases.
  */
 public class IndexingStamp {
-  private static final long UNINDEXED_STAMP = -1L; // we don't store trivial "absent" state
   private static final long INDEX_DATA_OUTDATED_STAMP = -2L;
 
-  private static final int VERSION = 14;
+  private static final int VERSION = 15;
   private static final ConcurrentMap<ID<?, ?>, Long> ourIndexIdToCreationStamp = ContainerUtil.newConcurrentMap();
   static final int INVALID_FILE_ID = 0;
   private static volatile long ourLastStamp; // ensure any file index stamp increases
@@ -69,6 +71,7 @@ public class IndexingStamp {
   private IndexingStamp() {}
 
   public static synchronized void rewriteVersion(@NotNull final File file, final int version) throws IOException {
+    SharedIndicesData.beforeSomeIndexVersionInvalidation();
     final long prevLastModifiedValue = file.lastModified();
     if (file.exists()) {
       FileUtil.deleteWithRenaming(file);
@@ -96,11 +99,24 @@ public class IndexingStamp {
     finally {
       ourIndexIdToCreationStamp.clear();
       os.close();
-      long max = Math.max(System.currentTimeMillis(), Math.max(prevLastModifiedValue, ourLastStamp) + 2000);
+      long max = Math.max(
+        System.currentTimeMillis(),
+        Math.max(prevLastModifiedValue + MIN_FS_MODIFIED_TIMESTAMP_RESOLUTION, ourLastStamp + OUR_INDICES_TIMESTAMP_INCREMENT)
+      );
       ourLastStamp = max;
-      file.setLastModified(max);
+      final boolean lastModifiedSuccess = file.setLastModified(max);
+      if (!lastModifiedSuccess) {
+        Logger.getInstance(IndexingStamp.class).info("Setting lastModified failed for " + file + " timestamp:" + max);
+        ourLastStamp = Math.max(ourLastStamp, file.lastModified());
+      }
     }
   }
+
+  private static final int MIN_FS_MODIFIED_TIMESTAMP_RESOLUTION = 2000; // https://en.wikipedia.org/wiki/File_Allocation_Table,
+  // 1s for ext3 / hfs+ http://unix.stackexchange.com/questions/11599/determine-file-system-timestamp-accuracy
+  // https://en.wikipedia.org/wiki/HFS_Plus
+
+  private static final int OUR_INDICES_TIMESTAMP_INCREMENT = SystemProperties.getIntProperty("idea.indices.timestamp.resolution", 1);
 
   public static boolean versionDiffers(@NotNull File versionFile, final int currentIndexVersion) {
     try {
@@ -125,7 +141,7 @@ public class IndexingStamp {
     }
   }
 
-  private static long getIndexCreationStamp(@NotNull ID<?, ?> indexName) {
+  public static long getIndexCreationStamp(@NotNull ID<?, ?> indexName) {
     Long version = ourIndexIdToCreationStamp.get(indexName);
     if (version != null) return version.longValue();
 
@@ -133,10 +149,6 @@ public class IndexingStamp {
     ourIndexIdToCreationStamp.putIfAbsent(indexName, stamp);
 
     return stamp;
-  }
-
-  public static boolean isFileIndexedStateCurrent(VirtualFile file, ID<?, ?> indexName) {
-    return file instanceof NewVirtualFile && isFileIndexedStateCurrent(((NewVirtualFile)file).getId(), indexName);
   }
 
   public static boolean isFileIndexedStateCurrent(int fileId, ID<?, ?> indexName) {
@@ -155,10 +167,6 @@ public class IndexingStamp {
 
   public static void setFileIndexedStateCurrent(int fileId, ID<?, ?> id) {
     update(fileId, id, getIndexCreationStamp(id));
-  }
-
-  public static void setFileIndexedStateUnindexed(int fileId, ID<?, ?> id) {
-    update(fileId, id, UNINDEXED_STAMP);
   }
 
   public static void setFileIndexedStateOutdated(int fileId, ID<?, ?> id) {
@@ -192,6 +200,7 @@ public class IndexingStamp {
             ID<?, ?> id = ID.findById(DataInputOutputUtil.readINT(stream));
             if (id != null) {
               long stamp = getIndexCreationStamp(id);
+              if (stamp == 0) continue; // All (indices) IDs should be valid in this running session (e.g. we can have ID instance existing but index is not registered)
               if (myIndexStamps == null) myIndexStamps = new TObjectLongHashMap<ID<?, ?>>(5, 0.98f);
               if (stamp <= dominatingIndexStamp) myIndexStamps.put(id, stamp);
             }
@@ -280,19 +289,13 @@ public class IndexingStamp {
     }
 
     private void set(ID<?, ?> id, long tmst) {
-      try {
-        if (tmst == UNINDEXED_STAMP) {
-          if (myIndexStamps == null) return;
-          myIndexStamps.remove(id);
-          return;
-        }
-        if (myIndexStamps == null) myIndexStamps = new TObjectLongHashMap<ID<?, ?>>(5, 0.98f);
+      if (myIndexStamps == null) myIndexStamps = new TObjectLongHashMap<ID<?, ?>>(5, 0.98f);
 
-        myIndexStamps.put(id, tmst);
+      if (tmst == INDEX_DATA_OUTDATED_STAMP && !myIndexStamps.contains(id)) {
+        return;
       }
-      finally {
-        myIsDirty = true;
-      }
+      long previous = myIndexStamps.put(id, tmst);
+      if (previous != tmst) myIsDirty = true;
     }
 
     public boolean isDirty() {
@@ -303,24 +306,23 @@ public class IndexingStamp {
   private static final ConcurrentIntObjectMap<Timestamps> myTimestampsCache = ContainerUtil.createConcurrentIntObjectMap();
   private static final BlockingQueue<Integer> ourFinishedFiles = new ArrayBlockingQueue<Integer>(100);
 
-  public static long getIndexStamp(@NotNull VirtualFile file, ID<?, ?> indexName) {
-    if(file instanceof NewVirtualFile && file.isValid()) {
-      return getIndexStamp(((NewVirtualFile)file).getId(), indexName);
-    }
-    return 0;
-  }
-
   public static long getIndexStamp(int fileId, ID<?, ?> indexName) {
-    synchronized (getStripedLock(fileId)) {
+    Lock readLock = getStripedLock(fileId).readLock();
+    readLock.lock();
+    try {
       Timestamps stamp = createOrGetTimeStamp(fileId);
       if (stamp != null) return stamp.get(indexName);
       return 0;
+    } finally {
+      readLock.unlock();
     }
   }
 
   private static Timestamps createOrGetTimeStamp(int id) {
     boolean isValid = id > 0;
-    if (!isValid) id = -id;
+    if (!isValid) {
+      id = -id;
+    }
     Timestamps timestamps = myTimestampsCache.get(id);
     if (timestamps == null) {
       final DataInputStream stream = FSRecords.readAttributeWithLock(id, Timestamps.PERSISTENCE);
@@ -337,32 +339,39 @@ public class IndexingStamp {
 
   public static void update(int fileId, @NotNull ID<?, ?> indexName, final long indexCreationStamp) {
     if (fileId < 0 || fileId == INVALID_FILE_ID) return;
-    synchronized (getStripedLock(fileId)) {
+    Lock writeLock = getStripedLock(fileId).writeLock();
+    writeLock.lock();
+    try {
       Timestamps stamp = createOrGetTimeStamp(fileId);
       if (stamp != null) stamp.set(indexName, indexCreationStamp);
+    } finally {
+      writeLock.unlock();
     }
   }
 
   @NotNull
   public static List<ID<?,?>> getNontrivialFileIndexedStates(int fileId) {
     if (fileId != INVALID_FILE_ID) {
-      synchronized (getStripedLock(fileId)) {
-        try {
-          Timestamps stamp = createOrGetTimeStamp(fileId);
-          if (stamp != null && stamp.myIndexStamps != null && !stamp.myIndexStamps.isEmpty()) {
-            final SmartList<ID<?, ?>> retained = new SmartList<ID<?, ?>>();
-            stamp.myIndexStamps.forEach(new TObjectProcedure<ID<?, ?>>() {
-              @Override
-              public boolean execute(ID<?, ?> object) {
-                retained.add(object);
-                return true;
-              }
-            });
-            return retained;
-          }
+      Lock readLock = getStripedLock(fileId).readLock();
+      readLock.lock();
+      try {
+        Timestamps stamp = createOrGetTimeStamp(fileId);
+        if (stamp != null && stamp.myIndexStamps != null && !stamp.myIndexStamps.isEmpty()) {
+          final SmartList<ID<?, ?>> retained = new SmartList<ID<?, ?>>();
+          stamp.myIndexStamps.forEach(new TObjectProcedure<ID<?, ?>>() {
+            @Override
+            public boolean execute(ID<?, ?> object) {
+              retained.add(object);
+              return true;
+            }
+          });
+          return retained;
         }
-        catch (InvalidVirtualFileAccessException ignored /*ok to ignore it here*/) {
-        }
+      }
+      catch (InvalidVirtualFileAccessException ignored /*ok to ignore it here*/) {
+      }
+      finally {
+        readLock.unlock();
       }
     }
     return Collections.emptyList();
@@ -381,19 +390,21 @@ public class IndexingStamp {
 
       if (!files.isEmpty()) {
         for (Integer file : files) {
-          synchronized (getStripedLock(file)) {
+          Lock writeLock = getStripedLock(file).writeLock();
+          writeLock.lock();
+          try {
             Timestamps timestamp = myTimestampsCache.remove(file);
             if (timestamp == null) continue;
-            try {
-              if (timestamp.isDirty() /*&& file.isValid()*/) {
-                final DataOutputStream sink = FSRecords.writeAttribute(file, Timestamps.PERSISTENCE);
-                timestamp.writeToStream(sink);
-                sink.close();
-              }
+
+            if (timestamp.isDirty() /*&& file.isValid()*/) {
+              final DataOutputStream sink = FSRecords.writeAttribute(file, Timestamps.PERSISTENCE);
+              timestamp.writeToStream(sink);
+              sink.close();
             }
-            catch (IOException e) {
-              throw new RuntimeException(e);
-            }
+          } catch (IOException e) {
+            throw new RuntimeException(e);
+          } finally {
+            writeLock.unlock();
           }
         }
       }
@@ -401,19 +412,13 @@ public class IndexingStamp {
       // else repeat until ourFinishedFiles.offer() succeeds
     }
   }
-  public static void flushCache(@Nullable VirtualFile finishedVirtualFile) {
-    // todo make better (e.g. FinishedFiles striping)
-    Integer finishedFile = (finishedVirtualFile instanceof NewVirtualFile) ? ((NewVirtualFile)finishedVirtualFile).getId() : null;
 
-    flushCache(finishedFile);
-  }
-
-  private static final Object[] ourLocks = new Object[16];
+  private static final ReadWriteLock[] ourLocks = new ReadWriteLock[16];
   static {
-    for(int i = 0; i < ourLocks.length; ++i) ourLocks[i] = new Object();
+    for(int i = 0; i < ourLocks.length; ++i) ourLocks[i] = new ReentrantReadWriteLock();
   }
 
-  private static Object getStripedLock(int fileId) {
+  private static ReadWriteLock getStripedLock(int fileId) {
     if (fileId < 0) fileId = -fileId;
     return ourLocks[(fileId & 0xFF) % ourLocks.length];
   }

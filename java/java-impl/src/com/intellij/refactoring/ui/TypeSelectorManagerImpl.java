@@ -154,12 +154,26 @@ public class TypeSelectorManagerImpl implements TypeSelectorManager {
     final Set<PsiClass> occurrenceClasses = new HashSet<PsiClass>();
     for (final PsiExpression occurrence : myOccurrences) {
       final PsiType occurrenceType = occurrence.getType();
+      collectOccurrenceClasses(occurrenceClasses, occurrenceType);
+    }
+    return new ExpectedTypeUtil.ExpectedClassesFromSetProvider(occurrenceClasses);
+  }
+
+  private static void collectOccurrenceClasses(Set<PsiClass> occurrenceClasses, PsiType occurrenceType) {
+    if (occurrenceType instanceof PsiIntersectionType) {
+      for (PsiType type : ((PsiIntersectionType)occurrenceType).getConjuncts()) {
+        collectOccurrenceClasses(occurrenceClasses, type);
+      }
+    }
+    else if (occurrenceType instanceof PsiCapturedWildcardType) {
+      collectOccurrenceClasses(occurrenceClasses, ((PsiCapturedWildcardType)occurrenceType).getUpperBound());
+    }
+    else {
       final PsiClass aClass = PsiUtil.resolveClassInType(occurrenceType);
       if (aClass != null) {
         occurrenceClasses.add(aClass);
       }
     }
-    return new ExpectedTypeUtil.ExpectedClassesFromSetProvider(occurrenceClasses);
   }
 
   private PsiType[] getTypesForMain() {
@@ -298,18 +312,25 @@ public class TypeSelectorManagerImpl implements TypeSelectorManager {
   private void setTypesAndPreselect(PsiType[] types) {
     myTypeSelector.setTypes(types);
 
+    final PsiType preferredType = getPreferredType(types, getDefaultType());
+    if (preferredType != null) {
+      myTypeSelector.selectType(preferredType);
+    }
+  }
+
+  public static PsiType getPreferredType(PsiType[] types, PsiType defaultType) {
     Map<String, PsiType> map = new THashMap<String, PsiType>();
     for (final PsiType type : types) {
       map.put(serialize(type), type);
     }
 
-    for (StatisticsInfo info : StatisticsManager.getInstance().getAllValues(getStatsKey())) {
+    for (StatisticsInfo info : StatisticsManager.getInstance().getAllValues(getStatsKey(defaultType))) {
       final PsiType candidate = map.get(info.getValue());
       if (candidate != null && StatisticsManager.getInstance().getUseCount(info) > 0) {
-        myTypeSelector.selectType(candidate);
-        return;
+        return candidate;
       }
     }
+    return null;
   }
 
   @Override
@@ -339,15 +360,10 @@ public class TypeSelectorManagerImpl implements TypeSelectorManager {
     StatisticsManager.getInstance().incUseCount(new StatisticsInfo(getStatsKey(defaultType), serialize(type)));
   }
 
-  private String getStatsKey() {
-    final PsiType defaultType = getDefaultType();
+  private static String getStatsKey(final PsiType defaultType) {
     if (defaultType == null) {
       return "IntroduceVariable##";
     }
-    return getStatsKey(defaultType);
-  }
-
-  private static String getStatsKey(final PsiType defaultType) {
     return "IntroduceVariable##" + serialize(defaultType);
   }
 

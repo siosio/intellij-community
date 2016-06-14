@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,11 +20,11 @@ import com.intellij.openapi.util.io.FileUtil;
 import java.util.ArrayList;
 import java.util.List;
 
-@SuppressWarnings("unused")
-@Deprecated
 /**
  * Use {@link com.intellij.util.text.UniqueNameGenerator}
  */
+@SuppressWarnings("unused")
+@Deprecated
 public class UniqueFileNamesProvider {
   private final List<String> myExistingNames;
 
@@ -33,7 +33,7 @@ public class UniqueFileNamesProvider {
   }
 
   public String suggestName(String originalName) {
-    String s = FileUtil.sanitizeName(originalName);
+    String s = FileUtil.sanitizeFileName(originalName, false);
     if (!contains(s)) {
       myExistingNames.add(s);
       return s;
@@ -58,7 +58,7 @@ public class UniqueFileNamesProvider {
   }
 
   public static String convertName(String s) {
-    return FileUtil.sanitizeName(s);
+    return FileUtil.sanitizeFileName(s, false);
   }
 
   public void reserveFileName(final String fileName) {

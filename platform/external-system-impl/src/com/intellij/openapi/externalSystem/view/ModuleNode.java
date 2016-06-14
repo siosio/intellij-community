@@ -30,7 +30,7 @@ import java.util.List;
  * @author Vladislav.Soroka
  * @since 11/7/2014
  */
-@Order(1)
+@Order(ExternalSystemNode.BUILTIN_MODULE_DATA_NODE_ORDER)
 public class ModuleNode extends ExternalSystemNode<ModuleData> {
   private final boolean myIsRoot;
   private final ModuleData myData;
@@ -55,7 +55,8 @@ public class ModuleNode extends ExternalSystemNode<ModuleData> {
       hint = "root";
     }
 
-    setNameAndTooltip(getName(), myData.toString(), hint);
+    final String tooltip = myData.toString() + (myData.getDescription() != null ? "<br>" + myData.getDescription() : "");
+    setNameAndTooltip(getName(), tooltip, hint);
   }
 
   @NotNull
@@ -76,7 +77,7 @@ public class ModuleNode extends ExternalSystemNode<ModuleData> {
   @Nullable
   @Override
   protected String getMenuId() {
-    return "ExternalSystemView.ProjectMenu";
+    return "ExternalSystemView.ModuleMenu";
   }
 
   @Override

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,7 +50,8 @@ public class MasterKeyPasswordSafe extends BasePasswordSafeProvider {
   private static final String TEST_PASSWORD_VALUE = "test password";
 
   private final PasswordDatabase myDatabase;
-  private transient final PasswordSafeTimed<Ref<Object>> myKey = new PasswordSafeTimed<Ref<Object>>() {
+  private final transient PasswordSafeTimed<Ref<Object>> myKey = new PasswordSafeTimed<Ref<Object>>() {
+    @Override
     protected Ref<Object> compute() {
       return Ref.create();
     }
@@ -62,7 +63,7 @@ public class MasterKeyPasswordSafe extends BasePasswordSafeProvider {
   };
 
   public MasterKeyPasswordSafe(PasswordDatabase database) {
-    this.myDatabase = database;
+    myDatabase = database;
   }
 
   /**
@@ -118,7 +119,6 @@ public class MasterKeyPasswordSafe extends BasePasswordSafeProvider {
    *
    * @param oldPassword the old password
    * @param newPassword the new password
-   * @param encrypt
    * @return re-encrypted database
    */
   boolean changeMasterPassword(String oldPassword, String newPassword, boolean encrypt) {
@@ -173,29 +173,26 @@ public class MasterKeyPasswordSafe extends BasePasswordSafeProvider {
       throw new MasterPasswordUnavailableException("The provider is not available in headless environment");
     }
 
-    key = invokeAndWait(new ThrowableComputable<Object, PasswordSafeException>() {
-      @Override
-      public Object compute() throws PasswordSafeException {
-        Object key = myKey.get().get();
-        if (key instanceof byte[] || key instanceof PasswordSafeException && ((PasswordSafeException)key).justHappened()) {
-          return key;
-        }
-        try {
-          if (myDatabase.isEmpty()) {
-            if (!MasterPasswordDialog.resetMasterPasswordDialog(project, MasterKeyPasswordSafe.this, requestor).showAndGet()) {
-              throw new MasterPasswordUnavailableException("Master password is required to store passwords in the database.");
-            }
-          }
-          else {
-            MasterPasswordDialog.askPassword(project, MasterKeyPasswordSafe.this, requestor);
-          }
-        }
-        catch (PasswordSafeException e) {
-          myKey.get().set(e);
-          throw e;
-        }
-        return myKey.get().get();
+    key = invokeAndWait(() -> {
+      Object key1 = myKey.get().get();
+      if (key1 instanceof byte[] || key1 instanceof PasswordSafeException && ((PasswordSafeException)key1).justHappened()) {
+        return key1;
       }
+      try {
+        if (myDatabase.isEmpty()) {
+          if (!MasterPasswordDialog.resetMasterPasswordDialog(project, MasterKeyPasswordSafe.this, requestor).showAndGet()) {
+            throw new MasterPasswordUnavailableException("Master password is required to store passwords in the database.");
+          }
+        }
+        else {
+          MasterPasswordDialog.askPassword(project, MasterKeyPasswordSafe.this, requestor);
+        }
+      }
+      catch (PasswordSafeException e) {
+        myKey.get().set(e);
+        throw e;
+      }
+      return myKey.get().get();
     }, project == null ? Conditions.alwaysFalse() : project.getDisposed());
     if (key instanceof byte[]) return (byte[])key;
     if (key instanceof PasswordSafeException) throw (PasswordSafeException)key;
@@ -209,7 +206,7 @@ public class MasterKeyPasswordSafe extends BasePasswordSafeProvider {
       return computable.compute();
     }
 
-    final AsyncFutureResult<Object> future = AsyncFutureFactory.getInstance().createAsyncFutureResult();
+    final AsyncFutureResult<T> future = AsyncFutureFactory.getInstance().createAsyncFutureResult();
     final ExpirableRunnable runnable = new ExpirableRunnable() {
       @Override
       public boolean isExpired() {
@@ -231,12 +228,9 @@ public class MasterKeyPasswordSafe extends BasePasswordSafeProvider {
     ProgressIndicator indicator = ProgressIndicatorProvider.getGlobalProgressIndicator();
     synchronized (ourEDTLock) {
       if (indicator != null && indicator.isModal()) {
-        UIUtil.invokeLaterIfNeeded(new Runnable() {
-          @Override
-          public void run() {
-            if (!runnable.isExpired()) {
-              runnable.run();
-            }
+        UIUtil.invokeLaterIfNeeded(() -> {
+          if (!runnable.isExpired()) {
+            runnable.run();
           }
         });
       }
@@ -244,7 +238,7 @@ public class MasterKeyPasswordSafe extends BasePasswordSafeProvider {
         IdeFocusManager.getGlobalInstance().doWhenFocusSettlesDown(runnable);
       }
       try {
-        return (T)future.get();
+        return future.get();
       }
       catch (InterruptedException e) {
         throw new ProcessCanceledException(e);
@@ -307,7 +301,7 @@ public class MasterKeyPasswordSafe extends BasePasswordSafeProvider {
     return setMasterPassword("");
   }
 
-  @SuppressWarnings({"MethodMayBeStatic"})
+  @SuppressWarnings("MethodMayBeStatic")
   public boolean isOsProtectedPasswordSupported() {
     // TODO extension point needed?
     return SystemInfo.isWindows;

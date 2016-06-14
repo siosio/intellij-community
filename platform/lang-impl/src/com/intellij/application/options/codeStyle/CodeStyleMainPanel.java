@@ -23,11 +23,11 @@ import com.intellij.lang.Language;
 import com.intellij.openapi.application.ApplicationBundle;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.options.ConfigurationException;
-import com.intellij.openapi.util.registry.Registry;
 import com.intellij.psi.codeStyle.CodeStyleScheme;
 import com.intellij.psi.codeStyle.CodeStyleSchemes;
 import com.intellij.ui.components.labels.SwingActionLink;
 import com.intellij.util.Alarm;
+import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -115,9 +115,7 @@ public class CodeStyleMainPanel extends JPanel implements TabbedLanguageCodeStyl
     JPanel top = new JPanel(new BorderLayout());
     top.add(BorderLayout.WEST, mySchemesPanel.getPanel());
     top.add(BorderLayout.EAST, link);
-    if (Registry.is("ide.new.settings.view")) {
-      top.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-    }
+    top.setBorder(JBUI.Borders.empty(10));
     add(top, BorderLayout.NORTH);
     add(mySettingsPanel, BorderLayout.CENTER);
 
@@ -139,27 +137,19 @@ public class CodeStyleMainPanel extends JPanel implements TabbedLanguageCodeStyl
 
   public void onCurrentSchemeChanged() {
     myLayout.show(mySettingsPanel, WAIT_CARD);
-    final Runnable replaceLayout = new Runnable() {
-      @Override
-      public void run() {
-        if (!myIsDisposed) {
-          ensureCurrentPanel().onSomethingChanged();
-          String schemeName = myModel.getSelectedScheme().getName();
-          updateSetFrom();
-          myLayout.show(mySettingsPanel, schemeName);
-        }
+    final Runnable replaceLayout = () -> {
+      if (!myIsDisposed) {
+        ensureCurrentPanel().onSomethingChanged();
+        String schemeName = myModel.getSelectedScheme().getName();
+        updateSetFrom();
+        myLayout.show(mySettingsPanel, schemeName);
       }
     };
     if (ApplicationManager.getApplication().isHeadlessEnvironment()) {
       replaceLayout.run();
     } else {
       myAlarm.cancelAllRequests();
-      final Runnable request = new Runnable() {
-        @Override
-        public void run() {
-          SwingUtilities.invokeLater(replaceLayout);
-        }
-      };
+      final Runnable request = () -> SwingUtilities.invokeLater(replaceLayout);
       myAlarm.addRequest(request, 200);
     }
   }

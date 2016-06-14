@@ -42,4 +42,9 @@ public abstract class SafeDeleteProcessorDelegateBase implements SafeDeleteProce
   public UsageView showUsages(UsageInfo[] usages, UsageViewPresentation presentation, UsageViewManager manager, PsiElement[] elements) {
     return null;
   }
+
+  @Nullable
+  public Collection<String> findConflicts(PsiElement element, PsiElement[] elements, UsageInfo[] usages) {
+    return findConflicts(element, elements);
+  }
 }

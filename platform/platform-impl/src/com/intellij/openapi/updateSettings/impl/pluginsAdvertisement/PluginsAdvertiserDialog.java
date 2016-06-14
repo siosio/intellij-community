@@ -23,8 +23,6 @@ import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.updateSettings.impl.DetectedPluginsPanel;
 import com.intellij.openapi.updateSettings.impl.PluginDownloader;
 import com.intellij.ui.TableUtil;
-import com.intellij.util.Function;
-import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
@@ -42,15 +40,12 @@ public class PluginsAdvertiserDialog extends DialogWrapper {
   private final List<PluginId> myAllPlugins;
   private final Set<String> mySkippedPlugins = new HashSet<String>();
 
+  private final PluginManagerMain.PluginEnabler.HEADLESS pluginHelper = new PluginManagerMain.PluginEnabler.HEADLESS();
+
   PluginsAdvertiserDialog(@Nullable Project project, PluginDownloader[] plugins, List<PluginId> allPlugins) {
     super(project);
     myProject = project;
-    Arrays.sort(plugins, new Comparator<PluginDownloader>() {
-      @Override
-      public int compare(PluginDownloader o1, PluginDownloader o2) {
-        return o1.getPluginName().compareToIgnoreCase(o2.getPluginName());
-      }
-    });
+    Arrays.sort(plugins, (o1, o2) -> o1.getPluginName().compareToIgnoreCase(o2.getPluginName()));
     myUploadedPlugins = plugins;
     myAllPlugins = allPlugins;
     setTitle("Choose Plugins to Install or Enable");
@@ -82,7 +77,7 @@ public class PluginsAdvertiserDialog extends DialogWrapper {
       String pluginId = downloader.getPluginId();
       if (!mySkippedPlugins.contains(pluginId)) {
         pluginsToEnable.add(pluginId);
-        if (!PluginManagerCore.getDisabledPlugins().contains(pluginId)) {
+        if (!pluginHelper.isDisabled(pluginId)) {
           final PluginNode pluginNode = PluginDownloader.createPluginNode(null, downloader);
           if (pluginNode != null) {
             nodes.add(pluginNode);
@@ -90,12 +85,10 @@ public class PluginsAdvertiserDialog extends DialogWrapper {
         }
       }
     }
-    final Runnable notifyRunnable = new Runnable() {
-      @Override
-      public void run() {
-        PluginManagerMain.notifyPluginsUpdated(myProject);
-      }
-    };
+
+    PluginManagerMain.suggestToEnableInstalledDependantPlugins(pluginHelper, nodes);
+
+    final Runnable notifyRunnable = () -> PluginManagerMain.notifyPluginsUpdated(myProject);
     for (String pluginId : pluginsToEnable) {
       PluginManagerCore.enablePlugin(pluginId);
     }

@@ -60,10 +60,10 @@ public abstract class PerFileMappingsBase<T> implements PersistentStateComponent
   }
 
   private void cleanup() {
-    for (final VirtualFile file : new ArrayList<VirtualFile>(myMappings.keySet())) {
-      if (file != null //PROJECT, top-level
-          && !file.isValid()) {
-        myMappings.remove(file);
+    for (Iterator<VirtualFile> i = myMappings.keySet().iterator(); i.hasNext();) {
+      VirtualFile file = i.next();
+      if (file != null /* PROJECT, top-level */ && !file.isValid()) {
+        i.remove();
       }
     }
   }
@@ -95,16 +95,18 @@ public abstract class PerFileMappingsBase<T> implements PersistentStateComponent
     }
     if (mappings == null) return null;
     synchronized (mappings) {
-      for (VirtualFile cur = file; ; cur = cur.getParent()) {
-        T t = mappings.get(cur);
-        if (t != null) return t;
-        if (originalFile != null) {
-          t = mappings.get(originalFile);
-          if (t != null) return t;
-          originalFile = originalFile.getParent();
-        }
-        if (cur == null) break;
-      }
+      T t = getMappingForHierarchy(file, mappings);
+      if (t != null) return t;
+      t = getMappingForHierarchy(originalFile, mappings);
+      if (t != null) return t;
+      return mappings.get(null);
+    }
+  }
+
+  private static <T> T getMappingForHierarchy(@Nullable VirtualFile file, @NotNull Map<VirtualFile, T> mappings) {
+    for (VirtualFile cur = file; cur != null; cur = cur.getParent()) {
+      T t = mappings.get(cur);
+      if (t != null) return t;
     }
     return null;
   }
@@ -166,8 +168,9 @@ public abstract class PerFileMappingsBase<T> implements PersistentStateComponent
         if (oldFile == null) continue; // project
         oldFile.putUserData(pusher.getFileDataKey(), null);
       }
-      PushedFilePropertiesUpdater updater = PushedFilePropertiesUpdater.getInstance(project);
-      updater.pushAll(pusher);
+      if (!project.isDefault()) {
+        PushedFilePropertiesUpdater.getInstance(project).pushAll(pusher);
+      }
     }
     if (shouldReparseFiles()) {
       Project[] projects = project == null ? ProjectManager.getInstance().getOpenProjects() : new Project[] { project };
@@ -193,12 +196,9 @@ public abstract class PerFileMappingsBase<T> implements PersistentStateComponent
       cleanup();
       final Element element = new Element("x");
       final List<VirtualFile> files = new ArrayList<VirtualFile>(myMappings.keySet());
-      Collections.sort(files, new Comparator<VirtualFile>() {
-        @Override
-        public int compare(final VirtualFile o1, final VirtualFile o2) {
-          if (o1 == null || o2 == null) return o1 == null ? o2 == null ? 0 : 1 : -1;
-          return o1.getPath().compareTo(o2.getPath());
-        }
+      Collections.sort(files, (o1, o2) -> {
+        if (o1 == null || o2 == null) return o1 == null ? o2 == null ? 0 : 1 : -1;
+        return o1.getPath().compareTo(o2.getPath());
       });
       for (VirtualFile file : files) {
         final T dialect = myMappings.get(file);

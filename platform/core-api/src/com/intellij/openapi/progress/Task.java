@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,9 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.DumbModeAction;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.util.ExceptionUtil;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -33,7 +35,7 @@ import org.jetbrains.annotations.Nullable;
  *  public void run(ProgressIndicator indicator) {
  *    indicator.setText("Loading changes");
  *    indicator.setFraction(0.0);
- * // some code
+ *    // some code
  *    indicator.setFraction(1.0);
  *  }
  * }.setCancelText("Stop loading").queue();
@@ -43,6 +45,7 @@ import org.jetbrains.annotations.Nullable;
  */
 public abstract class Task implements TaskInfo, Progressive {
   private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.progress.Task");
+
   protected final Project myProject;
   protected String myTitle;
   private final boolean myCanBeCancelled;
@@ -50,7 +53,7 @@ public abstract class Task implements TaskInfo, Progressive {
   private String myCancelText = CommonBundle.getCancelButtonText();
   private String myCancelTooltipText = CommonBundle.getCancelButtonText();
 
-  public Task(@Nullable final Project project,@Nls(capitalization = Nls.Capitalization.Title) @NotNull final String title, final boolean canBeCancelled) {
+  public Task(@Nullable Project project, @Nls(capitalization = Nls.Capitalization.Title) @NotNull String title, boolean canBeCancelled) {
     myProject = project;
     myTitle = title;
     myCanBeCancelled = canBeCancelled;
@@ -58,13 +61,32 @@ public abstract class Task implements TaskInfo, Progressive {
 
   /**
    * This callback will be invoked on AWT dispatch thread.
+   *
+   * Callback executed when run() throws {@link ProcessCanceledException} or if its {@link ProgressIndicator} was canceled.
    */
-  public void onCancel() {}
+  public void onCancel() {
+  }
 
   /**
    * This callback will be invoked on AWT dispatch thread.
    */
-  public void onSuccess() {}
+  public void onSuccess() {
+  }
+
+  /**
+   * This callback will be invoked on AWT dispatch thread.
+   *
+   * Callback executed when run() throws an exception (except PCE).
+   */
+  public void onError(@NotNull Exception error) {
+    LOG.error(error);
+  }
+
+  /**
+   * This callback will be invoked on AWT dispatch thread, after other specific handlers
+   */
+  public void onFinished() {
+  }
 
   public final Project getProject() {
     return myProject;
@@ -97,7 +119,7 @@ public abstract class Task implements TaskInfo, Progressive {
   }
 
   @NotNull
-  public final Task setCancelText(final String cancelText) {
+  public final Task setCancelText(String cancelText) {
     myCancelText = cancelText;
     return this;
   }
@@ -117,7 +139,7 @@ public abstract class Task implements TaskInfo, Progressive {
   }
 
   @NotNull
-  public final Task setCancelTooltipText(final String cancelTooltipText) {
+  public final Task setCancelTooltipText(String cancelTooltipText) {
     myCancelTooltipText = cancelTooltipText;
     return this;
   }
@@ -153,25 +175,23 @@ public abstract class Task implements TaskInfo, Progressive {
   public abstract static class Backgroundable extends Task implements PerformInBackgroundOption {
     protected final PerformInBackgroundOption myBackgroundOption;
 
-    public Backgroundable(@Nullable final Project project,
-                          @Nls(capitalization = Nls.Capitalization.Title) @NotNull final String title,
-                          final boolean canBeCancelled,
-                          @Nullable final PerformInBackgroundOption backgroundOption) {
+    public Backgroundable(@Nullable Project project, @Nls(capitalization = Nls.Capitalization.Title) @NotNull String title) {
+      this(project, title, true);
+    }
+
+    public Backgroundable(@Nullable Project project, @Nls(capitalization = Nls.Capitalization.Title) @NotNull String title, boolean canBeCancelled) {
+      this(project, title, canBeCancelled, null);
+    }
+
+    public Backgroundable(@Nullable Project project,
+                          @Nls(capitalization = Nls.Capitalization.Title) @NotNull String title,
+                          boolean canBeCancelled,
+                          @Nullable PerformInBackgroundOption backgroundOption) {
       super(project, title, canBeCancelled);
       myBackgroundOption = backgroundOption;
       if (StringUtil.isEmptyOrSpaces(title)) {
         LOG.warn("Empty title for backgroundable task.", new Throwable());
       }
-    }
-
-    public Backgroundable(@Nullable final Project project,
-                          @Nls(capitalization = Nls.Capitalization.Title) @NotNull final String title,
-                          final boolean canBeCancelled) {
-      this(project, title, canBeCancelled, null);
-    }
-
-    public Backgroundable(@Nullable final Project project, @Nls(capitalization = Nls.Capitalization.Title) @NotNull final String title) {
-      this(project, title, true);
     }
 
     @Override
@@ -198,15 +218,15 @@ public abstract class Task implements TaskInfo, Progressive {
     /**
      * to remove in IDEA 16
      */
+    @SuppressWarnings("deprecation")
     @Deprecated
-    @NotNull
     public DumbModeAction getDumbModeAction() {
       return DumbModeAction.NOTHING;
     }
   }
 
   public abstract static class Modal extends Task {
-    public Modal(@Nullable final Project project, @NotNull String title, boolean canBeCancelled) {
+    public Modal(@Nullable Project project, @Nls(capitalization = Nls.Capitalization.Title) @NotNull String title, boolean canBeCancelled) {
       super(project, title, canBeCancelled);
     }
 
@@ -218,8 +238,10 @@ public abstract class Task implements TaskInfo, Progressive {
   }
 
   public abstract static class ConditionalModal extends Backgroundable {
-    public ConditionalModal(@Nullable final Project project, @NotNull final String title, final boolean canBeCancelled,
-                            @NotNull final PerformInBackgroundOption backgroundOption) {
+    public ConditionalModal(@Nullable Project project,
+                            @Nls(capitalization = Nls.Capitalization.Title) @NotNull String title,
+                            boolean canBeCancelled,
+                            @NotNull PerformInBackgroundOption backgroundOption) {
       super(project, title, canBeCancelled, backgroundOption);
     }
 
@@ -268,6 +290,35 @@ public abstract class Task implements TaskInfo, Progressive {
 
     public boolean isShowWhenFocused() {
       return myShowWhenFocused;
+    }
+  }
+
+  public abstract static class WithResult<T, E extends Exception> extends Task.Modal {
+    private final Ref<T> myResult = Ref.create();
+    private final Ref<Throwable> myError = Ref.create();
+
+    public WithResult(@Nullable Project project, @Nls(capitalization = Nls.Capitalization.Title) @NotNull String title, boolean canBeCancelled) {
+      super(project, title, canBeCancelled);
+    }
+
+    @Override
+    public final void run(@NotNull ProgressIndicator indicator) {
+      try {
+        myResult.set(compute(indicator));
+      }
+      catch (Throwable t) {
+        myError.set(t);
+      }
+    }
+
+    protected abstract T compute(@NotNull ProgressIndicator indicator) throws E;
+
+    @SuppressWarnings("unchecked")
+    public T getResult() throws E {
+      Throwable t = myError.get();
+      ExceptionUtil.rethrowUnchecked(t);
+      if (t != null) throw (E)t;
+      return myResult.get();
     }
   }
 }

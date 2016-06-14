@@ -73,6 +73,7 @@ public class ImportToImportFromIntention implements IntentionAction {
         else if (parent instanceof PyFromImportStatement) {
           final PyFromImportStatement fromImport = (PyFromImportStatement)parent;
           final int relativeLevel = fromImport.getRelativeLevel();
+          PyPsiUtils.assertValid(fromImport);
           if (fromImport.isValid() && relativeLevel > 0 && fromImport.getImportSource() == null) {
             myRelativeLevel = relativeLevel;
             available = true;
@@ -184,7 +185,7 @@ public class ImportToImportFromIntention implements IntentionAction {
             // cut the module out of import, add a from-import.
             for (PyImportElement pie : importElements) {
               if (pie == myImportElement) {
-                PyUtil.removeListNode(pie);
+                pie.delete();
                 break;
               }
             }
@@ -236,6 +237,7 @@ public class ImportToImportFromIntention implements IntentionAction {
   private static PyImportElement findImportElement(@NotNull Editor editor, @NotNull PsiFile file) {
     final PsiElement elementAtCaret = file.findElementAt(editor.getCaretModel().getOffset());
     final PyImportElement importElement = PsiTreeUtil.getParentOfType(elementAtCaret, PyImportElement.class);
+    PyPsiUtils.assertValid(importElement);
     if (importElement != null && importElement.isValid()) {
       return importElement;
     }

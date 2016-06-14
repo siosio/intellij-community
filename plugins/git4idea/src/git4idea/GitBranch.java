@@ -15,13 +15,12 @@
  */
 package git4idea;
 
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.vcs.log.Hash;
-import com.intellij.vcs.log.impl.HashImpl;
 import git4idea.branch.GitBranchUtil;
 import git4idea.repo.GitRepository;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * <p>Represents a Git branch, local or remote.</p>
@@ -48,26 +47,11 @@ public abstract class GitBranch extends GitReference {
    * @deprecated All usages should be reviewed and substituted with actual GitBranch objects with Hashes retrieved from the GitRepository.
    */
   @Deprecated
-  public static final Hash DUMMY_HASH = HashImpl.build("");
+  @Nullable
+  public static final Hash DUMMY_HASH = null;
 
-  private static final Logger LOG = Logger.getInstance(GitBranch.class);
-
-  @NotNull private final Hash myHash;
-
-  protected GitBranch(@NotNull String name, @NotNull Hash hash) {
+  protected GitBranch(@NotNull String name) {
     super(GitBranchUtil.stripRefsPrefix(name));
-    myHash = hash;
-  }
-
-  /**
-   * <p>Returns the hash on which this branch is reference to.</p>
-   *
-   * <p>In certain cases (which are to be eliminated in the future) it may be empty,
-   *    if this information wasn't supplied to the GitBranch constructor.</p>
-   */
-  @NotNull
-  public Hash getHash() {
-    return myHash;
   }
 
   /**
@@ -79,49 +63,4 @@ public abstract class GitBranch extends GitReference {
   public String getFullName() {
     return (isRemote() ? REFS_REMOTES_PREFIX : REFS_HEADS_PREFIX) + myName;
   }
-
-  @Override
-  public boolean equals(Object o) {
-    if (!super.equals(o)) {
-      return false;
-    }
-
-    // Reusing equals from super: only the name is important:
-    // branches are considered equal even if they point to different commits.
-
-    /*
-      Commenting this for a while, because GitRepository has different update() methods: thus in certain cases only current branch is
-      updated => this branch in the branches collection has different hash.
-      Need either to update everything always, either to have a GitBranches collection in GitRepository and not recreate it.
-
-    // But if equal branches point to different commits (or have different local/remote nature), then it is a programmer bug:
-    // one if GitBranch instances in the calling code is out-of-date.
-    // throwing assertion in that case forcing the programmer to update before comparing.
-    GitBranch that = (GitBranch)o;
-    if (!myHash.equals(that.myHash)) {
-      LOG.error("Branches have equal names, but different hash codes. This: " + toLogString() + ", that: " + that.toLogString());
-    }
-    else if (isRemote() != that.isRemote()) {
-      LOG.error("Branches have equal names, but different local/remote type. This: " + toLogString() + ", that: " + that.toLogString());
-    }
-    */
-
-    return true;
-  }
-
-  @Override
-  public int hashCode() {
-    return super.hashCode();
-  }
-
-  @Override
-  public String toString() {
-    return super.toString();
-  }
-
-  @NotNull
-  public String toLogString() {
-    return String.format("%s:%s:%s", getFullName(), getHash(), isRemote() ? "remote" : "local");
-  }
-
 }

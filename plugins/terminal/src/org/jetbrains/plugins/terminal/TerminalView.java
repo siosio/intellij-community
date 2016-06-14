@@ -1,16 +1,26 @@
 package org.jetbrains.plugins.terminal;
 
 import com.intellij.icons.AllIcons;
+import com.intellij.ide.actions.ToggleDistractionFreeModeAction;
+import com.intellij.ide.actions.ToggleToolbarAction;
+import com.intellij.ide.ui.UISettings;
+import com.intellij.ide.ui.UISettingsListener;
+import com.intellij.ide.util.PropertiesComponent;
+import com.intellij.internal.statistic.UsageTrigger;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.SimpleToolWindowPanel;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.SystemInfo;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowManager;
+import com.intellij.openapi.wm.ex.ToolWindowEx;
 import com.intellij.openapi.wm.ex.ToolWindowManagerEx;
 import com.intellij.openapi.wm.ex.ToolWindowManagerListener;
+import com.intellij.openapi.wm.impl.InternalDecorator;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.awt.RelativeRectangle;
 import com.intellij.ui.content.Content;
@@ -19,6 +29,7 @@ import com.intellij.ui.docking.DockContainer;
 import com.intellij.ui.docking.DockManager;
 import com.intellij.ui.docking.DockableContent;
 import com.intellij.util.ui.UIUtil;
+import com.jediterm.terminal.TtyConnector;
 import com.jediterm.terminal.ui.JediTermWidget;
 import com.jediterm.terminal.ui.TabbedTerminalWidget;
 import com.jediterm.terminal.ui.TerminalWidget;
@@ -35,6 +46,7 @@ import java.awt.event.FocusListener;
  * @author traff
  */
 public class TerminalView {
+  private final static String TERMINAL_FEATURE = "terminal";
 
   private JBTabbedTerminalWidget myTerminalWidget;
 
@@ -56,38 +68,36 @@ public class TerminalView {
 
     toolWindow.setToHideOnEmptyContent(true);
 
-    if (terminalRunner != null) {
-      Content content = createTerminalInContentPanel(terminalRunner, toolWindow);
+    Content content = createTerminalInContentPanel(terminalRunner, toolWindow);
 
-      toolWindow.getContentManager().addContent(content);
+    toolWindow.getContentManager().addContent(content);
 
-      ((ToolWindowManagerEx)ToolWindowManager.getInstance(myProject)).addToolWindowManagerListener(new ToolWindowManagerListener() {
-        @Override
-        public void toolWindowRegistered(@NotNull String id) {
-        }
+    ((ToolWindowManagerEx)ToolWindowManager.getInstance(myProject)).addToolWindowManagerListener(new ToolWindowManagerListener() {
+      @Override
+      public void toolWindowRegistered(@NotNull String id) {
+      }
 
-        @Override
-        public void stateChanged() {
-          ToolWindow window = ToolWindowManager.getInstance(myProject).getToolWindow(TerminalToolWindowFactory.TOOL_WINDOW_ID);
-          if (window != null) {
-            boolean visible = window.isVisible();
-            if (visible && toolWindow.getContentManager().getContentCount() == 0) {
-              initTerminal(window);
-            }
+      @Override
+      public void stateChanged() {
+        ToolWindow window = ToolWindowManager.getInstance(myProject).getToolWindow(TerminalToolWindowFactory.TOOL_WINDOW_ID);
+        if (window != null) {
+          boolean visible = window.isVisible();
+          if (visible && toolWindow.getContentManager().getContentCount() == 0) {
+            initTerminal(window);
           }
         }
-      });
+      }
+    });
 
-      Disposer.register(myProject, new Disposable() {
-        @Override
-        public void dispose() {
-          if (myTerminalWidget != null) {
-            myTerminalWidget.dispose();
-            myTerminalWidget = null;
-          }
+    Disposer.register(myProject, new Disposable() {
+      @Override
+      public void dispose() {
+        if (myTerminalWidget != null) {
+          myTerminalWidget.dispose();
+          myTerminalWidget = null;
         }
-      });
-    }
+      }
+    });
 
     if (myDockContainer == null) {
       myDockContainer = new TerminalDockContainer(toolWindow);
@@ -99,7 +109,7 @@ public class TerminalView {
 
   private Content createTerminalInContentPanel(@NotNull AbstractTerminalRunner terminalRunner,
                                                final @NotNull ToolWindow toolWindow) {
-    SimpleToolWindowPanel panel = new SimpleToolWindowPanel(false, true);
+    TerminalToolWindowPanel panel = new TerminalToolWindowPanel(PropertiesComponent.getInstance(myProject), toolWindow);
 
     final Content content = ContentFactory.SERVICE.getInstance().createContent(panel, "", false);
     content.setCloseable(true);
@@ -108,12 +118,9 @@ public class TerminalView {
     myTerminalWidget.addTabListener(new TabbedTerminalWidget.TabListener() {
       @Override
       public void tabClosed(JediTermWidget terminal) {
-        UIUtil.invokeLaterIfNeeded(new Runnable() {
-          @Override
-          public void run() {
-            if (myTerminalWidget != null) {
-              hideIfNoActiveSessions(toolWindow, myTerminalWidget);
-            }
+        UIUtil.invokeLaterIfNeeded(() -> {
+          if (myTerminalWidget != null) {
+            hideIfNoActiveSessions(toolWindow, myTerminalWidget);
           }
         });
       }
@@ -126,8 +133,8 @@ public class TerminalView {
     toolbar.getComponent().addFocusListener(createFocusListener());
     toolbar.setTargetComponent(panel);
     panel.setToolbar(toolbar.getComponent());
-
-
+    panel.uiSettingsChanged(null);
+    
     content.setPreferredFocusableComponent(myTerminalWidget.getComponent());
 
     return content;
@@ -169,16 +176,19 @@ public class TerminalView {
       terminalRunner.openSession(myTerminalWidget);
     }
 
-    toolWindow.activate(new Runnable() {
-      @Override
-      public void run() {
+    toolWindow.activate(() -> {
 
-      }
     }, true);
   }
 
-  private ActionToolbar createToolbar(@Nullable final AbstractTerminalRunner terminalRunner,
-                                      @NotNull final JBTabbedTerminalWidget terminal, @NotNull ToolWindow toolWindow) {
+  public static void recordUsage(@NotNull TtyConnector ttyConnector) {
+    UsageTrigger.trigger(TERMINAL_FEATURE + "." +
+                         (ttyConnector.toString().contains("Jsch") ? "ssh" :
+                          SystemInfo.isWindows ? "win" : SystemInfo.isMac ? "mac" : "linux"));
+  }
+
+  private static ActionToolbar createToolbar(@Nullable final AbstractTerminalRunner terminalRunner,
+                                             @NotNull final JBTabbedTerminalWidget terminal, @NotNull ToolWindow toolWindow) {
     DefaultActionGroup group = new DefaultActionGroup();
 
     if (terminalRunner != null) {
@@ -192,12 +202,7 @@ public class TerminalView {
   public void createNewSession(Project project, final AbstractTerminalRunner terminalRunner) {
     final ToolWindow toolWindow = ToolWindowManager.getInstance(project).getToolWindow("Terminal");
 
-    toolWindow.activate(new Runnable() {
-      @Override
-      public void run() {
-        openSession(toolWindow, terminalRunner);
-      }
-    }, true);
+    toolWindow.activate(() -> openSession(toolWindow, terminalRunner), true);
   }
 
   private static void hideIfNoActiveSessions(@NotNull final ToolWindow toolWindow, @NotNull JBTabbedTerminalWidget terminal) {
@@ -223,7 +228,7 @@ public class TerminalView {
     }
   }
 
-  private class CloseSession extends DumbAwareAction {
+  private static class CloseSession extends DumbAwareAction {
     private final JBTabbedTerminalWidget myTerminal;
     private ToolWindow myToolWindow;
 
@@ -338,3 +343,45 @@ public class TerminalView {
     }
   }
 }
+
+
+class TerminalToolWindowPanel extends SimpleToolWindowPanel implements UISettingsListener {
+  private final PropertiesComponent myPropertiesComponent;
+  private final ToolWindow myWindow;
+
+  public TerminalToolWindowPanel(PropertiesComponent propertiesComponent, ToolWindow window) {
+    super(false, true);
+    myPropertiesComponent = propertiesComponent;
+    myWindow = window;
+  }
+
+  @Override
+  public void uiSettingsChanged(UISettings source) {
+    if (isDfmSupportEnabled()) {
+      setDistractionFree(shouldMakeDistractionFree());
+    }
+  }
+
+  private void setDistractionFree(boolean isDistractionFree) {
+    boolean isVisible = !isDistractionFree;
+    setToolbarVisible(isVisible);
+    setToolWindowHeaderVisible(isVisible);
+  }
+
+  private void setToolbarVisible(boolean isVisible) {
+    ToggleToolbarAction.setToolbarVisible(myWindow, myPropertiesComponent, isVisible);
+  }
+
+  private void setToolWindowHeaderVisible(boolean isVisible) {
+    InternalDecorator decorator = ((ToolWindowEx)myWindow).getDecorator();
+    decorator.setHeaderVisible(isVisible);
+  }
+
+  private boolean shouldMakeDistractionFree() {
+    return !myWindow.getAnchor().isHorizontal() && ToggleDistractionFreeModeAction.isDistractionFreeModeEnabled();
+  }
+
+  private static boolean isDfmSupportEnabled() {
+    return Registry.get("terminal.distraction.free").asBoolean();
+  }
+} 

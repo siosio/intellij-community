@@ -265,8 +265,7 @@ class Foo {
 }
 '''
     myFixture.completeBasic()
-    myFixture.assertPreferredCompletionItems 0, 'some', 'some integer param'
-    myFixture.lookup.currentItem = myFixture.lookupElements[1]
+    myFixture.assertPreferredCompletionItems 0, 'some integer param', 'some'
     myFixture.type('\t')
     myFixture.checkResult '''
 class Foo {
@@ -282,6 +281,25 @@ class Foo {
   void foo(int intParam, Object param2) { }
 }
 '''
+  }
+
+  public void "test suggest same param descriptions with no text after param name"() {
+    myFixture.configureByText "a.java", '''
+class Foo {
+  /**
+  * @param intParam <caret>
+  * @throws Foo
+  */
+  void foo2(int intParam, Object param2) { }
+
+  /**
+  * @param intParam some integer param
+  */
+  void foo(int intParam, Object param2) { }
+}
+'''
+    myFixture.completeBasic()
+    myFixture.assertPreferredCompletionItems 0, 'some integer param'
   }
 
   public void "test see super class"() {
@@ -513,6 +531,41 @@ class Test {
 '''
   }
 
+  public void testShortNameIfInnerClass() {
+    javaSettings.CLASS_NAMES_IN_JAVADOC = JavaCodeStyleSettings.FULLY_QUALIFY_NAMES_IF_NOT_IMPORTED
+    def text = '''
+package pkg;
+
+class Foo {
+
+    /**
+     * @throws FooE<caret>
+     */
+    void foo() {
+    }
+
+    static class FooException extends RuntimeException {}
+}
+'''
+    myFixture.configureByText "a.java", text
+    myFixture.completeBasic()
+    myFixture.type('\t')
+    myFixture.checkResult '''
+package pkg;
+
+class Foo {
+
+    /**
+     * @throws FooException 
+     */
+    void foo() {
+    }
+
+    static class FooException extends RuntimeException {}
+}
+'''
+  }
+
   public void testCustomReferenceProvider() throws Exception {
     PsiReferenceRegistrarImpl registrar =
       (PsiReferenceRegistrarImpl) ReferenceProvidersRegistry.getInstance().getRegistrar(StdLanguages.JAVA);
@@ -544,5 +597,53 @@ class Test {
     finally {
       registrar.unregisterReferenceProvider(PsiDocTag.class, provider);
     }
+  }
+
+  public void "test complete author name"() {
+    def userName = SystemProperties.userName
+    assert userName
+    myFixture.configureByText 'a.java', "/** @author <caret> */"
+    myFixture.completeBasic()
+    myFixture.type('\n')
+    myFixture.checkResult "/** @author $userName<caret> */"
+  }
+
+  public void "test insert link to class"() {
+    myFixture.configureByText 'a.java', "/** FileNotFoEx<caret> */"
+    myFixture.completeBasic()
+    myFixture.checkResult "/** {@link java.io.FileNotFoundException<caret>} */"
+  }
+
+  public void "test insert link to inner class"() {
+    myFixture.addClass('package zoo; public class Outer { public static class FooBarGoo{}}')
+    myFixture.configureByText 'a.java', "/** FooBarGo<caret> */"
+    myFixture.completeBasic()
+    myFixture.checkResult "/** {@link zoo.Outer.FooBarGoo<caret>} */"
+  }
+
+  public void "test insert link to imported class"() {
+    myFixture.configureByText 'a.java', "import java.io.*; /** FileNotFoEx<caret> */ class A{}"
+    myFixture.completeBasic()
+    myFixture.checkResult "import java.io.*; /** {@link FileNotFoundException<caret>} */ class A{}"
+  }
+
+  public void "test insert link to method"() {
+    myFixture.configureByText 'a.java', "/** a. #fo<caret> */ interface Foo { void foo(int a); }}"
+    myFixture.completeBasic()
+    myFixture.type('\n')
+    myFixture.checkResult "/** a. {@link #foo(int)}<caret> */ interface Foo { void foo(int a); }}"
+  }
+
+  public void "test insert link to field"() {
+    myFixture.configureByText 'a.java', "/** a. #fo<caret> */ interface Foo { int foo; }}"
+    myFixture.completeBasic()
+    myFixture.type('\n')
+    myFixture.checkResult "/** a. {@link #foo}<caret> */ interface Foo { int foo; }}"
+  }
+
+  public void "test wrap null into code tag"() {
+    myFixture.configureByText 'a.java', "/** nul<caret> */"
+    myFixture.completeBasic()
+    myFixture.checkResult "/** {@code null}<caret> */"
   }
 }

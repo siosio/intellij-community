@@ -18,6 +18,7 @@ package com.intellij.openapi.ui.impl;
 import com.intellij.ide.DataManager;
 import com.intellij.ide.IdeEventQueue;
 import com.intellij.ide.impl.TypeSafeDataProviderAdapter;
+import com.intellij.ide.ui.AntialiasingType;
 import com.intellij.ide.ui.UISettings;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.Application;
@@ -57,6 +58,7 @@ import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import sun.swing.SwingUtilities2;
 
 import javax.swing.*;
 import java.awt.*;
@@ -277,21 +279,15 @@ public class DialogWrapperPeerImpl extends DialogWrapperPeer implements FocusTra
       runnable.run();
     }
     myDisposeActions.clear();
-    Runnable disposer = new Runnable() {
-      @Override
-      public void run() {
-        Disposer.dispose(myDialog);
-        myProject = null;
+    Runnable disposer = () -> {
+      Disposer.dispose(myDialog);
+      myProject = null;
 
-        SwingUtilities.invokeLater(new Runnable() {
-          @Override
-          public void run() {
-            if (myDialog != null && myDialog.getRootPane() != null) {
-              myDialog.remove(myDialog.getRootPane());
-            }
-          }
-        });
-      }
+      SwingUtilities.invokeLater(() -> {
+        if (myDialog != null && myDialog.getRootPane() != null) {
+          myDialog.remove(myDialog.getRootPane());
+        }
+      });
     };
 
     UIUtil.invokeLaterIfNeeded(disposer);
@@ -433,12 +429,7 @@ public class DialogWrapperPeerImpl extends DialogWrapperPeer implements FocusTra
     final AnCancelAction anCancelAction = new AnCancelAction();
     final JRootPane rootPane = getRootPane();
     anCancelAction.registerCustomShortcutSet(CommonShortcuts.ESCAPE, rootPane);
-    myDisposeActions.add(new Runnable() {
-      @Override
-      public void run() {
-        anCancelAction.unregisterCustomShortcutSet(rootPane);
-      }
-    });
+    myDisposeActions.add(() -> anCancelAction.unregisterCustomShortcutSet(rootPane));
 
     if (!myCanBeParent && myWindowManager != null) {
       myWindowManager.doNotSuggestAsParent(myDialog.getWindow());
@@ -479,12 +470,7 @@ public class DialogWrapperPeerImpl extends DialogWrapperPeer implements FocusTra
     if (!SystemInfo.isMac) return;
 
     StackingPopupDispatcher.getInstance().hidePersistentPopups();
-    myDisposeActions.add(new Runnable() {
-      @Override
-      public void run() {
-        StackingPopupDispatcher.getInstance().restorePersistentPopups();
-      }
-    });
+    myDisposeActions.add(() -> StackingPopupDispatcher.getInstance().restorePersistentPopups());
   }
 
   @Override
@@ -493,6 +479,12 @@ public class DialogWrapperPeerImpl extends DialogWrapperPeer implements FocusTra
   }
 
   private class AnCancelAction extends AnAction implements DumbAware {
+
+    @Override
+    public boolean startInTransaction() {
+      return false;
+    }
+
     @Override
     public void update(AnActionEvent e) {
       Component focusOwner = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
@@ -505,16 +497,29 @@ public class DialogWrapperPeerImpl extends DialogWrapperPeer implements FocusTra
       JTree tree = UIUtil.getParentOfType(JTree.class, focusOwner);
       JTable table = UIUtil.getParentOfType(JTable.class, focusOwner);
       
-      if (tree != null) {
-        if (!tree.isEditing()) {
+      if (tree != null || table != null) {
+        if (hasNoEditingTreesOrTablesUpward(focusOwner)) {
           e.getPresentation().setEnabled(true);
         }
       }
-      else if (table != null) {
-        if (!table.isEditing()) {
-          e.getPresentation().setEnabled(true);
-        }
+    }
+
+    private boolean hasNoEditingTreesOrTablesUpward(Component comp) {
+      while (comp != null) {
+        if (isEditingTreeOrTable(comp)) return false;
+        comp = comp.getParent();
       }
+      return true;
+    }
+
+    private boolean isEditingTreeOrTable(Component comp) {
+      if (comp instanceof JTree) {
+        return ((JTree)comp).isEditing();
+      }
+      else if (comp instanceof JTable) {
+        return ((JTable)comp).isEditing();
+      }
+      return false;
     }
 
     @Override
@@ -724,12 +729,7 @@ public class DialogWrapperPeerImpl extends DialogWrapperPeer implements FocusTra
             Project project = getProject();
             if (project != null && !project.isDisposed()) {
               focusManager.set(getFocusManager());
-              focusManager.get().doWhenFocusSettlesDown(new Runnable() {
-                @Override
-                public void run() {
-                  disposeFocusTrackbackIfNoChildWindowFocused(focusManager.get());
-                }
-              });
+              focusManager.get().doWhenFocusSettlesDown(() -> disposeFocusTrackbackIfNoChildWindowFocused(focusManager.get()));
             }
             else {
               disposeFocusTrackbackIfNoChildWindowFocused(focusManager.get());
@@ -823,12 +823,9 @@ public class DialogWrapperPeerImpl extends DialogWrapperPeer implements FocusTra
       if (myFocusTrackback != null && !(myFocusTrackback.isSheduledForRestore() || myFocusTrackback.isWillBeSheduledForRestore())) {
         myFocusTrackback.setWillBeSheduledForRestore();
         IdeFocusManager mgr = getFocusManager();
-        Runnable r = new Runnable() {
-          @Override
-          public void run() {
-            if (myFocusTrackback != null)  myFocusTrackback.restoreFocus();
-            myFocusTrackback = null;
-          }
+        Runnable r = () -> {
+          if (myFocusTrackback != null)  myFocusTrackback.restoreFocus();
+          myFocusTrackback = null;
         };
         mgr.doWhenFocusSettlesDown(r);
       }
@@ -859,14 +856,11 @@ public class DialogWrapperPeerImpl extends DialogWrapperPeer implements FocusTra
       super.dispose();
 
 
+      removeAll(); // remove root pane from a component's list
       if (rootPane != null) { // Workaround for bug in native code to hold rootPane
         try {
-          ReflectionUtil.resetField(rootPane, "glassPane");
-          ReflectionUtil.resetField(rootPane, "contentPane");
-
+          Disposer.clearOwnFields(rootPane);
           rootPane = null;
-
-          ReflectionUtil.resetField(this, "windowListener");
         }
         catch (Exception ignored) {
         }
@@ -942,57 +936,56 @@ public class DialogWrapperPeerImpl extends DialogWrapperPeer implements FocusTra
       }
 
       @Override
-      public void windowOpened(WindowEvent e) {
-        SwingUtilities.invokeLater(new Runnable() {
-          @Override
-          public void run() {
-            myOpened = true;
-            final DialogWrapper activeWrapper = getActiveWrapper();
-            if (activeWrapper == null) {
-              myFocusedCallback.setRejected();
-              myTypeAheadDone.setRejected();
-            }
+      public void windowOpened(final WindowEvent e) {
+        SwingUtilities.invokeLater(() -> {
+          myOpened = true;
+          final DialogWrapper activeWrapper = getActiveWrapper();
+          for (JComponent c : UIUtil.uiTraverser(e.getWindow()).filter(JComponent.class)) {
+            c.putClientProperty(SwingUtilities2.AA_TEXT_PROPERTY_KEY, AntialiasingType.getAAHintForSwingComponent());
+          }
+          if (activeWrapper == null) {
+            myFocusedCallback.setRejected();
+            myTypeAheadDone.setRejected();
           }
         });
       }
 
       @Override
       public void windowActivated(final WindowEvent e) {
-        SwingUtilities.invokeLater(new Runnable() {
-          @Override
-          public void run() {
-            final DialogWrapper wrapper = getActiveWrapper();
-            if (wrapper == null && !myFocusedCallback.isProcessed()) {
-              myFocusedCallback.setRejected();
-              myTypeAheadDone.setRejected();
-              return;
-            }
+        SwingUtilities.invokeLater(() -> {
+          final DialogWrapper wrapper = getActiveWrapper();
+          if (wrapper == null && !myFocusedCallback.isProcessed()) {
+            myFocusedCallback.setRejected();
+            myTypeAheadDone.setRejected();
+            return;
+          }
 
-            if (myActivated) {
-              return;
-            }
-            myActivated = true;
-            JComponent toFocus = wrapper == null ? null : wrapper.getPreferredFocusedComponent();
-            if (toFocus == null) {
-              toFocus = getRootPane().getDefaultButton();
-            }
+          if (myActivated) {
+            return;
+          }
+          myActivated = true;
+          JComponent toFocus = wrapper == null ? null : wrapper.getPreferredFocusedComponent();
+          if (getRootPane() != null && toFocus == null) {
+            toFocus = getRootPane().getDefaultButton();
+          }
 
+          if (getRootPane() != null) {
             IJSwingUtilities.moveMousePointerOn(getRootPane().getDefaultButton());
-            setupSelectionOnPreferredComponent(toFocus);
+          }
+          setupSelectionOnPreferredComponent(toFocus);
 
-            if (toFocus != null) {
-              if (isShowing() && isActive()) {
-                getFocusManager().requestFocus(toFocus, true);
-                notifyFocused(wrapper);
-              }
-            } else {
-              if (isShowing()) {
-                notifyFocused(wrapper);
-              }
+          if (toFocus != null) {
+            if (isShowing() && isActive()) {
+              getFocusManager().requestFocus(toFocus, true);
+              notifyFocused(wrapper);
             }
-            if (myTypeAheadCallback != null) {
-              myTypeAheadCallback.setDone();
+          } else {
+            if (isShowing()) {
+              notifyFocused(wrapper);
             }
+          }
+          if (myTypeAheadCallback != null) {
+            myTypeAheadCallback.setDone();
           }
         });
       }
@@ -1071,6 +1064,14 @@ public class DialogWrapperPeerImpl extends DialogWrapperPeer implements FocusTra
         }
 
         super.setGlassPane(glass);
+      }
+
+      @Override
+      public void setContentPane(Container contentPane) {
+        super.setContentPane(contentPane);
+        if (contentPane != null) {
+          contentPane.addMouseMotionListener(new MouseMotionAdapter() {}); // listen to mouse motino events for a11y
+        }
       }
 
       @Override

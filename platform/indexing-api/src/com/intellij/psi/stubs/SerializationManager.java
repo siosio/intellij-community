@@ -22,7 +22,7 @@ package com.intellij.psi.stubs;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.psi.tree.IElementType;
-import com.intellij.psi.tree.IStubFileElementType;
+import com.intellij.psi.tree.StubFileElementType;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
@@ -31,7 +31,7 @@ import java.util.List;
 public abstract class SerializationManager {
 
   protected final List<ObjectStubSerializer> myAllSerializers = new ArrayList<ObjectStubSerializer>();
-  private volatile boolean mySerializersLoaded = false;
+  private volatile boolean mySerializersLoaded;
 
   public static SerializationManager getInstance() {
     return ApplicationManager.getApplication().getComponent(SerializationManager.class);
@@ -55,8 +55,7 @@ public abstract class SerializationManager {
         }
       });
       for (IElementType type : stubElementTypes) {
-        if (type instanceof IStubFileElementType &&
-            ((IStubFileElementType)type).getExternalId().equals(PsiFileStubImpl.TYPE.getExternalId())) {
+        if (type instanceof StubFileElementType && ((StubFileElementType)type).isDefault()) {
           continue;
         }
         StubSerializer stubSerializer = (StubSerializer)type;

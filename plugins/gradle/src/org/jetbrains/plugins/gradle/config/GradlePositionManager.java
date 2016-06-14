@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -120,11 +120,8 @@ public class GradlePositionManager extends ScriptPositionManagerHelper {
   @Nullable
   private ClassLoader getGradleClassLoader(@NotNull final Module module) {
     final Project project = module.getProject();
-    return CachedValuesManager.getManager(project).getCachedValue(module, GRADLE_CLASS_LOADER, new CachedValueProvider<ClassLoader>() {
-      public Result<ClassLoader> compute() {
-        return Result.create(createGradleClassLoader(module), ProjectRootManager.getInstance(project));
-        }
-      }, false);
+    return CachedValuesManager.getManager(project).getCachedValue(module, GRADLE_CLASS_LOADER,
+                                                                  () -> CachedValueProvider.Result.create(createGradleClassLoader(module), ProjectRootManager.getInstance(project)), false);
   }
 
   @Nullable

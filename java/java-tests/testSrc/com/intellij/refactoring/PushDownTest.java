@@ -63,6 +63,42 @@ public class PushDownTest extends LightRefactoringTestCase {
 
   public void testInterfaceConstants() { doTest();}
 
+  public void testReferenceForMovedInnerClass() { doTest();}
+
+  public void testDefaultMethodToInterface() {doTest();}
+  public void testDefaultMethodToInterfaceKeepAbstract() {doTestImplements(true);}
+  public void testDefaultMethodToClass() {doTest();}
+  public void testDefaultMethodToClassKeepAbstract() { doTestImplements(true); }
+
+  public void testInterfaceStaticMethodToInterface() { doTest(); }
+  public void testInterfaceStaticMethodToClass() { doTest(); }
+
+  public void testInterfaceMethodToClass() { doTest();}
+
+  public void testInsertOverrideWhenKeepAbstract() throws Exception {
+    doTestImplements(true);
+  }
+
+  public void testErasureIfInheritsWithRawSubstitution() throws Exception {
+    doTest();
+  }
+
+  public void testAlreadyContainsMethodWithTheSignatureForGenericsSuperclass() throws Exception {
+    doTest(true);
+  }
+
+  public void testJavadocWhenKeepAsAbstractInterface() throws Exception {
+    doTestImplements(true);
+  }
+
+  public void testJavadocWhenKeepAsAbstractClass() throws Exception {
+    doTestImplements(true);
+  }
+
+  public void testPreserveOverrideAnnotationAfterConflict() throws Exception {
+    doTestImplements(true, true);
+  }
+
   private void doTest() {
     doTest(false);
   }
@@ -88,15 +124,22 @@ public class PushDownTest extends LightRefactoringTestCase {
       membersToMove.add(memberInfo);
     }
 
+    final PsiClass classByName = currentClass.findInnerClassByName("ClassToMove", false);
+    if (classByName != null) {
+      final MemberInfo memberInfo = new MemberInfo(classByName);
+      memberInfo.setChecked(true);
+      membersToMove.add(memberInfo);
+    }
+
     final MemberInfo memberInfo = new MemberInfo(psiMember);
     memberInfo.setChecked(true);
     membersToMove.add(memberInfo);
 
-    new PushDownProcessor(getProject(), membersToMove.toArray(new MemberInfo[membersToMove.size()]), currentClass,
+    new PushDownProcessor<MemberInfo, PsiMember, PsiClass>(currentClass, membersToMove,
                           new DocCommentPolicy(DocCommentPolicy.ASIS)) {
       @Override
       protected boolean showConflicts(@NotNull MultiMap<PsiElement, String> conflicts, UsageInfo[] usages) {
-        if (failure ? conflicts.isEmpty() : !conflicts.isEmpty()) {
+        if (failure == conflicts.isEmpty()) {
           fail(failure ? "Conflict was not detected" : "False conflict was detected");
         }
         return true;
@@ -107,6 +150,14 @@ public class PushDownTest extends LightRefactoringTestCase {
   }
 
   private void doTestImplements() {
+    doTestImplements(false);
+  }
+
+  private void doTestImplements(boolean toAbstract) {
+    doTestImplements(toAbstract, false);
+  }
+
+  private void doTestImplements(boolean toAbstract, boolean failure) {
     configureByFile(BASE_PATH + getTestName(false) + ".java");
 
     PsiClass currentClass = JavaPsiFacade.getInstance(getProject()).findClass("Test", GlobalSearchScope.projectScope(getProject()));
@@ -114,12 +165,18 @@ public class PushDownTest extends LightRefactoringTestCase {
     List<MemberInfo> members = memberInfoStorage.getClassMemberInfos(currentClass);
     for (MemberInfo member : members) {
       member.setChecked(true);
+      if (toAbstract) {
+        member.setToAbstract(toAbstract);
+      }
     }
 
-    new PushDownProcessor(getProject(), members.toArray(new MemberInfo[members.size()]), currentClass,
+    new PushDownProcessor<MemberInfo, PsiMember, PsiClass>(currentClass, members,
                           new DocCommentPolicy(DocCommentPolicy.ASIS)) {
       @Override
       protected boolean showConflicts(@NotNull MultiMap<PsiElement, String> conflicts, UsageInfo[] usages) {
+        if (failure == conflicts.isEmpty()) {
+          fail(failure ? "Conflict was not detected" : "False conflict was detected");
+        }
         return true;
       }
     }.run();

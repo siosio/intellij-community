@@ -40,7 +40,10 @@ import org.jetbrains.jps.incremental.messages.BuildMessage;
 import org.jetbrains.jps.incremental.messages.CompilerMessage;
 import org.jetbrains.jps.incremental.messages.ProgressMessage;
 import org.jetbrains.jps.incremental.storage.OneToManyPathsMapping;
+import org.jetbrains.jps.model.JpsDummyElement;
 import org.jetbrains.jps.model.JpsProject;
+import org.jetbrains.jps.model.java.JpsJavaSdkType;
+import org.jetbrains.jps.model.library.sdk.JpsSdk;
 import org.jetbrains.jps.uiDesigner.model.JpsUiDesignerConfiguration;
 import org.jetbrains.jps.uiDesigner.model.JpsUiDesignerExtensionService;
 import org.jetbrains.org.objectweb.asm.ClassReader;
@@ -94,8 +97,8 @@ public class FormsInstrumenter extends FormsBuilder {
       classpath.add(getResourcePath(GridConstraints.class)); // forms_rt.jar
       final Map<File, String> chunkSourcePath = ProjectPaths.getSourceRootsWithDependents(chunk);
       classpath.addAll(chunkSourcePath.keySet()); // sourcepath for loading forms resources
-
-      final InstrumentationClassFinder finder = ClassProcessingBuilder.createInstrumentationClassFinder(platformCp, classpath, outputConsumer);
+      final JpsSdk<JpsDummyElement> sdk = chunk.representativeTarget().getModule().getSdk(JpsJavaSdkType.INSTANCE);
+      final InstrumentationClassFinder finder = ClassProcessingBuilder.createInstrumentationClassFinder(sdk, platformCp, classpath, outputConsumer);
 
       try {
         final Map<File, Collection<File>> processed = instrumentForms(context, chunk, chunkSourcePath, finder, formsToCompile, outputConsumer);
@@ -204,7 +207,7 @@ public class FormsInstrumenter extends FormsBuilder {
           new FailSafeClassReader(originalContent.getBuffer(), originalContent.getOffset(), originalContent.getLength());
 
         final int version = ClassProcessingBuilder.getClassFileVersion(classReader);
-        final InstrumenterClassWriter classWriter = new InstrumenterClassWriter(ClassProcessingBuilder.getAsmClassWriterFlags(version), finder);
+        final InstrumenterClassWriter classWriter = new InstrumenterClassWriter(classReader, ClassProcessingBuilder.getAsmClassWriterFlags(version), finder);
         final AsmCodeGenerator codeGenerator = new AsmCodeGenerator(rootContainer, finder, nestedFormsLoader, false, classWriter);
         final byte[] patchedBytes = codeGenerator.patchClass(classReader);
         if (patchedBytes != null) {

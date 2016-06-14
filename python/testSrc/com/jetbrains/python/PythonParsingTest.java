@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ import com.intellij.psi.PsiFile;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.testFramework.ParsingTestCase;
 import com.intellij.testFramework.TestDataPath;
-import com.jetbrains.python.fixtures.PyTestCase;
 import com.jetbrains.python.psi.LanguageLevel;
 import com.jetbrains.python.psi.PyFunction;
 import org.jetbrains.annotations.NotNull;
@@ -40,7 +39,6 @@ public class PythonParsingTest extends ParsingTestCase {
   @Override
   protected void setUp() throws Exception {
     super.setUp();
-    PyTestCase.initPlatformPrefix();
     registerExtensionPoint(PythonDialectsTokenSetContributor.EP_NAME, PythonDialectsTokenSetContributor.class);
     registerExtension(PythonDialectsTokenSetContributor.EP_NAME, new PythonTokenSetContributor());
   }
@@ -486,6 +484,35 @@ public class PythonParsingTest extends ParsingTestCase {
   // PY-15653
   public void testMissingClassNameAndThenColon() {
     doTest();
+  }
+
+  public void testAsyncDef() {
+    doTest(LanguageLevel.PYTHON35);
+  }
+
+  public void testAsyncWith() {
+    doTest(LanguageLevel.PYTHON35);
+  }
+
+  public void testAsyncFor() {
+    doTest(LanguageLevel.PYTHON35);
+  }
+
+  public void testAwait() {
+    doTest(LanguageLevel.PYTHON35);
+  }
+
+  public void testDecoratedAsyncDef() {
+    doTest(LanguageLevel.PYTHON35);
+  }
+
+  // PY-19036
+  public void testAwaitInNonAsyncNestedFunction() {
+    doTest(LanguageLevel.PYTHON35);
+  }
+
+  public void testUnpackingExpressions() {
+    doTest(LanguageLevel.PYTHON35);
   }
 
   public void doTest(LanguageLevel languageLevel) {

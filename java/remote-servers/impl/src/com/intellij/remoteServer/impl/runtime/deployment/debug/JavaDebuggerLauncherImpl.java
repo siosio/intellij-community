@@ -1,10 +1,25 @@
+/*
+ * Copyright 2000-2016 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.intellij.remoteServer.impl.runtime.deployment.debug;
 
 import com.intellij.debugger.DebugEnvironment;
 import com.intellij.debugger.DebugUIEnvironment;
 import com.intellij.debugger.DebuggerManager;
 import com.intellij.debugger.engine.DebugProcess;
-import com.intellij.debugger.engine.DebugProcessAdapter;
+import com.intellij.debugger.engine.DebugProcessListener;
 import com.intellij.debugger.engine.RemoteDebugProcessHandler;
 import com.intellij.debugger.ui.DebuggerPanelsManager;
 import com.intellij.execution.DefaultExecutionResult;
@@ -54,7 +69,7 @@ public class JavaDebuggerLauncherImpl extends JavaDebuggerLauncher {
     if (serverMode) {
       serverModeHandler.attachRemote();
       DebuggerManager.getInstance(executionEnvironment.getProject())
-        .addDebugProcessListener(processHandler, new DebugProcessAdapter() {
+        .addDebugProcessListener(processHandler, new DebugProcessListener() {
           public void processDetached(DebugProcess process, boolean closedByUser) {
             try {
               serverModeHandler.detachRemote();
@@ -127,6 +142,7 @@ public class JavaDebuggerLauncherImpl extends JavaDebuggerLauncher {
       return new DefaultExecutionResult(consoleView, process);
     }
 
+    @NotNull
     @Override
     public GlobalSearchScope getSearchScope() {
       return mySearchScope;
@@ -143,8 +159,8 @@ public class JavaDebuggerLauncherImpl extends JavaDebuggerLauncher {
     }
 
     @Override
-    public boolean isPollConnection() {
-      return true;
+    public long getPollTimeout() {
+      return LOCAL_START_TIMEOUT;
     }
 
     @Override

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,14 +21,13 @@ import com.intellij.openapi.application.ex.ApplicationInfoEx;
 import com.intellij.openapi.application.impl.ApplicationImpl;
 import com.intellij.openapi.application.impl.ApplicationInfoImpl;
 import com.intellij.openapi.command.CommandProcessor;
-import com.intellij.openapi.diagnostic.ApplicationInfoProvider;
-import com.intellij.openapi.diagnostic.Attachment;
-import com.intellij.openapi.diagnostic.IdeaLoggingEvent;
-import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.progress.ProcessCanceledException;
+import com.intellij.openapi.diagnostic.*;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.impl.DebugUtil;
-import org.apache.log4j.Level;
+import org.apache.log4j.DefaultThrowableRenderer;
+import org.apache.log4j.spi.LoggerRepository;
+import org.apache.log4j.spi.ThrowableRenderer;
+import org.apache.log4j.spi.ThrowableRendererSupport;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -42,7 +41,7 @@ import java.io.LineNumberReader;
  * @author Mike
  */
 @SuppressWarnings({"HardCodedStringLiteral"})
-public class IdeaLogger extends Logger {
+public class IdeaLogger extends Log4jBasedLogger {
   private static ApplicationInfoProvider ourApplicationInfoProvider = getIdeaInfoProvider();
 
   public static String ourLastActionId = "";
@@ -57,6 +56,20 @@ public class IdeaLogger extends Logger {
   private static String ourCompilationTimestamp;
 
   @NonNls private static final String COMPILATION_TIMESTAMP_RESOURCE_NAME = "/.compilation-timestamp";
+
+  private static ThrowableRenderer ourThrowableRenderer = t -> {
+    String[] defaultRes = DefaultThrowableRenderer.render(t);
+    int maxStackSize = 1024;
+    int maxExtraSize = 256;
+    if (defaultRes.length > maxStackSize + maxExtraSize) {
+      String[] res = new String[maxStackSize + maxExtraSize + 1];
+      System.arraycopy(defaultRes, 0, res, 0, maxStackSize);
+      res[maxStackSize] = "\t...";
+      System.arraycopy(defaultRes, defaultRes.length - maxExtraSize, res, maxStackSize + 1, maxExtraSize);
+      return res;
+    }
+    return defaultRes;
+  };
 
   static {
     InputStream stream = Logger.class.getResourceAsStream(COMPILATION_TIMESTAMP_RESOURCE_NAME);
@@ -77,10 +90,12 @@ public class IdeaLogger extends Logger {
     }
   }
 
-  private final org.apache.log4j.Logger myLogger;
-
   IdeaLogger(org.apache.log4j.Logger logger) {
-    myLogger = logger;
+    super(logger);
+    LoggerRepository repository = myLogger.getLoggerRepository();
+    if (repository instanceof ThrowableRendererSupport) {
+      ((ThrowableRendererSupport)repository).setThrowableRenderer(ourThrowableRenderer);
+    }
   }
 
   @Override
@@ -99,35 +114,15 @@ public class IdeaLogger extends Logger {
   }
 
   @Override
-  public boolean isDebugEnabled() {
-    return myLogger.isDebugEnabled();
-  }
-
-  @Override
-  public void debug(String message) {
-    myLogger.debug(message);
-  }
-
-  @Override
-  public void debug(Throwable t) {
-    myLogger.debug("", t);
-  }
-
-  @Override
-  public void debug(@NonNls String message, Throwable t) {
-    myLogger.debug(message, t);
-  }
-
-  @Override
   public void error(String message, @Nullable Throwable t, @NotNull String... details) {
-    if (t instanceof ProcessCanceledException) {
-      myLogger.error(message, new Throwable("Do not log ProcessCanceledException").initCause(t));
-      throw (ProcessCanceledException)t;
-    }
-
-    if (t != null && t.getClass().getName().contains("ReparsedSuccessfullyException")) {
-      myLogger.error(new Throwable("Do not log ReparsedSuccessfullyException").initCause(t));
-      throw (RuntimeException)t;
+    if (t instanceof ControlFlowException) {
+      myLogger.error(message, new Throwable("Control-flow exceptions (like " + t.getClass().getSimpleName() + ") should never be logged", t));
+      if (t instanceof RuntimeException) {
+        throw (RuntimeException)t;
+      }
+      else {
+        throw new RuntimeException(t);
+      }
     }
 
     String detailString = StringUtil.join(details, "\n");
@@ -159,7 +154,7 @@ public class IdeaLogger extends Logger {
     myLogger.error("OS: " + System.getProperties().getProperty("os.name", "unknown"));
 
     ApplicationImpl application = (ApplicationImpl)ApplicationManager.getApplication();
-    if (application != null && application.isComponentsCreated()) {
+    if (application != null && application.isComponentsCreated() && !application.isDisposed()) {
       final String lastPreformedActionId = ourLastActionId;
       if (lastPreformedActionId != null) {
         myLogger.error("Last Action: " + lastPreformedActionId);
@@ -175,19 +170,8 @@ public class IdeaLogger extends Logger {
     }
   }
 
-  @Override
-  public void info(String message) {
-    myLogger.info(message);
-  }
-
-  @Override
-  public void info(String message, @Nullable Throwable t) {
-    myLogger.info(message, t);
-  }
-
-  @Override
-  public void warn(@NonNls String message, @Nullable Throwable t) {
-    myLogger.warn(message, t);
+  public static ThrowableRenderer getThrowableRenderer() {
+    return ourThrowableRenderer;
   }
 
   public static void setApplicationInfoProvider(ApplicationInfoProvider aProvider) {
@@ -199,13 +183,8 @@ public class IdeaLogger extends Logger {
       @Override
       public String getInfo() {
         final ApplicationInfoEx info = ApplicationInfoImpl.getShadowInstance();
-        return info.getFullApplicationName() + "  " + "Build #" + info.getBuild().asStringWithAllDetails();
+        return info.getFullApplicationName() + "  " + "Build #" + info.getBuild().asString();
       }
     };
-  }
-
-  @Override
-  public void setLevel(Level level) {
-    myLogger.setLevel(level);
   }
 }

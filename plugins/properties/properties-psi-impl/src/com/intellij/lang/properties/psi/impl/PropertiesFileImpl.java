@@ -31,6 +31,9 @@ import com.intellij.psi.PsiElement;
 import com.intellij.psi.TokenType;
 import com.intellij.psi.impl.source.tree.ChangeUtil;
 import com.intellij.psi.impl.source.tree.TreeElement;
+import com.intellij.psi.stubs.PsiFileStub;
+import com.intellij.psi.stubs.StubElement;
+import com.intellij.psi.stubs.StubTree;
 import com.intellij.psi.tree.TokenSet;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.IncorrectOperationException;
@@ -42,6 +45,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 public class PropertiesFileImpl extends PsiFileBase implements PropertiesFile {
   private static final Logger LOG = Logger.getInstance(PropertiesFileImpl.class);
@@ -79,15 +83,29 @@ public class PropertiesFileImpl extends PsiFileBase implements PropertiesFile {
 
   private void ensurePropertiesLoaded() {
     if (myPropertiesMap != null) return;
-
-    final ASTNode[] props = getPropertiesList().getChildren(PropertiesElementTypes.PROPERTIES);
+    final StubTree stubTree = getStubTree();
+    List<IProperty> properties;
     MostlySingularMultiMap<String, IProperty> propertiesMap = new MostlySingularMultiMap<String, IProperty>();
-    List<IProperty> properties = new ArrayList<IProperty>(props.length);
-    for (final ASTNode prop : props) {
-      final Property property = (Property)prop.getPsi();
-      String key = property.getUnescapedKey();
-      propertiesMap.add(key, property);
-      properties.add(property);
+    if (stubTree != null) {
+      final PsiFileStub root = stubTree.getRoot();
+      final StubElement propertiesList = root.findChildStubByType(PropertiesElementTypes.PROPERTIES_LIST);
+      if (propertiesList != null) {
+        properties = Arrays.stream(propertiesList.getChildrenByType(PropertiesElementTypes.PROPERTY, Property[]::new))
+          .map(IProperty.class::cast)
+          .peek(p -> propertiesMap.add(p.getKey(), p))
+          .collect(Collectors.toList());
+      } else {
+        properties = Collections.emptyList();
+      }
+    } else {
+      final ASTNode[] props = getPropertiesList().getChildren(PropertiesElementTypes.PROPERTIES);
+      properties = new ArrayList<IProperty>(props.length);
+      for (final ASTNode prop : props) {
+        final Property property = (Property)prop.getPsi();
+        String key = property.getUnescapedKey();
+        propertiesMap.add(key, property);
+        properties.add(property);
+      }
     }
     final boolean isAlphaSorted = PropertiesImplUtil.isAlphaSorted(properties);
     synchronized (lock) {
@@ -96,16 +114,6 @@ public class PropertiesFileImpl extends PsiFileBase implements PropertiesFile {
       myPropertiesMap = propertiesMap;
       myAlphaSorted = isAlphaSorted;
     }
-  }
-
-  public Character findFirstKeyValueDelimiter() {
-    for (IProperty property : myProperties) {
-      final Character separator = ((PropertyImpl)property).getKeyValueDelimiter();
-      if (separator != null) {
-        return separator;
-      }
-    }
-    return null;
   }
 
   @Override
@@ -150,7 +158,7 @@ public class PropertiesFileImpl extends PsiFileBase implements PropertiesFile {
   @NotNull
   public PsiElement addProperty(@NotNull IProperty property) throws IncorrectOperationException {
     final IProperty position = findInsertionPosition(property);
-    return addPropertyAfter((Property)property, (Property)position);
+    return addPropertyAfter(property, position);
   }
 
   private IProperty findInsertionPosition(@NotNull IProperty property) {
@@ -160,14 +168,11 @@ public class PropertiesFileImpl extends PsiFileBase implements PropertiesFile {
         return null;
       }
       if (myAlphaSorted) {
-        final int insertIndex = Collections.binarySearch(myProperties, property, new Comparator<IProperty>() {
-          @Override
-          public int compare(IProperty p1, IProperty p2) {
-            final String k1 = p1.getKey();
-            final String k2 = p2.getKey();
-            LOG.assertTrue(k1 != null && k2 != null);
-            return k1.compareTo(k2);
-          }
+        final int insertIndex = Collections.binarySearch(myProperties, property, (p1, p2) -> {
+          final String k1 = p1.getKey();
+          final String k2 = p2.getKey();
+          LOG.assertTrue(k1 != null && k2 != null);
+          return String.CASE_INSENSITIVE_ORDER.compare(k1, k2);
         });
         return insertIndex == -1 ? null :myProperties.get(insertIndex < 0 ? - insertIndex - 2 : insertIndex);
       }
@@ -177,11 +182,11 @@ public class PropertiesFileImpl extends PsiFileBase implements PropertiesFile {
 
   @Override
   @NotNull
-  public PsiElement addPropertyAfter(@NotNull final Property property, @Nullable final Property anchor) throws IncorrectOperationException {
-    final TreeElement copy = ChangeUtil.copyToElement(property);
+  public PsiElement addPropertyAfter(@NotNull final IProperty property, @Nullable final IProperty anchor) throws IncorrectOperationException {
+    final TreeElement copy = ChangeUtil.copyToElement(property.getPsiElement());
     List<IProperty> properties = getProperties();
     ASTNode anchorBefore = anchor == null ? properties.isEmpty() ? null : properties.get(0).getPsiElement().getNode()
-                           : anchor.getNode().getTreeNext();
+                           : anchor.getPsiElement().getNode().getTreeNext();
     if (anchorBefore != null) {
       if (anchorBefore.getElementType() == TokenType.WHITE_SPACE) {
         anchorBefore = anchorBefore.getTreeNext();
@@ -200,13 +205,13 @@ public class PropertiesFileImpl extends PsiFileBase implements PropertiesFile {
   @NotNull
   @Override
   public IProperty addProperty(String key, String value) {
-    return (IProperty)addProperty(PropertiesElementFactory.createProperty(getProject(), key, value));
+    return (IProperty)addProperty(PropertiesElementFactory.createProperty(getProject(), key, value, null));
   }
 
   @NotNull
   @Override
-  public IProperty addPropertyAfter(String key, String value, @Nullable Property anchor) {
-    return (IProperty)addPropertyAfter((Property) PropertiesElementFactory.createProperty(getProject(), key, value), anchor);
+  public IProperty addPropertyAfter(String key, String value, @Nullable IProperty anchor) {
+    return (IProperty)addPropertyAfter(PropertiesElementFactory.createProperty(getProject(), key, value, null), anchor);
   }
 
   private void insertLineBreakBefore(final ASTNode anchorBefore) {

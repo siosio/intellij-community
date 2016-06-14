@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -75,7 +75,7 @@ public class GrIntroduceParameterHandler implements RefactoringActionHandler, Me
       if (expressions.isEmpty()) {
         GrIntroduceHandlerBase.updateSelectionForVariable(editor, file, selectionModel, offset);
       }
-      else if (expressions.size() == 1) {
+      else if (expressions.size() == 1 || ApplicationManager.getApplication().isUnitTestMode()) {
         final TextRange textRange = expressions.get(0).getTextRange();
         selectionModel.setSelection(textRange.getStartOffset(), textRange.getEndOffset());
       }
@@ -85,12 +85,7 @@ public class GrIntroduceParameterHandler implements RefactoringActionHandler, Me
           public void pass(final GrExpression selectedValue) {
             invoke(project, editor, file, selectedValue.getTextRange().getStartOffset(), selectedValue.getTextRange().getEndOffset());
           }
-        }, new Function<GrExpression, String>() {
-          @Override
-          public String fun(GrExpression grExpression) {
-            return grExpression.getText();
-          }
-        }
+        }, grExpression -> grExpression.getText()
         );
         return;
       }
@@ -129,12 +124,9 @@ public class GrIntroduceParameterHandler implements RefactoringActionHandler, Me
       showDialogOrStartInplace(new IntroduceParameterInfoImpl(initialInfo, owner, toSearchFor), editor);
     }
     else {
-      myEnclosingMethodsPopup = MethodOrClosureScopeChooser.create(scopes, editor, this, new PairFunction<GrParametersOwner, PsiElement, Object>() {
-        @Override
-        public Object fun(GrParametersOwner owner, PsiElement element) {
-          showDialogOrStartInplace(new IntroduceParameterInfoImpl(initialInfo, owner, element), editor);
-          return null;
-        }
+      myEnclosingMethodsPopup = MethodOrClosureScopeChooser.create(scopes, editor, this, (owner, element) -> {
+        showDialogOrStartInplace(new IntroduceParameterInfoImpl(initialInfo, owner, element), editor);
+        return null;
       });
       myEnclosingMethodsPopup.showInBestPositionFor(editor);
     }

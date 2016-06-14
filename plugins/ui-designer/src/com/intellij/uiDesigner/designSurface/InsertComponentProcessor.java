@@ -27,6 +27,7 @@ import com.intellij.openapi.roots.*;
 import com.intellij.openapi.roots.libraries.Library;
 import com.intellij.openapi.roots.libraries.LibraryTable;
 import com.intellij.openapi.ui.Messages;
+import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.JavaPsiFacade;
 import com.intellij.psi.PsiClass;
@@ -217,17 +218,13 @@ public final class InsertComponentProcessor extends EventProcessor {
           return;
         }
         ApplicationManager.getApplication().runWriteAction(
-          new Runnable() {
-            public void run() {
-              CreateFieldFix.runImpl(editor.getProject(),
+          () -> CreateFieldFix.runImpl(editor.getProject(),
                                      editor.getRootContainer(),
                                      aClass,
                                      insertedComponent.getComponentClassName(),
                                      insertedComponent.getBinding(),
                                      false, // silently skip all errors (if any)
-                                     null);
-            }
-          }
+                                     null)
         );
       }
     }
@@ -302,35 +299,33 @@ public final class InsertComponentProcessor extends EventProcessor {
     if (location.canDrop(dragObject)) {
       CommandProcessor.getInstance().executeCommand(
         myEditor.getProject(),
-        new Runnable() {
-          public void run() {
-            createBindingWhenDrop(myEditor, myInsertedComponent, forceBinding);
+        () -> {
+          createBindingWhenDrop(myEditor, myInsertedComponent, forceBinding);
 
-            final RadComponent[] components = new RadComponent[]{myInsertedComponent};
-            location.processDrop(myEditor, components, null, dragObject);
+          final RadComponent[] components = new RadComponent[]{myInsertedComponent};
+          location.processDrop(myEditor, components, null, dragObject);
 
-            FormEditingUtil.selectSingleComponent(myEditor, myInsertedComponent);
+          FormEditingUtil.selectSingleComponent(myEditor, myInsertedComponent);
 
-            if (location.getContainer() != null && location.getContainer().isXY()) {
-              Dimension newSize = myInsertedComponent.getPreferredSize();
-              Util.adjustSize(myInsertedComponent.getDelegee(), myInsertedComponent.getConstraints(), newSize);
-              myInsertedComponent.setSize(newSize);
-            }
-
-            if (myInsertedComponent.getParent() instanceof RadRootContainer &&
-                myInsertedComponent instanceof RadAtomicComponent) {
-              GridBuildUtil.convertToGrid(myEditor);
-              FormEditingUtil.selectSingleComponent(myEditor, myInsertedComponent);
-            }
-
-            checkBindTopLevelPanel();
-
-            if (!mySticky) {
-              PaletteToolWindowManager.getInstance(myEditor).clearActiveItem();
-            }
-
-            myEditor.refreshAndSave(false);
+          if (location.getContainer() != null && location.getContainer().isXY()) {
+            Dimension newSize = myInsertedComponent.getPreferredSize();
+            Util.adjustSize(myInsertedComponent.getDelegee(), myInsertedComponent.getConstraints(), newSize);
+            myInsertedComponent.setSize(newSize);
           }
+
+          if (myInsertedComponent.getParent() instanceof RadRootContainer &&
+              myInsertedComponent instanceof RadAtomicComponent) {
+            GridBuildUtil.convertToGrid(myEditor);
+            FormEditingUtil.selectSingleComponent(myEditor, myInsertedComponent);
+          }
+
+          checkBindTopLevelPanel();
+
+          if (!mySticky) {
+            PaletteToolWindowManager.getInstance(myEditor).clearActiveItem();
+          }
+
+          myEditor.refreshAndSave(false);
         }, UIDesignerBundle.message("command.insert.component"), null);
     }
     myComponentToInsert = null;
@@ -383,17 +378,15 @@ public final class InsertComponentProcessor extends EventProcessor {
       Messages.getQuestionIcon());
     if (rc == Messages.CANCEL) return false;
     if (rc == Messages.YES) {
-      ApplicationManager.getApplication().runWriteAction(new Runnable() {
-        public void run() {
-          final ModifiableRootModel model = ModuleRootManager.getInstance(myEditor.getModule()).getModifiableModel();
-          if (libraryOrderEntry.isModuleLevel()) {
-            copyModuleLevelLibrary(libraryOrderEntry.getLibrary(), model);
-          }
-          else {
-            model.addLibraryEntry(libraryOrderEntry.getLibrary());
-          }
-          model.commit();
+      ApplicationManager.getApplication().runWriteAction(() -> {
+        final ModifiableRootModel model = ModuleRootManager.getInstance(myEditor.getModule()).getModifiableModel();
+        if (libraryOrderEntry.isModuleLevel()) {
+          copyModuleLevelLibrary(libraryOrderEntry.getLibrary(), model);
         }
+        else {
+          model.addLibraryEntry(libraryOrderEntry.getLibrary());
+        }
+        model.commit();
       });
     }
     return true;
@@ -525,8 +518,13 @@ public final class InsertComponentProcessor extends EventProcessor {
   }
 
   @Nullable
-  public static RadComponentFactory getRadComponentFactory(Project project, final String className) {
-    ClassLoader loader = LoaderFactory.getInstance(project).getProjectClassLoader();
+  public static RadComponentFactory getRadComponentFactory(final Project project, final String className) {
+    ClassLoader loader = ApplicationManager.getApplication().runReadAction(new Computable<ClassLoader>() {
+      @Override
+      public ClassLoader compute() {
+        return LoaderFactory.getInstance(project).getProjectClassLoader();
+      }
+    });
     return getRadComponentFactory(className, loader);
   }
 

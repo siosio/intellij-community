@@ -58,12 +58,9 @@ public class FoldingUpdate {
   private static final Key<ParameterizedCachedValue<Runnable, Couple<Boolean>>> CODE_FOLDING_KEY = Key.create("code folding");
   private static final Key<String> CODE_FOLDING_FILE_EXTENSION_KEY = Key.create("code folding file extension");
 
-  private static final Comparator<PsiElement> COMPARE_BY_OFFSET_REVERSED = new Comparator<PsiElement>() {
-    @Override
-    public int compare(PsiElement element, PsiElement element1) {
-      int startOffsetDiff = element1.getTextRange().getStartOffset() - element.getTextRange().getStartOffset();
-      return startOffsetDiff == 0 ? element1.getTextRange().getEndOffset() - element.getTextRange().getEndOffset() : startOffsetDiff;
-    }
+  private static final Comparator<PsiElement> COMPARE_BY_OFFSET_REVERSED = (element, element1) -> {
+    int startOffsetDiff = element1.getTextRange().getStartOffset() - element.getTextRange().getStartOffset();
+    return startOffsetDiff == 0 ? element1.getTextRange().getEndOffset() - element.getTextRange().getEndOffset() : startOffsetDiff;
   };
 
   private FoldingUpdate() {
@@ -118,15 +115,12 @@ public class FoldingUpdate {
 
     final FoldingMap elementsToFoldMap = getFoldingsFor(file, document, quick);
     final UpdateFoldRegionsOperation operation = new UpdateFoldRegionsOperation(project, editor, file, elementsToFoldMap,
-                                                                                applyDefaultState ? EXCEPT_CARET_REGION : NO, false);
-    Runnable runnable = new Runnable() {
-      @Override
-      public void run() {
-        editor.getFoldingModel().runBatchFoldingOperationDoNotCollapseCaret(operation);
-      }
-    };
+                                                                                applyDefaultState ? EXCEPT_CARET_REGION : NO, 
+                                                                                !applyDefaultState, false);
+    Runnable runnable = () -> editor.getFoldingModel().runBatchFoldingOperationDoNotCollapseCaret(operation);
     Set<Object> dependencies = new HashSet<Object>();
     dependencies.add(document);
+    dependencies.add(editor.getFoldingModel());
     for (FoldingDescriptor descriptor : elementsToFoldMap.values()) {
       dependencies.addAll(descriptor.getDependencies());
     }
@@ -173,29 +167,23 @@ public class FoldingUpdate {
       });
     }
 
-    return new Runnable() {
-      @Override
-      public void run() {
-        final ArrayList<Runnable> updateOperations = new ArrayList<Runnable>(injectedEditors.size());
-        for (int i = 0; i < injectedEditors.size(); i++) {
-          EditorWindow injectedEditor = injectedEditors.get(i);
-          PsiFile injectedFile = injectedFiles.get(i);
-          if (!injectedEditor.getDocument().isValid()) continue;
-          FoldingMap map = maps.get(i);
-          updateOperations.add(new UpdateFoldRegionsOperation(project, injectedEditor, injectedFile, map,
-                                                              applyDefaultState ? EXCEPT_CARET_REGION : NO, true));
-        }
-        foldingModel.runBatchFoldingOperation(new Runnable() {
-          @Override
-          public void run() {
-            for (Runnable operation : updateOperations) {
-              operation.run();
-            }
-          }
-        });
-
-        editor.putUserData(LAST_UPDATE_INJECTED_STAMP_KEY, timeStamp);
+    return () -> {
+      final ArrayList<Runnable> updateOperations = new ArrayList<Runnable>(injectedEditors.size());
+      for (int i = 0; i < injectedEditors.size(); i++) {
+        EditorWindow injectedEditor = injectedEditors.get(i);
+        PsiFile injectedFile = injectedFiles.get(i);
+        if (!injectedEditor.getDocument().isValid()) continue;
+        FoldingMap map = maps.get(i);
+        updateOperations.add(new UpdateFoldRegionsOperation(project, injectedEditor, injectedFile, map,
+                                                            applyDefaultState ? EXCEPT_CARET_REGION : NO, !applyDefaultState, true));
       }
+      foldingModel.runBatchFoldingOperation(() -> {
+        for (Runnable operation : updateOperations) {
+          operation.run();
+        }
+      });
+
+      editor.putUserData(LAST_UPDATE_INJECTED_STAMP_KEY, timeStamp);
     };
   }
 
@@ -253,21 +241,34 @@ public class FoldingUpdate {
       final FoldingBuilder foldingBuilder = LanguageFolding.INSTANCE.forLanguage(language);
       if (psi != null && foldingBuilder != null) {
         for (FoldingDescriptor descriptor : LanguageFolding.buildFoldingDescriptors(foldingBuilder, psi, document, quick)) {
-          TextRange range = descriptor.getRange();
-          if (!docRange.contains(range)) {
-            LOG.error("Folding descriptor " + descriptor +
-                      " made by " + foldingBuilder +
-                      " for " +language +
-                      " and called on file " + psi +
-                      " is outside document range: " + docRange,
-                      ApplicationManager.getApplication().isInternal()
-                      ? new Attachment[] {AttachmentFactory.createAttachment(document), new Attachment("psiTree.txt", DebugUtil.psiToString(psi, false, true))}
-                      : new Attachment[0]);
+          PsiElement psiElement = descriptor.getElement().getPsi();
+          if (psiElement == null) {
+            LOG.error("No PSI for folding descriptor " + descriptor);
+            continue;
           }
-          elementsToFoldMap.putValue(descriptor.getElement().getPsi(), descriptor);
+          if (!docRange.contains(descriptor.getRange())) {
+            diagnoseIncorrectRange(psi, document, language, foldingBuilder, descriptor, psiElement);
+            continue;
+          }
+          elementsToFoldMap.putValue(psiElement, descriptor);
         }
       }
     }
+  }
+
+  private static void diagnoseIncorrectRange(@NotNull PsiFile file,
+                                             @NotNull Document document,
+                                             Language language,
+                                             FoldingBuilder foldingBuilder, FoldingDescriptor descriptor, PsiElement psiElement) {
+    String message = "Folding descriptor " + descriptor +
+                     " made by " + foldingBuilder +
+                     " for " + language +
+                     " is outside document range" +
+                     ", PSI element: " + psiElement +
+                     ", PSI element range: " + psiElement.getTextRange() + "; " + DebugUtil.diagnosePsiDocumentInconsistency(psiElement, document);
+    LOG.error(message, ApplicationManager.getApplication().isInternal()
+                               ? new Attachment[]{AttachmentFactory.createAttachment(document), new Attachment("psiTree.txt", DebugUtil.psiToString(file, false, true))}
+                               : new Attachment[0]);
   }
 
   public static class FoldingMap extends MultiMap<PsiElement, FoldingDescriptor>{

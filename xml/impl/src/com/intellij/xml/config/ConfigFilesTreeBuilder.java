@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -113,7 +113,10 @@ public class ConfigFilesTreeBuilder {
         }
       }
     }
-    for (VirtualFile file : jars.keySet()) {
+
+    List<VirtualFile> sortedJars = new ArrayList<VirtualFile>(jars.keySet());
+    Collections.sort(sortedJars, (o1, o2) -> StringUtil.naturalCompare(o1.getName(), o2.getName()));
+    for (VirtualFile file : sortedJars) {
       final List<PsiFile> list = new ArrayList<PsiFile>(jars.get(file));
       final PsiFile jar = list.get(0).getManager().findFile(file);
       if (jar != null) {
@@ -155,12 +158,7 @@ public class ConfigFilesTreeBuilder {
     return new DefaultMutableTreeNode(file);
   }
 
-  private static final Comparator<PsiFile> FILE_COMPARATOR = new Comparator<PsiFile>() {
-    @Override
-    public int compare(final PsiFile o1, final PsiFile o2) {
-      return StringUtil.naturalCompare(o1.getName(), o2.getName());
-    }
-  };
+  private static final Comparator<PsiFile> FILE_COMPARATOR = (o1, o2) -> StringUtil.naturalCompare(o1.getName(), o2.getName());
 
   public static void renderNode(Object value, boolean expanded, ColoredTreeCellRenderer renderer) {
     if (!(value instanceof DefaultMutableTreeNode)) return;

@@ -20,12 +20,16 @@ import com.intellij.codeInsight.completion.CompletionUtil;
 import com.intellij.lang.Language;
 import com.intellij.lang.injection.MultiHostRegistrar;
 import com.intellij.openapi.extensions.Extensions;
+import com.intellij.openapi.fileTypes.FileType;
+import com.intellij.openapi.fileTypes.FileTypeManager;
+import com.intellij.openapi.fileTypes.LanguageFileType;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.source.tree.injected.MultiHostRegistrarImpl;
 import com.intellij.psi.impl.source.tree.injected.Place;
+import com.intellij.psi.injection.ReferenceInjector;
 import com.intellij.psi.util.CachedValueProvider;
 import com.intellij.psi.util.CachedValuesManager;
 import com.intellij.psi.util.PsiTreeUtil;
@@ -51,22 +55,34 @@ import java.util.regex.Pattern;
  * @author Gregory.Shrago
  */
 public class InjectorUtils {
-  public static final Comparator<TextRange> RANGE_COMPARATOR = new Comparator<TextRange>() {
-    public int compare(final TextRange o1, final TextRange o2) {
-      if (o1.intersects(o2)) return 0;
-      return o1.getStartOffset() - o2.getStartOffset();
-    }
+  public static final Comparator<TextRange> RANGE_COMPARATOR = (o1, o2) -> {
+    if (o1.intersects(o2)) return 0;
+    return o1.getStartOffset() - o2.getStartOffset();
   };
 
   private InjectorUtils() {
   }
 
+  @Nullable
+  public static Language getLanguage(@NotNull BaseInjection injection) {
+    return getLanguageByString(injection.getInjectedLanguageId());
+  }
+
+  @Nullable
+  public static Language getLanguageByString(String languageId) {
+    Language language = InjectedLanguage.findLanguageById(languageId);
+    if (language != null) return language;
+    ReferenceInjector injector = ReferenceInjector.findById(languageId);
+    if (injector != null) return injector.toLanguage();
+    FileType fileType = FileTypeManager.getInstance().getFileTypeByExtension(languageId);
+    return fileType instanceof LanguageFileType ? ((LanguageFileType)fileType).getLanguage() : null;
+  }
 
   public static boolean registerInjectionSimple(@NotNull PsiLanguageInjectionHost host,
                                                 @NotNull BaseInjection injection,
                                                 @Nullable LanguageInjectionSupport support,
                                                 @NotNull MultiHostRegistrar registrar) {
-    Language language = InjectedLanguage.findLanguageById(injection.getInjectedLanguageId());
+    Language language = getLanguage(injection);
     if (language == null) return false;
 
     InjectedLanguage injectedLanguage =
@@ -88,22 +104,29 @@ public class InjectorUtils {
     return !ranges.isEmpty();
   }
 
-  public static void registerInjection(Language language, List<Trinity<PsiLanguageInjectionHost, InjectedLanguage, TextRange>> list, PsiFile containingFile, MultiHostRegistrar registrar) {
+  public static void registerInjection(Language language,
+                                       List<Trinity<PsiLanguageInjectionHost, InjectedLanguage, TextRange>> list,
+                                       PsiFile containingFile,
+                                       MultiHostRegistrar registrar) {
     // if language isn't injected when length == 0, subsequent edits will not cause the language to be injected as well.
     // Maybe IDEA core is caching a bit too aggressively here?
     if (language == null/* && (pair.second.getLength() > 0*/) {
       return;
     }
     boolean injectionStarted = false;
-    for (Trinity<PsiLanguageInjectionHost, InjectedLanguage, TextRange> trinity : list) {
-      final PsiLanguageInjectionHost host = trinity.first;
+    for (Trinity<PsiLanguageInjectionHost, InjectedLanguage, TextRange> t : list) {
+      PsiLanguageInjectionHost host = t.first;
       if (host.getContainingFile() != containingFile) continue;
 
-      final TextRange textRange = trinity.third;
-      final InjectedLanguage injectedLanguage = trinity.second;
+      TextRange textRange = t.third;
+      InjectedLanguage injectedLanguage = t.second;
 
       if (!injectionStarted) {
         registrar.startInjecting(language);
+        // TextMate language requires file extension
+        if (registrar instanceof MultiHostRegistrarImpl && !StringUtil.equalsIgnoreCase(language.getID(), t.second.getID())) {
+          ((MultiHostRegistrarImpl)registrar).setFileExtension(StringUtil.toLowerCase(t.second.getID()));
+        }
         injectionStarted = true;
       }
       registrar.addPlace(injectedLanguage.getPrefix(), injectedLanguage.getSuffix(), host, textRange);
@@ -272,13 +295,9 @@ public class InjectorUtils {
 
   @Nullable
   private static TreeMap<TextRange, BaseInjection> getInjectionMap(@NotNull final PsiFile file) {
-    return CachedValuesManager.getCachedValue(file, new CachedValueProvider<TreeMap<TextRange, BaseInjection>>() {
-      @Nullable
-      @Override
-      public Result<TreeMap<TextRange, BaseInjection>> compute() {
-        TreeMap<TextRange, BaseInjection> map = calcInjections(file);
-        return Result.create(map.isEmpty() ? null : map, file);
-      }
+    return CachedValuesManager.getCachedValue(file, () -> {
+      TreeMap<TextRange, BaseInjection> map = calcInjections(file);
+      return CachedValueProvider.Result.create(map.isEmpty() ? null : map, file);
     });
   }
 

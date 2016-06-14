@@ -15,13 +15,13 @@
  */
 package com.intellij.codeInsight.intention
 
-import com.intellij.lang.java.JavaLanguage;
+import com.intellij.codeInsight.daemon.impl.quickfix.ImportClassFix
+import com.intellij.lang.java.JavaLanguage
 import com.intellij.pom.java.LanguageLevel
-import com.intellij.psi.PsiClass
-import com.intellij.psi.PsiFile
 import com.intellij.psi.codeStyle.CodeStyleSettings
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager
-import com.intellij.psi.impl.source.codeStyle.ImportHelper
+import com.intellij.psi.statistics.StatisticsManager
+import com.intellij.psi.statistics.impl.StatisticsManagerImpl
 import com.intellij.testFramework.IdeaTestUtil
 import com.intellij.testFramework.fixtures.LightCodeInsightFixtureTestCase
 
@@ -85,6 +85,46 @@ public class Foo {
 '''
   }
 
+  public void testPackageLocalInner() {
+    myFixture.addClass 'package foo; class Outer { static class Inner {static String FOO = "";}}'
+
+    myFixture.configureByText 'a.java', '''\
+package foo;
+class Usage {
+  {
+    String foo = In<caret>ner.FOO;
+  }
+}
+'''
+
+    importClass()
+
+    myFixture.checkResult '''package foo;
+class Usage {
+  {
+    String foo = Outer.Inner.FOO;
+  }
+}
+'''
+  }
+
+  public void testWrongTypeParams() throws Exception {
+    myFixture.addClass 'package f; public class Foo {}'
+    myFixture.configureByText 'a.java', '''\
+public class Bar {
+  Fo<caret>o<String> foo;
+}
+'''
+    importClass()
+    myFixture.checkResult '''\
+import f.Foo;
+
+public class Bar {
+  Foo<String> foo;
+}
+'''
+  }
+
   public void testUseContext() {
     myFixture.addClass 'package foo; public class Log {}'
     myFixture.addClass 'package bar; public class Log {}'
@@ -101,6 +141,19 @@ public class Foo {
     Lo<caret>g l = bar.LogFactory.log();
 }
 '''
+  }
+
+  public void "test use initializer"() {
+    myFixture.addClass 'package foo; public class Map {}'
+    myFixture.configureByText 'a.java', '''\
+import java.util.HashMap;
+
+public class Foo {
+    Ma<caret>p l = new HashMap<>();
+}
+'''
+    ImportClassFix intention = myFixture.findSingleIntention("Import class") as ImportClassFix
+    assert intention.classesToImport.collect { it.qualifiedName } == ['java.util.Map']
   }
 
   public void testUseOverrideContext() {
@@ -455,5 +508,94 @@ class Tq {
 
   private def reimportClass() {
     myFixture.launchAction(myFixture.findSingleIntention("Replace qualified name with 'import'"))
+  }
+
+  public void "test disprefer deprecated classes"() {
+    myFixture.addClass 'package foo; public class Log {}'
+    myFixture.addClass 'package bar; @Deprecated public class Log {}'
+    myFixture.configureByText 'a.java', '''\
+public class Foo {
+    Lo<caret>g l;
+}
+'''
+    importClass()
+    myFixture.checkResult '''import foo.Log;
+
+public class Foo {
+    Lo<caret>g l;
+}
+'''
+
+  }
+
+  public void "prefer from imported package"() {
+    myFixture.addClass 'package foo; public class Log {}'
+    myFixture.addClass 'package foo; public class Imported {}'
+    myFixture.addClass 'package bar; public class Log {}'
+    myFixture.configureByText 'a.java', '''import foo.Imported;
+public class Foo {
+    Lo<caret>g l;
+    Imported i;
+}
+'''
+    importClass()
+    myFixture.checkResult '''import foo.Log;
+import foo.Imported;
+
+public class Foo {
+    Lo<caret>g l;
+    Imported i;
+}
+'''
+  }
+
+  public void "test prefer from imported package sibling"() {
+    myFixture.addClass 'package com.foo.doo; public class Log {}'
+    myFixture.addClass 'package com.foo.imported; public class Imported {}'
+    myFixture.addClass 'package com.bar; public class Log {}'
+    myFixture.configureByText 'a.java', '''import com.foo.imported.Imported;
+
+public class Foo {
+    Lo<caret>g l;
+    Imported i;
+}
+'''
+    importClass()
+    myFixture.checkResult '''import com.foo.doo.Log;
+import com.foo.imported.Imported;
+
+public class Foo {
+    Lo<caret>g l;
+    Imported i;
+}
+'''
+
+  }
+
+  public void "test remember chosen variants"() {
+    ((StatisticsManagerImpl)StatisticsManager.getInstance()).enableStatistics(getTestRootDisposable());
+    myFixture.addClass 'package foo; public class Log {}'
+    myFixture.addClass 'package bar; public class Log {}'
+
+    def textBefore = '''\
+
+public class Foo {
+    Lo<caret>g l;
+}
+'''
+    def textAfter = '''import bar.Log;
+
+public class Foo {
+    Lo<caret>g l;
+}
+'''
+    myFixture.configureByText 'a.java', textBefore
+    importClass()
+    myFixture.checkResult textAfter
+
+    myFixture.addClass("package aPackage; public class Log {}")
+    myFixture.configureByText 'b.java', textBefore
+    importClass()
+    myFixture.checkResult textAfter
   }
 }

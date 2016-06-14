@@ -328,12 +328,8 @@ public class CodeStyleManagerImpl extends CodeStyleManager {
   @Override
   public int adjustLineIndent(@NotNull final PsiFile file, final int offset) throws IncorrectOperationException {
     DetectedIndentOptionsNotificationProvider.updateIndentNotification(file, false);
-    return PostprocessReformattingAspect.getInstance(file.getProject()).disablePostprocessFormattingInside(new Computable<Integer>() {
-      @Override
-      public Integer compute() {
-        return doAdjustLineIndentByOffset(file, offset);
-      }
-    });
+    return PostprocessReformattingAspect.getInstance(file.getProject()).disablePostprocessFormattingInside(
+      () -> doAdjustLineIndentByOffset(file, offset));
   }
 
   @Nullable
@@ -353,22 +349,19 @@ public class CodeStyleManagerImpl extends CodeStyleManager {
 
   @Override
   public int adjustLineIndent(@NotNull final Document document, final int offset) {
-    return PostprocessReformattingAspect.getInstance(getProject()).disablePostprocessFormattingInside(new Computable<Integer>() {
-      @Override
-      public Integer compute() {
-        final PsiDocumentManager documentManager = PsiDocumentManager.getInstance(myProject);
-        documentManager.commitDocument(document);
+    return PostprocessReformattingAspect.getInstance(getProject()).disablePostprocessFormattingInside(() -> {
+      final PsiDocumentManager documentManager = PsiDocumentManager.getInstance(myProject);
+      documentManager.commitDocument(document);
 
-        PsiFile file = documentManager.getPsiFile(document);
-        if (file == null) return offset;
+      PsiFile file = documentManager.getPsiFile(document);
+      if (file == null) return offset;
 
-        return doAdjustLineIndentByOffset(file, offset);
-      }
+      return doAdjustLineIndentByOffset(file, offset);
     });
   }
 
   private int doAdjustLineIndentByOffset(@NotNull PsiFile file, int offset) {
-    return new CodeStyleManagerRunnable<Integer>(this, FormattingMode.ADJUST_INDENT) {
+    final Integer result = new CodeStyleManagerRunnable<Integer>(this, FormattingMode.ADJUST_INDENT) {
       @Override
       protected Integer doPerform(int offset, TextRange range) {
         return FormatterEx.getInstanceEx().adjustLineIndent(myModel, mySettings, myIndentOptions, offset, mySignificantRange);
@@ -381,9 +374,12 @@ public class CodeStyleManagerImpl extends CodeStyleManager {
 
       @Override
       protected Integer adjustResultForInjected(Integer result, DocumentWindow documentWindow) {
-        return documentWindow.hostToInjected(result);
+        return result != null ? documentWindow.hostToInjected(result)
+                              : null;
       }
-    }.perform(file, offset, null, offset);
+    }.perform(file, offset, null, null);
+    
+    return result != null ? result : offset;
   }
 
   @Override
@@ -676,12 +672,9 @@ public class CodeStyleManagerImpl extends CodeStyleManager {
 
   @Override
   public void performActionWithFormatterDisabled(final Runnable r) {
-    performActionWithFormatterDisabled(new Computable<Object>() {
-      @Override
-      public Object compute() {
-        r.run();
-        return null;
-      }
+    performActionWithFormatterDisabled(() -> {
+      r.run();
+      return null;
     });
   }
 
@@ -689,17 +682,14 @@ public class CodeStyleManagerImpl extends CodeStyleManager {
   public <T extends Throwable> void performActionWithFormatterDisabled(final ThrowableRunnable<T> r) throws T {
     final Throwable[] throwable = new Throwable[1];
 
-    performActionWithFormatterDisabled(new Computable<Object>() {
-      @Override
-      public Object compute() {
-        try {
-          r.run();
-        }
-        catch (Throwable t) {
-          throwable[0] = t;
-        }
-        return null;
+    performActionWithFormatterDisabled(() -> {
+      try {
+        r.run();
       }
+      catch (Throwable t) {
+        throwable[0] = t;
+      }
+      return null;
     });
 
     if (throwable[0] != null) {
@@ -710,12 +700,9 @@ public class CodeStyleManagerImpl extends CodeStyleManager {
 
   @Override
   public <T> T performActionWithFormatterDisabled(final Computable<T> r) {
-    return ((FormatterImpl)FormatterEx.getInstance()).runWithFormattingDisabled(new Computable<T>() {
-      @Override
-      public T compute() {
-        final PostprocessReformattingAspect component = PostprocessReformattingAspect.getInstance(getProject());
-        return component.disablePostprocessFormattingInside(r);
-      }
+    return ((FormatterImpl)FormatterEx.getInstance()).runWithFormattingDisabled(() -> {
+      final PostprocessReformattingAspect component = PostprocessReformattingAspect.getInstance(getProject());
+      return component.disablePostprocessFormattingInside(r);
     });
   }
 

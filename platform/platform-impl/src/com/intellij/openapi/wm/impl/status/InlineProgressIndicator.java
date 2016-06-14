@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@ import com.intellij.openapi.progress.TaskInfo;
 import com.intellij.openapi.progress.util.ProgressIndicatorBase;
 import com.intellij.openapi.ui.GraphicsConfig;
 import com.intellij.openapi.ui.popup.IconButton;
-import com.intellij.openapi.util.EmptyRunnable;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.ui.ColorUtil;
 import com.intellij.ui.InplaceButton;
@@ -66,6 +65,7 @@ public class InlineProgressIndicator extends ProgressIndicatorBase implements Di
                                                       AllIcons.Process.Stop,
                                                       AllIcons.Process.StopHovered) {
     }, new ActionListener() {
+      @Override
       public void actionPerformed(final ActionEvent e) {
         cancelRequest();
       }
@@ -106,7 +106,6 @@ public class InlineProgressIndicator extends ProgressIndicatorBase implements Di
       myComponent.add(myProcessName, BorderLayout.NORTH);
       myProcessName.setForeground(UIUtil.getPanelBackground().brighter().brighter());
       myProcessName.setBorder(new EmptyBorder(2, 2, 2, 2));
-      myProcessName.setDecorate(false);
 
       final NonOpaquePanel content = new NonOpaquePanel(new BorderLayout());
       content.setBorder(new EmptyBorder(2, 2, 2, myInfo.isCancellable() ? 2 : 4));
@@ -120,9 +119,6 @@ public class InlineProgressIndicator extends ProgressIndicatorBase implements Di
       content.add(myText, BorderLayout.NORTH);
       content.add(myProgress, BorderLayout.CENTER);
       content.add(myText2, BorderLayout.SOUTH);
-
-      myText.setDecorate(false);
-      myText2.setDecorate(false);
 
       myComponent.setBorder(new EmptyBorder(2, 2, 2, 2));
     }
@@ -139,20 +135,16 @@ public class InlineProgressIndicator extends ProgressIndicatorBase implements Di
     cancel();
   }
 
-  private void updateRunning() {
-    queueRunningUpdate(EmptyRunnable.getInstance());
+  protected void updateProgress() {
+    queueProgressUpdate();
   }
 
-  protected void updateProgress() {
-    queueProgressUpdate(new Runnable() {
-      public void run() {
-        if (isDisposed()) return;
+  protected void updateAndRepaint() {
+    if (isDisposed()) return;
 
-        updateProgressNow();
+    updateProgressNow();
 
-        myComponent.repaint();
-      }
-    });
+    myComponent.repaint();
   }
 
   public void updateProgressNow() {
@@ -172,7 +164,7 @@ public class InlineProgressIndicator extends ProgressIndicatorBase implements Di
     myText.setText(getText() != null ? getText() : "");
     myText2.setText(getText2() != null ? getText2() : "");
 
-    if (myCompact && myText.getText().length() == 0) {
+    if (myCompact && myText.getText().isEmpty()) {
       myText.setText(myInfo.getTitle());
     }
 
@@ -202,20 +194,17 @@ public class InlineProgressIndicator extends ProgressIndicatorBase implements Di
     return false;
   }
 
-  protected void queueProgressUpdate(Runnable update) {
+  protected void queueProgressUpdate() {
+    updateAndRepaint();
+  }
+
+  protected void queueRunningUpdate(@NotNull Runnable update) {
     update.run();
   }
 
-  protected void queueRunningUpdate(Runnable update) {
-    update.run();
-  }
-
+  @Override
   protected void onProgressChange() {
     updateProgress();
-  }
-
-  protected void onRunningChange() {
-    updateRunning();
   }
 
   public JComponent getComponent() {
@@ -238,6 +227,7 @@ public class InlineProgressIndicator extends ProgressIndicatorBase implements Di
       myCompact = compact;
       myProcessName = processName;
       addMouseListener(new MouseAdapter() {
+        @Override
         public void mousePressed(final MouseEvent e) {
           if (UIUtil.isCloseClick(e) && getBounds().contains(e.getX(), e.getY())) {
             cancelRequest();
@@ -246,6 +236,7 @@ public class InlineProgressIndicator extends ProgressIndicatorBase implements Di
       });
     }
 
+    @Override
     protected void paintComponent(final Graphics g) {
       if (myCompact) {
         super.paintComponent(g);
@@ -285,6 +276,7 @@ public class InlineProgressIndicator extends ProgressIndicatorBase implements Di
     }
   }
 
+  @Override
   public void dispose() {
     if (myDisposed) return;
 

@@ -53,7 +53,6 @@ class CallbackData {
                 LOG.debug("invokeAfterUpdate: silent wrapper called for project: " + project.getName());
                 if (project.isDisposed()) return;
                 afterUpdate.run();
-                ChangesViewManager.getInstance(project).scheduleRefresh();
               }
             });
           }
@@ -70,7 +69,7 @@ class CallbackData {
     }
     else {
       if (mode.isSynchronous()) {
-        final Waiter waiter = new Waiter(project, afterUpdate, state,
+        final Waiter waiter = new Waiter(project, afterUpdate,
                                          VcsBundle.message("change.list.manager.wait.lists.synchronization", title), mode.isCancellable());
         return new CallbackData(
           new Runnable() {

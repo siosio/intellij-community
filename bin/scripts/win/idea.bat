@@ -6,9 +6,18 @@
 
 :: ---------------------------------------------------------------------
 :: Locate a JDK installation directory which will be used to run the IDE.
-:: Try (in order): @@product_uc@@_JDK, ..\jre, JDK_HOME, JAVA_HOME.
+:: Try (in order): @@product_uc@@_JDK, @@vm_options@@.jdk, ..\jre, JDK_HOME, JAVA_HOME.
 :: ---------------------------------------------------------------------
 IF EXIST "%@@product_uc@@_JDK%" SET JDK=%@@product_uc@@_JDK%
+IF NOT "%JDK%" == "" GOTO jdk
+SET USER_JDK_FILE=%USERPROFILE%\.@@system_selector@@\config\@@vm_options@@.jdk
+IF EXIST "%USER_JDK_FILE%" SET/pJDK=<%USER_JDK_FILE%
+IF "%JDK%" == "" GOTO jdk0
+IF EXIST "%JDK%" GOTO jdk
+SET JDK=%~dp0\..\%JDK%
+GOTO jdk
+
+:jdk0
 IF NOT "%JDK%" == "" GOTO jdk
 IF EXIST "%~dp0\..\jre" SET JDK=%~dp0\..\jre
 IF NOT "%JDK%" == "" GOTO jdk
@@ -33,9 +42,6 @@ IF EXIST "%JRE%\lib\amd64" SET BITS=64
 SET IDE_BIN_DIR=%~dp0
 SET IDE_HOME=%IDE_BIN_DIR%\..
 
-SET MAIN_CLASS_NAME=%@@product_uc@@_MAIN_CLASS_NAME%
-IF "%MAIN_CLASS_NAME%" == "" SET MAIN_CLASS_NAME=com.intellij.idea.Main
-
 IF NOT "%@@product_uc@@_PROPERTIES%" == "" SET IDE_PROPERTIES_PROPERTY="-Didea.properties.file=%@@product_uc@@_PROPERTIES%"
 
 :: ---------------------------------------------------------------------
@@ -52,9 +58,9 @@ SET ACC=
 FOR /F "usebackq delims=" %%i IN ("%VM_OPTIONS_FILE%") DO CALL "%IDE_BIN_DIR%\append.bat" "%%i"
 IF EXIST "%VM_OPTIONS_FILE%" SET ACC=%ACC% -Djb.vmOptionsFile="%VM_OPTIONS_FILE%"
 
-SET COMMON_JVM_ARGS="-XX:ErrorFile=%USERPROFILE%\java_error_in_@@product_uc@@_%%p.log" "-Xbootclasspath/a:%IDE_HOME%/lib/boot.jar" -Didea.paths.selector=@@system_selector@@ %IDE_PROPERTIES_PROPERTY%
+SET COMMON_JVM_ARGS="-XX:ErrorFile=%USERPROFILE%\java_error_in_@@product_uc@@_%%p.log" "-XX:HeapDumpPath=%USERPROFILE%\java_error_in_@@product_uc@@.hprof" "-Xbootclasspath/a:%IDE_HOME%/lib/boot.jar" -Didea.paths.selector=@@system_selector@@ %IDE_PROPERTIES_PROPERTY%
 SET IDE_JVM_ARGS=@@ide_jvm_args@@
-SET ALL_JVM_ARGS=%ACC% %COMMON_JVM_ARGS% %IDE_JVM_ARGS% %REQUIRED_JVM_ARGS%
+SET ALL_JVM_ARGS=%ACC% %COMMON_JVM_ARGS% %IDE_JVM_ARGS%
 
 @@class_path@@
 IF NOT "%@@product_uc@@_CLASS_PATH%" == "" SET CLASS_PATH=%CLASS_PATH%;%@@product_uc@@_CLASS_PATH%
@@ -65,7 +71,7 @@ IF NOT "%@@product_uc@@_CLASS_PATH%" == "" SET CLASS_PATH=%CLASS_PATH%;%@@produc
 SET OLD_PATH=%PATH%
 SET PATH=%IDE_BIN_DIR%;%PATH%
 
-"%JAVA_EXE%" %ALL_JVM_ARGS% -cp "%CLASS_PATH%" %MAIN_CLASS_NAME% %*
+"%JAVA_EXE%" %ALL_JVM_ARGS% -cp "%CLASS_PATH%" com.intellij.idea.Main %*
 
 SET PATH=%OLD_PATH%
 GOTO end

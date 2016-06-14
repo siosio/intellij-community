@@ -56,12 +56,9 @@ public abstract class HighlightUsagesHandlerBase<T extends PsiElement> {
     if (targets == null) {
       return;
     }
-    selectTargets(targets, new Consumer<List<T>>() {
-      @Override
-      public void consume(final List<T> targets) {
-        computeUsages(targets);
-        performHighlighting();
-      }
+    selectTargets(targets, targets1 -> {
+      computeUsages(targets1);
+      performHighlighting();
     });
   }
 
@@ -123,5 +120,13 @@ public abstract class HighlightUsagesHandlerBase<T extends PsiElement> {
 
   public List<TextRange> getWriteUsages() {
     return myWriteUsages;
+  }
+
+  /**
+   * In case of egoistic handler (highlightReferences = true) IdentifierHighlighterPass applies information only from this particular handler.
+   * Otherwise additional information would be collected from reference search as well. 
+   */
+  public boolean highlightReferences() {
+    return false;
   }
 }

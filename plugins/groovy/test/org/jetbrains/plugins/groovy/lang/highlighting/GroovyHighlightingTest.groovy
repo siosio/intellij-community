@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,13 +15,11 @@
  */
 package org.jetbrains.plugins.groovy.lang.highlighting
 
-import com.intellij.testFramework.IdeaTestUtil
 import com.siyeh.ig.junit.JUnitAbstractTestClassNamingConventionInspection
 import com.siyeh.ig.junit.JUnitTestClassNamingConventionInspection
 import org.jetbrains.plugins.groovy.codeInspection.assignment.GroovyAssignabilityCheckInspection
-import org.jetbrains.plugins.groovy.codeInspection.confusing.GrUnusedIncDecInspection
 import org.jetbrains.plugins.groovy.codeInspection.untypedUnresolvedAccess.GrUnresolvedAccessInspection
-import org.jetbrains.plugins.groovy.codeInspection.unusedDef.UnusedDefInspection
+
 /**
  * @author peter
  */
@@ -183,15 +181,6 @@ class A {
   public void testBuiltInTypeInstantiation() { doTest(); }
 
   public void testSOEInFieldDeclarations() { doTest(); }
-
-  public void testVeryLongDfaWithComplexGenerics() {
-    IdeaTestUtil.assertTiming("", 10000, 1, new Runnable() {
-      @Override
-      public void run() {
-        doTest(new GroovyAssignabilityCheckInspection(), new UnusedDefInspection(), new GrUnusedIncDecInspection());
-      }
-    });
-  }
 
   public void testWrongAnnotation() { doTest(); }
 
@@ -1002,14 +991,160 @@ class Sub<W extends Window> extends Super<W> {
 ''')
   }
 
-  void testAnonymousBodyOnNewLine() {
-    testHighlighting('''\
-class Foo{}
-print new Foo()
+  void 'test anonymous body on new line within parenthesized expression'() {
+    testHighlighting '''\
+class Foo {
+  def i
+}
+
+def foo = new Foo()
 <error descr="Ambiguous code block">{
-  String toString() {'abc'}
 }</error>
-''')
+
+def bar = (new Foo()
+{
+})
+
+def baz
+baz = new Foo()
+<error descr="Ambiguous code block">{
+}</error>
+
+baz = (new Foo()
+{
+})
+
+(baz = new Foo()
+{
+})
+
+new Foo()
+<error descr="Ambiguous code block">{
+}</error>
+
+(new Foo()
+{
+})
+
+new Foo()
+<error descr="Ambiguous code block">{
+}</error> + 666
+
+(new Foo()
+{
+}) + 444
+
+1 + (new Foo()
+{
+} + 555)
+
+(1 + new Foo()
+{
+} + 112)
+
+new Foo()
+<error descr="Ambiguous code block">{
+}</error>.getI()
+
+(new Foo()
+{
+}).getI()
+
+(new Foo()
+{
+}.getI())
+
+def mm() {
+    new Foo()
+    <error descr="Ambiguous code block">{
+    }</error>
+}
+
+def mm2() {
+    (new Foo()
+    {
+    })
+}
+
+def mm3() {
+    return new Foo()
+    <error descr="Ambiguous code block">{
+    }</error>
+}
+
+def mm4() {
+    return (new Foo()
+    {
+    })
+}
+
+(new Foo()
+{
+    def foo() {
+        // still error
+        new Foo()
+        <error descr="Ambiguous code block">{
+        }</error>
+    }
+})
+'''
+  }
+
+  void 'test anonymous body on new line within argument list'() {
+    testHighlighting '''\
+class Foo {}
+
+def foo(param) {}
+
+foo(new Foo()
+{
+})
+
+def baz
+foo(baz = new Foo()
+{
+})
+
+foo(new Foo()
+{
+} + 666)
+
+foo(1 + new Foo()
+{
+})
+
+foo(1 + new Foo()
+{
+} + 666)
+
+foo(new Foo()
+{
+}.getI())
+
+foo(new Foo()
+{
+
+}.identity { it })
+
+foo new Foo()
+<error descr="Ambiguous code block">{
+
+}</error>
+
+foo 1 + (new Foo()
+{
+}) + 22
+
+foo(new Foo() {
+    def a() {
+        // still error
+        new Foo()
+        <error descr="Ambiguous code block">{
+
+        }</error>
+    }
+})
+'''
   }
 
   void testGenerics() {
@@ -1815,5 +1950,55 @@ class Target {
     private static void callMe() {}
 }
 ''')
+  }
+
+  void 'test no exception for @Field annotation without variable'() {
+    testHighlighting '''\
+import groovy.transform.Field
+
+@Field
+def (,<error descr="Identifier expected">)</error>
+'''
+  }
+
+  void 'test no SOE in index property assignment with generic function'() {
+    testHighlighting '''
+class Main {
+
+    static <T> T foo() {}
+
+    static void main(String[] args) {
+        def main = new Main()
+        main[Main] = foo()
+    }
+
+    def putAt(x, String t) {
+        println "Works: $x = $t"
+    }
+}
+'''
+    testHighlighting '''
+class Main {
+
+    static <T> T foo() {}
+
+    static void main(String[] args) {
+        def main = new Main()
+        (main[Main]) = foo()
+    }
+
+    def putAt(x, String t) {
+        println "Works: $x = $t"
+    }
+}
+'''
+  }
+
+  void 'test static GDK method applicable'() {
+    testHighlighting '''
+def doParse() {
+  Date.parse('dd.MM.yyyy', '01.12.2016')
+}
+''', GroovyAssignabilityCheckInspection
   }
 }

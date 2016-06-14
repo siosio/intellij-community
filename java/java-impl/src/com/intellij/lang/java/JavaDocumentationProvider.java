@@ -21,25 +21,28 @@ import com.intellij.codeInsight.documentation.PlatformDocumentationUtil;
 import com.intellij.codeInsight.editorActions.CodeDocumentationUtil;
 import com.intellij.codeInsight.javadoc.JavaDocExternalFilter;
 import com.intellij.codeInsight.javadoc.JavaDocInfoGenerator;
+import com.intellij.codeInsight.javadoc.JavaDocInfoGeneratorFactory;
 import com.intellij.codeInsight.javadoc.JavaDocUtil;
 import com.intellij.lang.CodeDocumentationAwareCommenter;
 import com.intellij.lang.LangBundle;
 import com.intellij.lang.LanguageCommenters;
 import com.intellij.lang.documentation.CodeDocumentationProvider;
-import com.intellij.lang.documentation.CompositeDocumentationProvider;
+import com.intellij.lang.documentation.DocumentationProviderEx;
 import com.intellij.lang.documentation.ExternalDocumentationProvider;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.project.IndexNotReadyException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.*;
+import com.intellij.openapi.util.Conditions;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vfs.JarFileSystem;
-import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.openapi.vfs.VirtualFileSystem;
+import com.intellij.openapi.vfs.*;
+import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.beanProperties.BeanPropertyElement;
 import com.intellij.psi.impl.source.javadoc.PsiDocParamRef;
@@ -54,51 +57,56 @@ import com.intellij.util.SmartList;
 import com.intellij.util.Url;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.HashMap;
-import org.jetbrains.annotations.NonNls;
+import com.intellij.util.io.URLUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.builtInWebServer.BuiltInWebBrowserUrlProvider;
 
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.Reader;
+import java.net.URL;
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * @author Maxim.Mossienko
  */
-public class JavaDocumentationProvider implements CodeDocumentationProvider, ExternalDocumentationProvider {
+public class JavaDocumentationProvider extends DocumentationProviderEx implements CodeDocumentationProvider, ExternalDocumentationProvider {
   private static final Logger LOG = Logger.getInstance("#" + JavaDocumentationProvider.class.getName());
-  private static final String LINE_SEPARATOR = "\n";
 
-  @NonNls private static final String PARAM_TAG = "@param";
-  @NonNls private static final String RETURN_TAG = "@return";
-  @NonNls private static final String THROWS_TAG = "@throws";
-  @NonNls public static final String HTML_EXTENSION = ".html";
-  @NonNls public static final String PACKAGE_SUMMARY_FILE = "package-summary.html";
+  private static final String LINE_SEPARATOR = "\n";
+  private static final String PARAM_TAG = "@param";
+  private static final String RETURN_TAG = "@return";
+  private static final String THROWS_TAG = "@throws";
+
+  public static final String HTML_EXTENSION = ".html";
+  public static final String PACKAGE_SUMMARY_FILE = "package-summary.html";
 
   @Override
-     public String getQuickNavigateInfo(PsiElement element, PsiElement originalElement) {
-       if (element instanceof PsiClass) {
-         return generateClassInfo((PsiClass)element);
-       }
-       else if (element instanceof PsiMethod) {
-         return generateMethodInfo((PsiMethod)element, calcSubstitutor(originalElement));
-       }
-       else if (element instanceof PsiField) {
-         return generateFieldInfo((PsiField)element, calcSubstitutor(originalElement));
-       }
-       else if (element instanceof PsiVariable) {
-         return generateVariableInfo((PsiVariable)element);
-       }
-       else if (element instanceof PsiPackage) {
-         return generatePackageInfo((PsiPackage)element);
-       }
-       else if (element instanceof BeanPropertyElement) {
-         return generateMethodInfo(((BeanPropertyElement) element).getMethod(), PsiSubstitutor.EMPTY);
-       }
-       return null;
-     }
+  public String getQuickNavigateInfo(PsiElement element, PsiElement originalElement) {
+    if (element instanceof PsiClass) {
+      return generateClassInfo((PsiClass)element);
+    }
+    else if (element instanceof PsiMethod) {
+      return generateMethodInfo((PsiMethod)element, calcSubstitutor(originalElement));
+    }
+    else if (element instanceof PsiField) {
+      return generateFieldInfo((PsiField)element, calcSubstitutor(originalElement));
+    }
+    else if (element instanceof PsiVariable) {
+      return generateVariableInfo((PsiVariable)element);
+    }
+    else if (element instanceof PsiPackage) {
+      return generatePackageInfo((PsiPackage)element);
+    }
+    else if (element instanceof BeanPropertyElement) {
+      return generateMethodInfo(((BeanPropertyElement)element).getMethod(), PsiSubstitutor.EMPTY);
+    }
+    return null;
+  }
 
   private static PsiSubstitutor calcSubstitutor(PsiElement originalElement) {
     PsiSubstitutor substitutor = PsiSubstitutor.EMPTY;
@@ -150,8 +158,8 @@ public class JavaDocumentationProvider implements CodeDocumentationProvider, Ext
     VirtualFile vFile = file.getVirtualFile();
     if (vFile != null && (fileIndex.isInLibrarySource(vFile) || fileIndex.isInLibraryClasses(vFile))) {
       final List<OrderEntry> orderEntries = fileIndex.getOrderEntriesForFile(vFile);
-      if (orderEntries.size() > 0) {
-        final OrderEntry orderEntry = orderEntries.get(0);
+      OrderEntry orderEntry = ContainerUtil.find(orderEntries, Conditions.instanceOf(LibraryOrSdkOrderEntry.class));
+      if (orderEntry != null) {
         buffer.append("[").append(StringUtil.escapeXml(orderEntry.getPresentableName())).append("] ");
       }
     }
@@ -382,7 +390,7 @@ public class JavaDocumentationProvider implements CodeDocumentationProvider, Ext
   public Pair<PsiElement, PsiComment> parseContext(@NotNull PsiElement startPoint) {
     for (PsiElement e = startPoint; e != null; e = e.getParent()) {
       if (e instanceof PsiDocCommentOwner) {
-        return Pair.<PsiElement, PsiComment>create(e, ((PsiDocCommentOwner)e).getDocComment());
+        return Pair.create(e, ((PsiDocCommentOwner)e).getDocComment());
       }
     }
     return null;
@@ -404,7 +412,7 @@ public class JavaDocumentationProvider implements CodeDocumentationProvider, Ext
       if (typeParameterList != null) {
         createTypeParamsListComment(builder, project, commenter, typeParameterList);
       }
-      if (psiMethod.getReturnType() != null && psiMethod.getReturnType() != PsiType.VOID) {
+      if (psiMethod.getReturnType() != null && !PsiType.VOID.equals(psiMethod.getReturnType())) {
         builder.append(CodeDocumentationUtil.createDocCommentLine(RETURN_TAG, project, commenter));
         builder.append(LINE_SEPARATOR);
       }
@@ -518,7 +526,7 @@ public class JavaDocumentationProvider implements CodeDocumentationProvider, Ext
         PsiMethod[] constructors = targetClass.getConstructors();
         if (constructors.length > 0) {
           if (constructors.length == 1) return generateDoc(constructors[0], originalElement);
-          @NonNls final StringBuilder sb = new StringBuilder();
+          final StringBuilder sb = new StringBuilder();
 
           for(PsiMethod constructor:constructors) {
             final String str = PsiFormatUtil.formatMethod(constructor, PsiSubstitutor.EMPTY,
@@ -545,7 +553,7 @@ public class JavaDocumentationProvider implements CodeDocumentationProvider, Ext
 
   @Nullable
   public static String generateExternalJavadoc(final PsiElement element) {
-    final JavaDocInfoGenerator javaDocInfoGenerator = new JavaDocInfoGenerator(element.getProject(), element);
+    final JavaDocInfoGenerator javaDocInfoGenerator = JavaDocInfoGeneratorFactory.create(element.getProject(), element);
     final List<String> docURLs = getExternalJavaDocUrl(element);
     return JavaDocExternalFilter.filterInternalDocInfo(javaDocInfoGenerator.generateDocInfo(docURLs));
   }
@@ -574,7 +582,7 @@ public class JavaDocumentationProvider implements CodeDocumentationProvider, Ext
         PsiElement element = candidates[0].getElement();
         if (element instanceof PsiMethod) return generateDoc(element, null);
       }
-      @NonNls final StringBuilder sb = new StringBuilder();
+      final StringBuilder sb = new StringBuilder();
 
       for (final CandidateInfo candidate : candidates) {
         final PsiElement element = candidate.getElement();
@@ -597,7 +605,7 @@ public class JavaDocumentationProvider implements CodeDocumentationProvider, Ext
     return CodeInsightBundle.message("javadoc.candidates.not.found", text);
   }
 
-  private static void createElementLink(@NonNls final StringBuilder sb, final PsiElement element, final String str) {
+  private static void createElementLink(StringBuilder sb, PsiElement element, String str) {
     sb.append("&nbsp;&nbsp;<a href=\"" + DocumentationManagerProtocol.PSI_ELEMENT_PROTOCOL);
     sb.append(JavaDocUtil.getReferenceText(element.getProject(), element));
     sb.append("\">");
@@ -606,22 +614,25 @@ public class JavaDocumentationProvider implements CodeDocumentationProvider, Ext
     sb.append("<br>");
   }
 
+  // this method is closely related to hasUrlFor, both should be updated in sync
   @Nullable
   public static List<String> getExternalJavaDocUrl(final PsiElement element) {
+    // this method can be slow, as it can perform IO (potentially via network), so it shouldn't be invoked on EDT 
+    LOG.assertTrue(ApplicationManager.getApplication().isUnitTestMode() || !ApplicationManager.getApplication().isDispatchThread());
+    
     List<String> urls = null;
 
     if (element instanceof PsiClass) {
-      urls = findUrlForClass((PsiClass)element);
+      ClassInfo info = findUrlForClass((PsiClass)element);
+      urls = info == null ? null : info.externalDocUrls;
     }
     else if (element instanceof PsiField) {
       PsiField field = (PsiField)element;
       PsiClass aClass = field.getContainingClass();
       if (aClass != null) {
-        urls = findUrlForClass(aClass);
-        if (urls != null) {
-          for (int i = 0; i < urls.size(); i++) {
-            urls.set(i, urls.get(i) + "#" + field.getName());
-          }
+        ClassInfo info = findUrlForClass(aClass);
+        if (info != null) {
+          urls = ContainerUtil.map(info.externalDocUrls, (url) -> url + "#" + field.getName());
         }
       }
     }
@@ -629,23 +640,17 @@ public class JavaDocumentationProvider implements CodeDocumentationProvider, Ext
       PsiMethod method = (PsiMethod)element;
       PsiClass aClass = method.getContainingClass();
       if (aClass != null) {
-        List<String> classUrls = findUrlForClass(aClass);
-        if (classUrls != null) {
+        ClassInfo info = findUrlForClass(aClass);
+        if (info != null) {
           urls = ContainerUtil.newSmartList();
+          for (int i = 0; i < info.externalDocUrls.size(); i++) {
+            // For JDK docs we assume it's always generated with matching javadoc version
+            LanguageLevel languageLevel = info.isInJdk ? PsiUtil.getLanguageLevel(method) : detectLanguageLevel(info.internalDocUrls.get(i));
 
-          final boolean useJava8Format = PsiUtil.isLanguageLevel8OrHigher(method);
-
-          final Set<String> signatures = new LinkedHashSet<String>();
-          signatures.add(formatMethodSignature(method, true, useJava8Format));
-          signatures.add(formatMethodSignature(method, false, useJava8Format));
-
-          signatures.add(formatMethodSignature(method, true, !useJava8Format));
-          signatures.add(formatMethodSignature(method, false, !useJava8Format));
-
-          for (String signature : signatures) {
-            for (String classUrl : classUrls) {
-              urls.add(classUrl + "#" + signature);
-            }
+            String signature = formatMethodSignature(method,
+                                                     languageLevel.isAtLeast(LanguageLevel.JDK_1_5),
+                                                     languageLevel.isAtLeast(LanguageLevel.JDK_1_8));
+            urls.add(info.externalDocUrls.get(i) + "#" + signature);
           }
         }
       }
@@ -664,11 +669,105 @@ public class JavaDocumentationProvider implements CodeDocumentationProvider, Ext
       return null;
     }
     else {
-      for (int i = 0; i < urls.size(); i++) {
-        urls.set(i, FileUtil.toSystemIndependentName(urls.get(i)));
-      }
-      return urls;
+      return ContainerUtil.map(urls, FileUtil::toSystemIndependentName);
     }
+  }
+  
+  // this method is closely related to getExternalJavaDocUrl, both should be updated in sync
+  public static boolean hasUrlFor(PsiElement element) {
+    if (element instanceof PsiClass) {
+      ClassInfo info = findUrlForClass((PsiClass)element);
+      return info != null;
+    }
+    else if (element instanceof PsiField || element instanceof PsiMethod) {
+      PsiMember member = (PsiMember)element;
+      PsiClass aClass = member.getContainingClass();
+      return aClass != null && findUrlForClass(aClass) != null;
+    }
+    else if (element instanceof PsiPackage) {
+      return findUrlForPackage((PsiPackage)element) != null;
+    }
+    else if (element instanceof PsiDirectory) {
+      PsiPackage aPackage = JavaDirectoryService.getInstance().getPackage(((PsiDirectory)element));
+      return aPackage != null && findUrlForPackage(aPackage) != null;
+    }
+    else {
+      return false;
+    }
+  }
+  
+  private static final Pattern GENERATED_SIGNATURE = Pattern.compile("<!-- Generated by javadoc(.*) on .* -->");
+
+  private static LanguageLevel detectLanguageLevel(String javadocPageUrl) {
+    try {
+      URL url = VfsUtilCore.convertToURL(javadocPageUrl);
+      if (url == null) {
+        LOG.warn("Couldn't open URL " + javadocPageUrl);
+      }
+      else {
+        try (InputStream stream = URLUtil.openStream(url);
+             Reader isr = new InputStreamReader(stream);
+             BufferedReader reader = new BufferedReader(isr)) {
+          String line;
+          while ((line = reader.readLine()) != null) {
+            Matcher matcher = GENERATED_SIGNATURE.matcher(line);
+            if (matcher.matches()) {
+              String version = matcher.group(1);
+              LanguageLevel level = parseVersion(version);
+              if (level == null) {
+                LOG.warn("Couldn't parse javadoc version " + version);
+              }
+              else {
+                if (LOG.isDebugEnabled()) {
+                  LOG.debug("Language level " + level + " detected for " + javadocPageUrl);
+                }
+                return level;
+              }
+              break;
+            }
+          }
+        }
+        LOG.warn("Couldn't find javadoc version in " + javadocPageUrl);
+      }
+    }
+    catch (Exception e) {
+      LOG.warn("Error reading " + javadocPageUrl, e);
+    }
+    return LanguageLevel.HIGHEST; // default, if detection fails
+  }
+
+  @Nullable
+  private static LanguageLevel parseVersion(@NotNull String javadocVersionString) {
+    if (javadocVersionString.isEmpty()) return LanguageLevel.JDK_1_3;
+    javadocVersionString = StringUtil.trim(javadocVersionString);
+    javadocVersionString = StringUtil.trimStart(javadocVersionString, "(");
+    javadocVersionString = StringUtil.trimEnd(javadocVersionString, ")");
+    javadocVersionString = StringUtil.trimStart(javadocVersionString, "version");
+    javadocVersionString = StringUtil.trimStart(javadocVersionString, "build");
+    javadocVersionString = StringUtil.trim(javadocVersionString);
+    String[] parts = javadocVersionString.split("[_.-]");
+    if (parts.length > 0) {
+      if (parts[0].equals("9")) return LanguageLevel.JDK_1_9;
+      if (parts[0].equals("1") && parts.length > 1) {
+        switch (parts[1]) {
+          case "8": return LanguageLevel.JDK_1_8;
+          case "7": return LanguageLevel.JDK_1_7;
+          case "6": return LanguageLevel.JDK_1_6;
+          case "5": return LanguageLevel.JDK_1_5;
+          case "4": return LanguageLevel.JDK_1_4;
+        }
+      }
+    }
+    return null;
+  }
+
+  public static Set<String> getHtmlMethodSignatures(PsiMethod method) {
+    final Set<String> signatures = new LinkedHashSet<String>();
+    signatures.add(formatMethodSignature(method, true, true));
+    signatures.add(formatMethodSignature(method, false, true));
+    signatures.add(formatMethodSignature(method, true, false));
+    signatures.add(formatMethodSignature(method, false, false));
+    return signatures;
   }
 
   private static String formatMethodSignature(PsiMethod method, boolean raw, boolean java8Format) {
@@ -689,7 +788,7 @@ public class JavaDocumentationProvider implements CodeDocumentationProvider, Ext
   }
 
   @Nullable
-  public static List<String> findUrlForClass(@NotNull PsiClass aClass) {
+  private static ClassInfo findUrlForClass(@NotNull PsiClass aClass) {
     String qName = aClass.getQualifiedName();
     if (qName == null) return null;
 
@@ -712,7 +811,7 @@ public class JavaDocumentationProvider implements CodeDocumentationProvider, Ext
   }
 
   @Nullable
-  public static List<String> findUrlForVirtualFile(@NotNull Project project, @NotNull VirtualFile virtualFile, @NotNull String relPath) {
+  private static ClassInfo findUrlForVirtualFile(@NotNull Project project, @NotNull VirtualFile virtualFile, @NotNull String relPath) {
     final ProjectFileIndex fileIndex = ProjectRootManager.getInstance(project).getFileIndex();
     Module module = fileIndex.getModuleForFile(virtualFile);
     if (module == null) {
@@ -729,28 +828,31 @@ public class JavaDocumentationProvider implements CodeDocumentationProvider, Ext
       final List<String> httpRoots = PlatformDocumentationUtil.getHttpRoots(javadocPaths, relPath);
       // if found nothing and the file is from library classes, fall back to order entries
       if (httpRoots != null || !fileIndex.isInLibraryClasses(virtualFile)) {
-        return httpRoots;
+        return ContainerUtil.isEmpty(httpRoots) ? null : new ClassInfo(false, httpRoots);
       }
     }
-
+    
     for (OrderEntry orderEntry : fileIndex.getOrderEntriesForFile(virtualFile)) {
+      boolean isJdk = orderEntry instanceof JdkOrderEntry;
+      List<String> internalUrls = new ArrayList<>();
       for (VirtualFile root : orderEntry.getFiles(JavadocOrderRootType.getInstance())) {
+        String internalUrl = PlatformDocumentationUtil.getDocUrl(root, relPath);
+        if (internalUrl == null) continue;
         if (root.getFileSystem() == JarFileSystem.getInstance()) {
           VirtualFile file = root.findFileByRelativePath(relPath);
           List<Url> urls = file == null ? null : BuiltInWebBrowserUrlProvider.getUrls(file, project, null);
           if (!ContainerUtil.isEmpty(urls)) {
-            List<String> result = new SmartList<String>();
+            List<String> externalUrls = new SmartList<String>();
             for (Url url : urls) {
-              result.add(url.toExternalForm());
+              externalUrls.add(url.toExternalForm());
             }
-            return result;
+            return new ClassInfo(isJdk, Collections.nCopies(externalUrls.size(), internalUrl), externalUrls);
           }
         }
+        internalUrls.add(internalUrl);
       }
-
-      List<String> httpRoot = PlatformDocumentationUtil.getHttpRoots(JavadocOrderRootType.getUrls(orderEntry), relPath);
-      if (httpRoot != null) {
-        return httpRoot;
+      if (!ContainerUtil.isEmpty(internalUrls)) {
+        return new ClassInfo(isJdk, internalUrls);
       }
     }
     return null;
@@ -761,9 +863,9 @@ public class JavaDocumentationProvider implements CodeDocumentationProvider, Ext
     String qName = aPackage.getQualifiedName();
     qName = qName.replace('.', '/') + '/' + PACKAGE_SUMMARY_FILE;
     for (PsiDirectory directory : aPackage.getDirectories()) {
-      List<String> url = findUrlForVirtualFile(aPackage.getProject(), directory.getVirtualFile(), qName);
-      if (url != null) {
-        return url;
+      ClassInfo urls = findUrlForVirtualFile(aPackage.getProject(), directory.getVirtualFile(), qName);
+      if (urls != null) {
+        return urls.externalDocUrls;
       }
     }
     return null;
@@ -781,7 +883,7 @@ public class JavaDocumentationProvider implements CodeDocumentationProvider, Ext
 
   @Override
   public boolean hasDocumentationFor(PsiElement element, PsiElement originalElement) {
-    return CompositeDocumentationProvider.hasUrlsFor(this, element, originalElement);
+    return hasUrlFor(element);
   }
 
   @Override
@@ -791,6 +893,19 @@ public class JavaDocumentationProvider implements CodeDocumentationProvider, Ext
 
   @Override
   public void promptToConfigureDocumentation(PsiElement element) {
+  }
+
+  @Nullable
+  @Override
+  public PsiElement getCustomDocumentationElement(@NotNull Editor editor, @NotNull PsiFile file, @Nullable PsiElement contextElement) {
+    PsiDocComment docComment = PsiTreeUtil.getParentOfType(contextElement, PsiDocComment.class, false);
+    if (docComment != null && JavaDocUtil.isInsidePackageInfo(docComment)) {
+      PsiDirectory directory = file.getContainingDirectory();
+      if (directory != null) {
+        return JavaDirectoryService.getInstance().getPackage(directory);
+      }
+    }
+    return null;
   }
 
   public static String fetchExternalJavadoc(PsiElement element, final Project project, final List<String> docURLs) {
@@ -813,5 +928,23 @@ public class JavaDocumentationProvider implements CodeDocumentationProvider, Ext
       }
     }
     return null;
+  }
+  
+  private static class ClassInfo {
+    private final boolean isInJdk;
+    /** These should be used to fetch documentation in IDEA code */
+    private final @NotNull List<String> internalDocUrls;
+    /** These are for viewing documentation in browser (jar:// urls here are replaced with http:// urls provided by built-in web server) */
+    private final @NotNull List<String> externalDocUrls;
+
+    private ClassInfo(boolean jdk, @NotNull List<String> docUrls) {
+      this(jdk, docUrls, docUrls);
+    }
+    
+    private ClassInfo(boolean jdk, @NotNull List<String> internalUrls, @NotNull List<String> externalUrls) {
+      isInJdk = jdk;
+      internalDocUrls = internalUrls;
+      externalDocUrls = externalUrls;
+    }
   }
 }

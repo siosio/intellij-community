@@ -43,6 +43,7 @@ import com.intellij.ui.switcher.SwitchTarget;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.JBInsets;
+import com.intellij.util.ui.JBSwingUtilities;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.update.Activatable;
@@ -115,6 +116,8 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar {
   private Rectangle myAutoPopupRec;
 
   private final DefaultActionGroup mySecondaryActions = new DefaultActionGroup();
+  private PopupStateModifier mySecondaryButtonPopupStateModifier = null;
+  private boolean myForceMinimumSize = false;
   private boolean myMinimalMode;
   private boolean myForceUseMacEnhancements;
 
@@ -242,6 +245,11 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar {
   }
 
   @Override
+  protected Graphics getComponentGraphics(Graphics graphics) {
+    return JBSwingUtilities.runGlobalCGTransform(this, super.getComponentGraphics(graphics));
+  }
+
+  @Override
   protected void paintComponent(final Graphics g) {
     if (doMacEnhancementsForMainToolbar()) {
       final Rectangle r = getBounds();
@@ -262,6 +270,10 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar {
         }
       }
     }
+  }
+
+  public void setSecondaryButtonPopupStateModifier(PopupStateModifier popupStateModifier) {
+    mySecondaryButtonPopupStateModifier = popupStateModifier;
   }
 
   private void fillToolBar(final List<AnAction> actions, boolean layoutSecondaries) {
@@ -304,7 +316,15 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar {
     }
 
     if (mySecondaryActions.getChildrenCount() > 0) {
-      mySecondaryActionsButton = new ActionButton(mySecondaryActions, myPresentationFactory.getPresentation(mySecondaryActions), myPlace, getMinimumButtonSize());
+      mySecondaryActionsButton = new ActionButton(mySecondaryActions, myPresentationFactory.getPresentation(mySecondaryActions), myPlace, getMinimumButtonSize()) {
+        @Override
+        @ButtonState
+        public int getPopState() {
+          return mySecondaryButtonPopupStateModifier != null && mySecondaryButtonPopupStateModifier.willModify()
+                 ? mySecondaryButtonPopupStateModifier.getModifiedPopupState()
+                 : super.getPopState();
+        }
+      };
       mySecondaryActionsButton.setNoIconsInPopup(true);
       add(mySecondaryActionsButton);
     }
@@ -334,6 +354,9 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar {
     if (customComponent == null) {
       customComponent = ((CustomComponentAction)action).createCustomComponent(presentation);
       presentation.putClientProperty(CustomComponentAction.CUSTOM_COMPONENT_PROPERTY, customComponent);
+    }
+    if (customComponent instanceof JCheckBox) {
+      customComponent.setBorder(JBUI.Borders.empty(0, 9, 0, 0));
     }
     tweakActionComponentUI(customComponent);
     return customComponent;
@@ -439,44 +462,41 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar {
       final int maxHeight = getMaxButtonHeight();
 
       if (myOrientation == SwingConstants.HORIZONTAL) {
-        int xOffset = insets.left;
+        int offset = 0;
         for (int i = 0; i < componentCount; i++) {
           final Rectangle r = bounds.get(i);
-          r.setBounds(xOffset, (height - maxHeight) / 2, maxWidth, maxHeight);
-          xOffset += maxWidth;
+          r.setBounds(insets.left + offset, insets.top + (height - maxHeight) / 2, maxWidth, maxHeight);
+          offset += maxWidth;
         }
       }
       else {
-        int yOffset = insets.top;
+        int offset = 0;
         for (int i = 0; i < componentCount; i++) {
           final Rectangle r = bounds.get(i);
-          r.setBounds((width - maxWidth) / 2, yOffset, maxWidth, maxHeight);
-          yOffset += maxHeight;
+          r.setBounds(insets.left + (width - maxWidth) / 2, insets.top + offset, maxWidth, maxHeight);
+          offset += maxHeight;
         }
       }
     }
     else {
       if (myOrientation == SwingConstants.HORIZONTAL) {
         final int maxHeight = getMaxButtonHeight();
-
-        int xOffset = insets.left;
-        final int yOffset = insets.top;
+        int offset = 0;
         for (int i = 0; i < componentCount; i++) {
           final Dimension d = getChildPreferredSize(i);
           final Rectangle r = bounds.get(i);
-          r.setBounds(xOffset, yOffset + (maxHeight - d.height) / 2, d.width, d.height);
-          xOffset += d.width;
+          r.setBounds(insets.left + offset, insets.top + (maxHeight - d.height) / 2, d.width, d.height);
+          offset += d.width;
         }
       }
       else {
         final int maxWidth = getMaxButtonWidth();
-        final int xOffset = insets.left;
-        int yOffset = insets.top;
+        int offset = 0;
         for (int i = 0; i < componentCount; i++) {
           final Dimension d = getChildPreferredSize(i);
           final Rectangle r = bounds.get(i);
-          r.setBounds(xOffset + (maxWidth - d.width) / 2, yOffset, d.width, d.height);
-          yOffset += d.height;
+          r.setBounds(insets.left + (maxWidth - d.width) / 2, insets.top + offset, d.width, d.height);
+          offset += d.height;
         }
       }
     }
@@ -496,11 +516,12 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar {
     boolean full = false;
 
     final Insets insets = getInsets();
+    int widthToFit = sizeToFit.width - insets.left - insets.right;
+    int heightToFit = sizeToFit.height - insets.top - insets.bottom;
 
     if (myOrientation == SwingConstants.HORIZONTAL) {
-      int eachX = insets.left;
-      int eachY = insets.top;
-      int maxHeight = 0;
+      int eachX = 0;
+      int maxHeight = heightToFit;
       for (int i = 0; i < componentCount; i++) {
         final Component eachComp = getComponent(i);
         final boolean isLast = i == componentCount - 1;
@@ -511,26 +532,26 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar {
         if (!full) {
           boolean inside;
           if (isLast) {
-            inside = eachX + eachBound.width <= sizeToFit.width;
+            inside = eachX + eachBound.width <= widthToFit;
           } else {
-            inside = eachX + eachBound.width + autoButtonSize <= sizeToFit.width;
+            inside = eachX + eachBound.width + autoButtonSize <= widthToFit;
           }
 
           if (inside) {
             if (eachComp == mySecondaryActionsButton) {
               assert isLast;
               if (sizeToFit.width != Integer.MAX_VALUE) {
-                eachBound.x = sizeToFit.width - eachBound.width;
-                eachX = (int)eachBound.getMaxX();
+                eachBound.x = sizeToFit.width - insets.right - eachBound.width;
+                eachX = (int)eachBound.getMaxX() - insets.left;
               }
               else {
-                eachBound.x = eachX;
+                eachBound.x = insets.left + eachX;
               }
             } else {
-              eachBound.x = eachX;
+              eachBound.x = insets.left + eachX;
               eachX += eachBound.width;
             }
-            eachBound.y = eachY;
+            eachBound.y = insets.top;
           }
           else {
             full = true;
@@ -539,7 +560,7 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar {
 
         if (full) {
           if (myAutoPopupRec == null) {
-            myAutoPopupRec = new Rectangle(eachX, eachY, sizeToFit.width - eachX - 1, sizeToFit.height - 1);
+            myAutoPopupRec = new Rectangle(insets.left + eachX, insets.top, widthToFit - eachX, heightToFit);
             myFirstOutsideIndex = i;
           }
           eachBound.x = Integer.MAX_VALUE;
@@ -557,21 +578,20 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar {
 
     }
     else {
-      int eachX = insets.left;
-      int eachY = insets.top;
+      int eachY = 0;
       for (int i = 0; i < componentCount; i++) {
         final Rectangle eachBound = new Rectangle(getChildPreferredSize(i));
         if (!full) {
           boolean outside;
           if (i < componentCount - 1) {
-            outside = eachY + eachBound.height + autoButtonSize < sizeToFit.height;
+            outside = eachY + eachBound.height + autoButtonSize < heightToFit;
           }
           else {
-            outside = eachY + eachBound.height < sizeToFit.height;
+            outside = eachY + eachBound.height < heightToFit;
           }
           if (outside) {
-            eachBound.x = eachX;
-            eachBound.y = eachY;
+            eachBound.x = insets.left;
+            eachBound.y = insets.top + eachY;
             eachY += eachBound.height;
           }
           else {
@@ -581,7 +601,7 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar {
 
         if (full) {
           if (myAutoPopupRec == null) {
-            myAutoPopupRec = new Rectangle(eachX, eachY, sizeToFit.width - 1, sizeToFit.height - eachY - 1);
+            myAutoPopupRec = new Rectangle(insets.left, insets.top + eachY, widthToFit, heightToFit - eachY);
             myFirstOutsideIndex = i;
           }
           eachBound.x = Integer.MAX_VALUE;
@@ -613,6 +633,8 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar {
     LOG.assertTrue(componentCount <= bounds.size());
 
     final Insets insets = getInsets();
+    int widthToFit = sizeToFit.width - insets.left - insets.right;
+    int heightToFit = sizeToFit.height - insets.top - insets.bottom;
 
     if (myAdjustTheSameSize) {
       if (myOrientation == SwingConstants.HORIZONTAL) {
@@ -620,18 +642,18 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar {
         final int maxHeight = getMaxButtonHeight();
 
         // Lay components out
-        int xOffset = insets.left;
-        int yOffset = insets.top;
+        int xOffset = 0;
+        int yOffset = 0;
         // Calculate max size of a row. It's not possible to make more than 3 row toolbar
-        final int maxRowWidth = Math.max(sizeToFit.width, componentCount * maxWidth / 3);
+        final int maxRowWidth = Math.max(widthToFit, componentCount * maxWidth / 3);
         for (int i = 0; i < componentCount; i++) {
           if (xOffset + maxWidth > maxRowWidth) { // place component at new row
-            xOffset = insets.left;
+            xOffset = 0;
             yOffset += maxHeight;
           }
 
           final Rectangle each = bounds.get(i);
-          each.setBounds(xOffset, yOffset, maxWidth, maxHeight);
+          each.setBounds(insets.left + xOffset, insets.top + yOffset, maxWidth, maxHeight);
 
           xOffset += maxWidth;
         }
@@ -641,18 +663,18 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar {
         final int maxHeight = getMaxButtonHeight();
 
         // Lay components out
-        int xOffset = insets.left;
-        int yOffset = insets.top;
+        int xOffset = 0;
+        int yOffset = 0;
         // Calculate max size of a row. It's not possible to make more then 3 column toolbar
-        final int maxRowHeight = Math.max(sizeToFit.height, componentCount * myMinimumButtonSize.height / 3);
+        final int maxRowHeight = Math.max(heightToFit, componentCount * myMinimumButtonSize.height / 3);
         for (int i = 0; i < componentCount; i++) {
           if (yOffset + maxHeight > maxRowHeight) { // place component at new row
-            yOffset = insets.top;
+            yOffset = 0;
             xOffset += maxWidth;
           }
 
           final Rectangle each = bounds.get(i);
-          each.setBounds(xOffset, yOffset, maxWidth, maxHeight);
+          each.setBounds(insets.left + xOffset, insets.top + yOffset, maxWidth, maxHeight);
 
           yOffset += maxHeight;
         }
@@ -670,19 +692,19 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar {
         }
 
         // Lay components out
-        int xOffset = insets.left;
-        int yOffset = insets.top;
+        int xOffset = 0;
+        int yOffset = 0;
         // Calculate max size of a row. It's not possible to make more then 3 row toolbar
-        final int maxRowWidth = Math.max(getWidth(), componentCount * myMinimumButtonSize.width / 3);
+        final int maxRowWidth = Math.max(widthToFit, componentCount * myMinimumButtonSize.width / 3);
         for (int i = 0; i < componentCount; i++) {
           final Dimension d = dims[i];
           if (xOffset + d.width > maxRowWidth) { // place component at new row
-            xOffset = insets.left;
+            xOffset = 0;
             yOffset += rowHeight;
           }
 
           final Rectangle each = bounds.get(i);
-          each.setBounds(xOffset, yOffset + (rowHeight - d.height) / 2, d.width, d.height);
+          each.setBounds(insets.left + xOffset, insets.top + yOffset + (rowHeight - d.height) / 2, d.width, d.height);
 
           xOffset += d.width;
         }
@@ -698,19 +720,19 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar {
         }
 
         // Lay components out
-        int xOffset = insets.left;
-        int yOffset = insets.top;
+        int xOffset = 0;
+        int yOffset = 0;
         // Calculate max size of a row. It's not possible to make more then 3 column toolbar
-        final int maxRowHeight = Math.max(getHeight(), componentCount * myMinimumButtonSize.height / 3);
+        final int maxRowHeight = Math.max(heightToFit, componentCount * myMinimumButtonSize.height / 3);
         for (int i = 0; i < componentCount; i++) {
           final Dimension d = dims[i];
           if (yOffset + d.height > maxRowHeight) { // place component at new row
-            yOffset = insets.top;
+            yOffset = 0;
             xOffset += rowWidth;
           }
 
           final Rectangle each = bounds.get(i);
-          each.setBounds(xOffset + (rowWidth - d.width) / 2, yOffset, d.width, d.height);
+          each.setBounds(insets.left + xOffset + (rowWidth - d.width) / 2, insets.top + yOffset, d.width, d.height);
 
           yOffset += d.height;
         }
@@ -788,9 +810,15 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar {
 
     return dimension;
   }
+  public void setForceMinimumSize(boolean force) {
+    myForceMinimumSize = force;
+  }
 
   @Override
   public Dimension getMinimumSize() {
+    if (myForceMinimumSize) {
+      return getPreferredSize();
+    }
     if (myLayoutPolicy == AUTO_LAYOUT_POLICY) {
       final Insets i = getInsets();
       return new Dimension(AllIcons.Ide.Link.getIconWidth() + i.left + i.right, myMinimumButtonSize.height + i.top + i.bottom);
@@ -995,12 +1023,7 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar {
       return;
     }
     if (myAutoPopupRec != null && myAutoPopupRec.contains(e.getPoint())) {
-      IdeFocusManager.getInstance(null).doWhenFocusSettlesDown(new Runnable() {
-        @Override
-        public void run() {
-          showAutoPopup();
-        }
-      });
+      IdeFocusManager.getInstance(null).doWhenFocusSettlesDown(() -> showAutoPopup());
     }
   }
 
@@ -1050,15 +1073,12 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar {
       .setTitle(null)
       .setCancelOnClickOutside(true)
       .setCancelOnOtherWindowOpen(true)
-      .setCancelCallback(new Computable<Boolean>() {
-        @Override
-        public Boolean compute() {
-          final boolean toClose = myActionManager.isActionPopupStackEmpty();
-          if (toClose) {
-            myUpdater.updateActions(false, true);
-          }
-          return toClose;
+      .setCancelCallback(() -> {
+        final boolean toClose = myActionManager.isActionPopupStackEmpty();
+        if (toClose) {
+          myUpdater.updateActions(false, true);
         }
+        return toClose;
       })
       .setCancelOnMouseOutCallback(new MouseChecker() {
         @Override
@@ -1235,7 +1255,7 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar {
     @Override
     public ActionCallback switchTo(boolean requestFocus) {
       myButton.click();
-      return new ActionCallback.Done();
+      return ActionCallback.DONE;
     }
 
     @Override
@@ -1322,5 +1342,11 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar {
   @TestOnly
   public Presentation getPresentation(AnAction action) {
     return myPresentationFactory.getPresentation(action);
+  }
+
+  public interface PopupStateModifier {
+    @ActionButtonComponent.ButtonState
+    int getModifiedPopupState();
+    boolean willModify();
   }
 }

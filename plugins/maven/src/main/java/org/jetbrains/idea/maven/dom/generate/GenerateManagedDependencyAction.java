@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -67,7 +67,7 @@ public class GenerateManagedDependencyAction extends GenerateDomElementAction {
       if (!dependenciesToOverride.isEmpty()) {
         return new WriteCommandAction<MavenDomDependency>(editor.getProject(), mavenModel.getXmlTag().getContainingFile()) {
           @Override
-          protected void run(Result result) throws Throwable {
+          protected void run(@NotNull Result result) throws Throwable {
             for (MavenDomDependency parentDependency : dependenciesToOverride) {
               String groupId = parentDependency.getGroupId().getStringValue();
               String artifactId = parentDependency.getArtifactId().getStringValue();
@@ -115,15 +115,13 @@ public class GenerateManagedDependencyAction extends GenerateDomElementAction {
   public static Map<DependencyConflictId, MavenDomDependency> collectManagingDependencies(@NotNull final MavenDomProjectModel model) {
     final Map<DependencyConflictId, MavenDomDependency> dependencies = new HashMap<DependencyConflictId, MavenDomDependency>();
 
-    Processor<MavenDomDependency> collectProcessor = new Processor<MavenDomDependency>() {
-      public boolean process(MavenDomDependency dependency) {
-        DependencyConflictId id = DependencyConflictId.create(dependency);
-        if (id != null && !dependencies.containsKey(id)) {
-          dependencies.put(id, dependency);
-        }
-
-        return false;
+    Processor<MavenDomDependency> collectProcessor = dependency -> {
+      DependencyConflictId id = DependencyConflictId.create(dependency);
+      if (id != null && !dependencies.containsKey(id)) {
+        dependencies.put(id, dependency);
       }
+
+      return false;
     };
 
     MavenDomProjectProcessorUtils.processDependenciesInDependencyManagement(model, collectProcessor, model.getManager().getProject());

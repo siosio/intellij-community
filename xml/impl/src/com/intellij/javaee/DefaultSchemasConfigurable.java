@@ -53,7 +53,7 @@ public class DefaultSchemasConfigurable implements Configurable {
   @NotNull
   private String getDoctype() {
     if (myHtml4RadioButton.isSelected()) {
-      return XmlUtil.XHTML_URI;
+      return XmlUtil.XHTML4_SCHEMA_LOCATION;
     }
     if (myHtml5RadioButton.isSelected()) {
       return Html5SchemaProvider.getHtml5SchemaLocation();
@@ -70,7 +70,7 @@ public class DefaultSchemasConfigurable implements Configurable {
   @Nullable
   @Override
   public String getHelpTopic() {
-    return null;
+    return "reference.default.schemas";
   }
 
   @Nullable
@@ -123,15 +123,12 @@ public class DefaultSchemasConfigurable implements Configurable {
     else {
       myOtherRadioButton.setSelected(true);
       myDoctypeTextField.setEnabled(true);
-      UIUtil.invokeLaterIfNeeded(new Runnable() {
-        @Override
-        public void run() {
-          try {
-            myDoctypeTextField.setText(doctype);
-          }
-          catch (Exception e) {
-            throw new RuntimeException(e);
-          }
+      UIUtil.invokeLaterIfNeeded(() -> {
+        try {
+          myDoctypeTextField.setText(doctype);
+        }
+        catch (Exception e) {
+          throw new RuntimeException(e);
         }
       });
     }

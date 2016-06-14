@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,44 +31,35 @@ public class FileUtilPerformanceTest {
   public void toCanonicalPath() throws Exception {
     assertEquals(myCanonicalPath, FileUtil.toCanonicalPath(myTestPath));
 
-    PlatformTestUtil.startPerformanceTest("", 1000, new ThrowableRunnable() {
-      @Override
-      public void run() throws Throwable {
-        for (int i = 0; i < 1000000; ++i) {
-          final String canonicalPath = FileUtil.toCanonicalPath(myTestPath, '/');
-          assert canonicalPath != null && canonicalPath.length() == 18 : canonicalPath;
-        }
+    PlatformTestUtil.startPerformanceTest("", 1000, () -> {
+      for (int i = 0; i < 1000000; ++i) {
+        final String canonicalPath = FileUtil.toCanonicalPath(myTestPath, '/');
+        assert canonicalPath != null && canonicalPath.length() == 18 : canonicalPath;
       }
-    }).cpuBound().assertTiming();
+    }).cpuBound().useLegacyScaling().assertTiming();
   }
 
   @Test
   public void toCanonicalPathSimple() throws Exception {
     assertEquals(mySimpleTestPath, FileUtil.toCanonicalPath(mySimpleTestPath));
 
-    PlatformTestUtil.startPerformanceTest("", 50, new ThrowableRunnable() {
-      @Override
-      public void run() throws Throwable {
-        for (int i = 0; i < 1000000; ++i) {
-          final String canonicalPath = FileUtil.toCanonicalPath(mySimpleTestPath, '/');
-          assert canonicalPath != null && canonicalPath.length() == 8 : canonicalPath;
-        }
+    PlatformTestUtil.startPerformanceTest("", 50, () -> {
+      for (int i = 0; i < 1000000; ++i) {
+        final String canonicalPath = FileUtil.toCanonicalPath(mySimpleTestPath, '/');
+        assert canonicalPath != null && canonicalPath.length() == 8 : canonicalPath;
       }
-    }).cpuBound().assertTiming();
+    }).cpuBound().useLegacyScaling().assertTiming();
   }
 
   @Test
   public void isAncestor() throws Exception {
     assertTrue(FileUtil.isAncestor(myTestPath, myCanonicalPath, false));
 
-    PlatformTestUtil.startPerformanceTest("", 4000, new ThrowableRunnable() {
-      @Override
-      public void run() throws Throwable {
-        for (int i = 0; i < 1000000; ++i) {
-          assert FileUtil.isAncestor(myTestPath, myCanonicalPath, false);
-          assert !FileUtil.isAncestor(myTestPath, myCanonicalPath, true);
-        }
+    PlatformTestUtil.startPerformanceTest("", 4000, () -> {
+      for (int i = 0; i < 1000000; ++i) {
+        assert FileUtil.isAncestor(myTestPath, myCanonicalPath, false);
+        assert !FileUtil.isAncestor(myTestPath, myCanonicalPath, true);
       }
-    }).cpuBound().assertTiming();
+    }).cpuBound().useLegacyScaling().assertTiming();
   }
 }

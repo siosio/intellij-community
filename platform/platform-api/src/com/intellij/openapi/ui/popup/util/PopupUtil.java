@@ -21,10 +21,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.ui.MessageType;
-import com.intellij.openapi.ui.popup.Balloon;
-import com.intellij.openapi.ui.popup.BalloonBuilder;
-import com.intellij.openapi.ui.popup.JBPopup;
-import com.intellij.openapi.ui.popup.JBPopupFactory;
+import com.intellij.openapi.ui.popup.*;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.openapi.wm.IdeFrame;
 import com.intellij.openapi.wm.WindowManager;
@@ -118,8 +115,40 @@ public class PopupUtil {
   }
 
   public static void showBalloonForActiveFrame(@NotNull final String message, final MessageType type) {
-    final Runnable runnable = new Runnable() {
-      public void run() {
+    final Runnable runnable = () -> {
+      final IdeFrame frame = IdeFocusManager.findInstance().getLastFocusedFrame();
+      if (frame == null) {
+        final Project[] projects = ProjectManager.getInstance().getOpenProjects();
+        final Project project = projects == null || projects.length == 0 ? ProjectManager.getInstance().getDefaultProject() : projects[0];
+        final JFrame jFrame = WindowManager.getInstance().getFrame(project);
+        if (jFrame != null) {
+          showBalloonForComponent(jFrame, message, type, true, project);
+        } else {
+          LOG.info("Can not get component to show message: " + message);
+        }
+        return;
+      }
+      showBalloonForComponent(frame.getComponent(), message, type, true, frame.getProject());
+    };
+    UIUtil.invokeLaterIfNeeded(runnable);
+  }
+
+  public static void showBalloonForActiveComponent(@NotNull final String message, final MessageType type) {
+    Runnable runnable = () -> {
+      Window[] windows = Window.getWindows();
+      Window targetWindow = null;
+      for (Window each : windows) {
+        if (each.isActive()) {
+          targetWindow = each;
+          break;
+        }
+      }
+
+      if (targetWindow == null) {
+        targetWindow = JOptionPane.getRootFrame();
+      }
+
+      if (targetWindow == null) {
         final IdeFrame frame = IdeFocusManager.findInstance().getLastFocusedFrame();
         if (frame == null) {
           final Project[] projects = ProjectManager.getInstance().getOpenProjects();
@@ -133,44 +162,8 @@ public class PopupUtil {
           return;
         }
         showBalloonForComponent(frame.getComponent(), message, type, true, frame.getProject());
-      }
-    };
-    UIUtil.invokeLaterIfNeeded(runnable);
-  }
-
-  public static void showBalloonForActiveComponent(@NotNull final String message, final MessageType type) {
-    Runnable runnable = new Runnable() {
-      public void run() {
-        Window[] windows = Window.getWindows();
-        Window targetWindow = null;
-        for (Window each : windows) {
-          if (each.isActive()) {
-            targetWindow = each;
-            break;
-          }
-        }
-
-        if (targetWindow == null) {
-          targetWindow = JOptionPane.getRootFrame();
-        }
-
-        if (targetWindow == null) {
-          final IdeFrame frame = IdeFocusManager.findInstance().getLastFocusedFrame();
-          if (frame == null) {
-            final Project[] projects = ProjectManager.getInstance().getOpenProjects();
-            final Project project = projects == null || projects.length == 0 ? ProjectManager.getInstance().getDefaultProject() : projects[0];
-            final JFrame jFrame = WindowManager.getInstance().getFrame(project);
-            if (jFrame != null) {
-              showBalloonForComponent(jFrame, message, type, true, project);
-            } else {
-              LOG.info("Can not get component to show message: " + message);
-            }
-            return;
-          }
-          showBalloonForComponent(frame.getComponent(), message, type, true, frame.getProject());
-        } else {
-          showBalloonForComponent(targetWindow, message, type, true, null);
-        }
+      } else {
+        showBalloonForComponent(targetWindow, message, type, true, null);
       }
     };
     UIUtil.invokeLaterIfNeeded(runnable);
@@ -204,5 +197,24 @@ public class PopupUtil {
     if(!comboBox.isPopupVisible() || component == null) return false;
     ComboPopup popup = ReflectionUtil.getField(comboBox.getUI().getClass(), comboBox.getUI(), ComboPopup.class, "popup");
     return popup != null && SwingUtilities.isDescendingFrom(popup.getList(), component);
+  }
+
+  public static boolean handleEscKeyEvent() {
+    MenuSelectionManager menuSelectionManager = MenuSelectionManager.defaultManager();
+    MenuElement[] selectedPath = menuSelectionManager.getSelectedPath();
+    if (selectedPath.length > 0) { // hide popup menu if any
+      menuSelectionManager.clearSelectedPath();
+      return true;
+    }
+    else {
+      if (ApplicationManager.getApplication() == null) {
+        return false;
+      }
+      final StackingPopupDispatcher popupDispatcher = StackingPopupDispatcher.getInstance();
+      if (popupDispatcher != null && !popupDispatcher.isPopupFocused()) {
+        return false;
+      }
+      return true;
+    }
   }
 }

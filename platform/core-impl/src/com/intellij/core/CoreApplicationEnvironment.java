@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -69,7 +69,6 @@ import com.intellij.psi.stubs.StubTreeLoader;
 import com.intellij.util.Consumer;
 import com.intellij.util.Function;
 import com.intellij.util.Processor;
-import com.intellij.util.messages.MessageBusFactory;
 import org.jetbrains.annotations.NotNull;
 import org.picocontainer.MutablePicoContainer;
 
@@ -112,7 +111,7 @@ public class CoreApplicationEnvironment {
     }, null));
 
     VirtualFileSystem[] fs = {myLocalFileSystem, myJarFileSystem};
-    VirtualFileManagerImpl virtualFileManager = new VirtualFileManagerImpl(fs, MessageBusFactory.newMessageBus(myApplication));
+    VirtualFileManagerImpl virtualFileManager = new VirtualFileManagerImpl(fs,  myApplication.getMessageBus());
     registerComponentInstance(appContainer, VirtualFileManager.class, virtualFileManager);
 
     registerApplicationService(EncodingManager.class, new CoreEncodingRegistry());
@@ -300,7 +299,7 @@ public class CoreApplicationEnvironment {
 
   public static <T> void registerExtensionPoint(@NotNull ExtensionsArea area, @NotNull String name, @NotNull Class<? extends T> aClass) {
     if (!area.hasExtensionPoint(name)) {
-      ExtensionPoint.Kind kind = aClass.isInterface() || (aClass.getModifiers() & Modifier.ABSTRACT) != 0 ? ExtensionPoint.Kind.INTERFACE : ExtensionPoint.Kind.BEAN_CLASS;
+      ExtensionPoint.Kind kind = aClass.isInterface() || Modifier.isAbstract(aClass.getModifiers()) ? ExtensionPoint.Kind.INTERFACE : ExtensionPoint.Kind.BEAN_CLASS;
       area.registerExtensionPoint(name, aClass.getName(), kind);
     }
   }

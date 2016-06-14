@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,10 +19,7 @@ import com.intellij.openapi.components.PersistentStateComponent;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.DefaultJDOMExternalizer;
-import com.intellij.openapi.util.InvalidDataException;
-import com.intellij.openapi.util.JDOMExternalizableStringList;
-import com.intellij.openapi.util.WriteExternalException;
+import com.intellij.openapi.util.*;
 import com.intellij.psi.*;
 import com.intellij.psi.util.TypeConversionUtil;
 import com.intellij.util.containers.ContainerUtil;
@@ -33,16 +30,16 @@ import org.jetbrains.annotations.Nullable;
 import java.util.*;
 
 /**
- * User: anna
- * Date: 1/25/11
+ * @author anna
+ * @since 25.01.2011
  */
 public abstract class NullableNotNullManager implements PersistentStateComponent<Element> {
   private static final Logger LOG = Logger.getInstance("#" + NullableNotNullManager.class.getName());
 
   public String myDefaultNullable = AnnotationUtil.NULLABLE;
   public String myDefaultNotNull = AnnotationUtil.NOT_NULL;
-  public final JDOMExternalizableStringList myNullables = new JDOMExternalizableStringList();
-  public final JDOMExternalizableStringList myNotNulls = new JDOMExternalizableStringList();
+  @SuppressWarnings("deprecation") public final JDOMExternalizableStringList myNullables = new JDOMExternalizableStringList();
+  @SuppressWarnings("deprecation") public final JDOMExternalizableStringList myNotNulls = new JDOMExternalizableStringList();
 
   private static final String JAVAX_ANNOTATION_NULLABLE = "javax.annotation.Nullable";
   private static final String JAVAX_ANNOTATION_NONNULL = "javax.annotation.Nonnull";
@@ -106,12 +103,10 @@ public abstract class NullableNotNullManager implements PersistentStateComponent
     if (annotation == null) {
       return null;
     }
-    else {
-      if (!acceptContainer && isContainerAnnotation(annotation)) {
-        return null;
-      }
-      return annotation.getQualifiedName();
+    if (!acceptContainer && isContainerAnnotation(annotation)) {
+      return null;
     }
+    return annotation.getQualifiedName();
   }
 
   @Nullable
@@ -139,21 +134,54 @@ public abstract class NullableNotNullManager implements PersistentStateComponent
     return findNullabilityAnnotationWithDefault(owner, checkBases, false);
   }
 
+  @Nullable
+  public PsiAnnotation copyNotNullAnnotation(@NotNull PsiModifierListOwner original, @NotNull PsiModifierListOwner generated) {
+    return copyAnnotation(getNotNullAnnotation(original, false), generated);
+  }
+
+  @Nullable
+  public PsiAnnotation copyNullableAnnotation(@NotNull PsiModifierListOwner original, @NotNull PsiModifierListOwner generated) {
+    return copyAnnotation(getNullableAnnotation(original, false), generated);
+  }
+
+  @Nullable
+  public PsiAnnotation copyNullableOrNotNullAnnotation(@NotNull PsiModifierListOwner original, @NotNull PsiModifierListOwner generated) {
+    PsiAnnotation annotation = getNullableAnnotation(original, false);
+    if (annotation == null) annotation = getNotNullAnnotation(original, false);
+    return copyAnnotation(annotation, generated);
+  }
+
+  @Nullable
+  private PsiAnnotation copyAnnotation(PsiAnnotation annotation, PsiModifierListOwner target) {
+    // type annotations are part of target's type and should not to be copied explicitly to avoid duplication
+    if (annotation != null && !AnnotationTargetUtil.isTypeAnnotation(annotation)) {
+      String qualifiedName = checkContainer(annotation, false);
+      if (qualifiedName != null) {
+        PsiModifierList modifierList = target.getModifierList();
+        if (modifierList != null && modifierList.findAnnotation(qualifiedName) == null) {
+          return modifierList.addAnnotation(qualifiedName);
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /** @deprecated use {@link #copyNotNullAnnotation(PsiModifierListOwner, PsiModifierListOwner)} (to be removed in IDEA 17) */
+  @SuppressWarnings("unused")
   public PsiAnnotation copyNotNullAnnotation(PsiModifierListOwner owner) {
     return copyAnnotation(owner, getNotNullAnnotation(owner, false));
   }
 
+  /** @deprecated use {@link #copyNullableOrNotNullAnnotation(PsiModifierListOwner, PsiModifierListOwner)} (to be removed in IDEA 17) */
+  @SuppressWarnings("unused")
   public PsiAnnotation copyNullableAnnotation(PsiModifierListOwner owner) {
     return copyAnnotation(owner, getNullableAnnotation(owner, false));
   }
 
-  private PsiAnnotation copyAnnotation(PsiModifierListOwner owner,
-                                       PsiAnnotation annotation) {
-    final String notNull = checkContainer(annotation, false);
-    if (notNull != null) {
-      return JavaPsiFacade.getElementFactory(owner.getProject()).createAnnotationFromText("@" + notNull, owner);
-    }
-    return null;
+  private PsiAnnotation copyAnnotation(PsiModifierListOwner owner, PsiAnnotation annotation) {
+    String notNull = checkContainer(annotation, false);
+    return notNull != null ? JavaPsiFacade.getElementFactory(owner.getProject()).createAnnotationFromText("@" + notNull, owner) : null;
   }
 
   @Nullable
@@ -184,15 +212,35 @@ public abstract class NullableNotNullManager implements PersistentStateComponent
     if (type == null || TypeConversionUtil.isPrimitiveAndNotNull(type)) return null;
 
     // even if javax.annotation.Nullable is not configured, it should still take precedence over ByDefault annotations
-    if (AnnotationUtil.isAnnotated(owner, nullable ? Arrays.asList(DEFAULT_NOT_NULLS) : Arrays.asList(DEFAULT_NULLABLES), checkBases, false)) {
+    if (AnnotationUtil.isAnnotated(owner, Arrays.asList(nullable ? DEFAULT_NOT_NULLS : DEFAULT_NULLABLES), checkBases, false)) {
       return null;
     }
 
     if (!nullable && hasHardcodedContracts(owner)) {
       return null;
     }
-    
+
+    if (owner instanceof PsiParameter && !nullable && checkBases) {
+      List<PsiParameter> superParameters = AnnotationUtil.getSuperAnnotationOwners((PsiParameter)owner);
+      if (!superParameters.isEmpty()) {
+        return takeAnnotationFromSuperParameters((PsiParameter)owner, superParameters);
+      }
+    }
+
     return findNullabilityDefaultInHierarchy(owner, nullable);
+  }
+
+  private PsiAnnotation takeAnnotationFromSuperParameters(@NotNull PsiParameter owner, final List<PsiParameter> superOwners) {
+    return RecursionManager.doPreventingRecursion(owner, true, new Computable<PsiAnnotation>() {
+      @Override
+      public PsiAnnotation compute() {
+        for (PsiParameter superOwner : superOwners) {
+          PsiAnnotation anno = findNullabilityAnnotationWithDefault(superOwner, false, false);
+          if (anno != null) return anno;
+        }
+        return null;
+      }
+    });
   }
 
   private PsiAnnotation findPlainNullabilityAnnotation(@NotNull PsiModifierListOwner owner, boolean checkBases) {
@@ -262,19 +310,14 @@ public abstract class NullableNotNullManager implements PersistentStateComponent
     PsiElement declaration = element == null ? null : element.resolve();
     if (!(declaration instanceof PsiClass)) return false;
 
-    if (!AnnotationUtil.isAnnotated((PsiClass)declaration,
-                                     nullable ? JAVAX_ANNOTATION_NULLABLE : JAVAX_ANNOTATION_NONNULL,
-                                     false,
-                                     true)) {
-      return false;
-    }
+    String fqn = nullable ? JAVAX_ANNOTATION_NULLABLE : JAVAX_ANNOTATION_NONNULL;
+    if (!AnnotationUtil.isAnnotated((PsiClass)declaration, fqn, false, true)) return false;
 
     PsiAnnotation tqDefault = AnnotationUtil.findAnnotation((PsiClass)declaration, true, "javax.annotation.meta.TypeQualifierDefault");
     if (tqDefault == null) return false;
 
     Set<PsiAnnotation.TargetType> required = AnnotationTargetUtil.extractRequiredAnnotationTargets(tqDefault.findAttributeValue(null));
-    if (required == null) return false;
-    return required.isEmpty() || ContainerUtil.intersects(required, Arrays.asList(placeTargetTypes));
+    return required != null && (required.isEmpty() || ContainerUtil.intersects(required, Arrays.asList(placeTargetTypes)));
   }
 
   @NotNull
@@ -308,6 +351,7 @@ public abstract class NullableNotNullManager implements PersistentStateComponent
     return true;
   }
 
+  @SuppressWarnings("deprecation")
   @Override
   public Element getState() {
     final Element component = new Element("component");
@@ -325,6 +369,7 @@ public abstract class NullableNotNullManager implements PersistentStateComponent
     return component;
   }
 
+  @SuppressWarnings("deprecation")
   @Override
   public void loadState(Element state) {
     try {

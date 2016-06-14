@@ -31,12 +31,15 @@ import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.pom.Navigatable;
+import com.intellij.util.NullableFunction;
+import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * @author max
@@ -69,8 +72,20 @@ public class ChangesUtil {
     return revision == null ? null : revision.getFile();
   }
 
-  public static AbstractVcs getVcsForChange(Change change, final Project project) {
+  @Nullable
+  public static AbstractVcs getVcsForChange(@NotNull Change change, @NotNull Project project) {
     return ProjectLevelVcsManager.getInstance(project).getVcsFor(getFilePath(change));
+  }
+
+  @NotNull
+  public static Set<AbstractVcs> getAffectedVcses(@NotNull Collection<Change> changes, @NotNull final Project project) {
+    return ContainerUtil.map2SetNotNull(changes, new NullableFunction<Change, AbstractVcs>() {
+      @Nullable
+      @Override
+      public AbstractVcs fun(@NotNull Change change) {
+        return getVcsForChange(change, project);
+      }
+    });
   }
 
   public static AbstractVcs getVcsForFile(VirtualFile file, Project project) {
@@ -91,7 +106,7 @@ public class ChangesUtil {
     @NotNull private final Set<String> myDuplicatesControlSet = new HashSet<String>();
 
     public void add(@NotNull FilePath file) {
-      final String path = file.getIOFile().getAbsolutePath();
+      final String path = file.getPath();
       if (! myDuplicatesControlSet.contains(path)) {
         myResult.add(file);
         myDuplicatesControlSet.add(path);
@@ -156,22 +171,31 @@ public class ChangesUtil {
     return result;
   }
 
-  public static VirtualFile[] getFilesFromChanges(final Collection<Change> changes) {
-    ArrayList<VirtualFile> files = new ArrayList<VirtualFile>();
-    for (Change change : changes) {
-      final ContentRevision afterRevision = change.getAfterRevision();
-      if (afterRevision != null) {
-        FilePath filePath = afterRevision.getFile();
-        VirtualFile file = filePath.getVirtualFile();
-        if (file == null || !file.isValid()) {
-          file = LocalFileSystem.getInstance().refreshAndFindFileByPath(filePath.getPath());
-        }
-        if (file != null && file.isValid()) {
-          files.add(file);
-        }
-      }
+  @NotNull
+  public static VirtualFile[] getFilesFromChanges(@NotNull Collection<Change> changes) {
+    return VfsUtilCore.toVirtualFileArray(getAfterRevisionsFiles(changes));
+  }
+
+  @NotNull
+  public static List<VirtualFile> getAfterRevisionsFiles(@NotNull Collection<Change> changes) {
+    return changes.stream()
+      .map(Change::getAfterRevision)
+      .filter(Objects::nonNull)
+      .map(ContentRevision::getFile)
+      .map(ChangesUtil::refreshAndFind)
+      .filter(Objects::nonNull)
+      .collect(Collectors.toList());
+  }
+
+  @Nullable
+  private static VirtualFile refreshAndFind(@NotNull FilePath filePath) {
+    VirtualFile file = filePath.getVirtualFile();
+
+    if (file == null || !file.isValid()) {
+      file = LocalFileSystem.getInstance().refreshAndFindFileByPath(filePath.getPath());
     }
-    return VfsUtilCore.toVirtualFileArray(files);
+
+    return file != null && file.isValid() ? file : null;
   }
 
   public static Navigatable[] getNavigatableArray(final Project project, final VirtualFile[] selectedFiles) {
@@ -442,5 +466,34 @@ public class ChangesUtil {
 
   public static String getDefaultChangeListName() {
     return VcsBundle.message("changes.default.changelist.name");
+  }
+
+  /**
+   * Find common ancestor for changes (included both before and after files)
+   */
+  @Nullable
+  public static File findCommonAncestor(@NotNull Collection<Change> changes) {
+    File ancestor = null;
+    for (Change change : changes) {
+      File currentChangeAncestor = getCommonBeforeAfterAncestor(change);
+      if (currentChangeAncestor == null) return null;
+      if (ancestor == null) {
+        ancestor = currentChangeAncestor;
+      }
+      else {
+        ancestor = FileUtil.findAncestor(ancestor, currentChangeAncestor);
+        if (ancestor == null) return null;
+      }
+    }
+    return ancestor;
+  }
+
+  @Nullable
+  private static File getCommonBeforeAfterAncestor(@NotNull Change change) {
+    FilePath before = getBeforePath(change);
+    FilePath after = getAfterPath(change);
+    return before == null
+           ? ObjectUtils.assertNotNull(after).getIOFile()
+           : after == null ? before.getIOFile() : FileUtil.findAncestor(before.getIOFile(), after.getIOFile());
   }
 }

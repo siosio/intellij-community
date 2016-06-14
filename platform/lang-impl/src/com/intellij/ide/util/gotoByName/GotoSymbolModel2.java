@@ -16,6 +16,7 @@
 package com.intellij.ide.util.gotoByName;
 
 import com.intellij.ide.IdeBundle;
+import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.lang.Language;
 import com.intellij.navigation.ChooseByNameContributor;
 import com.intellij.navigation.ChooseByNameRegistry;
@@ -77,18 +78,24 @@ public class GotoSymbolModel2 extends FilteringGotoByModel<Language> {
 
   @Override
   public char getCheckBoxMnemonic() {
-    // Some combination like Alt+N, Ant+O, etc are a dead sysmbols, therefore
+    // Some combination like Alt+N, Ant+O, etc are a dead symbols, therefore
     // we have to change mnemonics for Mac users.
     return SystemInfo.isMac?'P':'n';
   }
 
   @Override
   public boolean loadInitialCheckBoxState() {
-    return false;
+    PropertiesComponent propertiesComponent = PropertiesComponent.getInstance(myProject);
+    return Boolean.TRUE.toString().equals(propertiesComponent.getValue("GoToClass.toSaveIncludeLibraries")) &&
+           Boolean.TRUE.toString().equals(propertiesComponent.getValue("GoToSymbol.includeLibraries"));
   }
 
   @Override
   public void saveInitialCheckBoxState(boolean state) {
+    PropertiesComponent propertiesComponent = PropertiesComponent.getInstance(myProject);
+    if (Boolean.TRUE.toString().equals(propertiesComponent.getValue("GoToClass.toSaveIncludeLibraries"))){
+      propertiesComponent.setValue("GoToSymbol.includeLibraries", Boolean.toString(state));
+    }
   }
 
   @Override
@@ -96,18 +103,20 @@ public class GotoSymbolModel2 extends FilteringGotoByModel<Language> {
     for(ChooseByNameContributor c: getContributors()) {
       if (c instanceof GotoClassContributor) {
         String result = ((GotoClassContributor) c).getQualifiedName((NavigationItem) element);
-        if (result != null) return result;
+        if (result != null) {
+          return result;
+        }
       }
     }
 
+    String elementName = getElementName(element);
+    if (elementName == null) return null;
+    
     if (element instanceof PsiElement) {
-      final PsiElement psiElement = (PsiElement)element;
-
-      final String containerText = SymbolPresentationUtil.getSymbolContainerText(psiElement);
-      return containerText + "." + getElementName(element);
+      return SymbolPresentationUtil.getSymbolContainerText((PsiElement)element) + "." + elementName;
     }
 
-    return getElementName(element);
+    return elementName;
   }
 
   @Override

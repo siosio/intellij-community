@@ -16,13 +16,19 @@
 package com.intellij.execution.junit;
 
 import com.intellij.execution.CantRunException;
+import com.intellij.execution.ExecutionBundle;
+import com.intellij.execution.JavaExecutionUtil;
 import com.intellij.execution.configurations.JavaRunConfigurationModule;
 import com.intellij.execution.configurations.RuntimeConfigurationError;
 import com.intellij.execution.configurations.RuntimeConfigurationException;
+import com.intellij.execution.configurations.RuntimeConfigurationWarning;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.util.JavaParametersUtil;
 import com.intellij.execution.util.ProgramParametersUtil;
+import com.intellij.openapi.module.Module;
 import com.intellij.psi.*;
+import com.intellij.psi.search.GlobalSearchScope;
+import com.intellij.refactoring.listeners.RefactoringElementListener;
 
 /**
 * User: anna
@@ -31,6 +37,11 @@ import com.intellij.psi.*;
 class TestCategory extends TestPackage {
   public TestCategory(JUnitConfiguration configuration, ExecutionEnvironment environment) {
     super(configuration, environment);
+  }
+
+  @Override
+  protected GlobalSearchScope filterScope(JUnitConfiguration.Data data) throws CantRunException {
+    return GlobalSearchScope.allScope(getConfiguration().getProject());
   }
 
   @Override
@@ -46,12 +57,14 @@ class TestCategory extends TestPackage {
     if (getSourceScope() == null) {
       configurationModule.checkForWarning();
     }
-    configurationModule.findNotNullClass(category);
-  }
-
-  @Override
-  protected PsiPackage getPackage(JUnitConfiguration.Data data) throws CantRunException {
-    return JavaPsiFacade.getInstance(getConfiguration().getProject()).findPackage("");
+    final Module module = configurationModule.getModule();
+    if (module != null) {
+      final PsiClass psiClass = JavaExecutionUtil.findMainClass(getConfiguration().getProject(), category, GlobalSearchScope.moduleWithDependenciesAndLibrariesScope(module));
+      if (psiClass == null) {
+        throw new RuntimeConfigurationWarning(
+          ExecutionBundle.message("class.not.found.in.module.error.message", category, configurationModule.getModuleName()));
+      }
+    }
   }
 
   @Override
@@ -66,5 +79,10 @@ class TestCategory extends TestPackage {
                                        PsiPackage testPackage,
                                        PsiDirectory testDir) {
     return false;
+  }
+
+  @Override
+  public RefactoringElementListener getListener(final PsiElement element, final JUnitConfiguration configuration) {
+    return RefactoringListeners.getClassOrPackageListener(element, configuration.myCategory);
   }
 }

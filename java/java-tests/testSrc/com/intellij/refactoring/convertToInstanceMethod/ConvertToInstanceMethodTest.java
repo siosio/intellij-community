@@ -2,6 +2,7 @@ package com.intellij.refactoring.convertToInstanceMethod;
 
 import com.intellij.JavaTestUtil;
 import com.intellij.codeInsight.TargetElementUtil;
+import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiMethod;
 import com.intellij.psi.PsiModifier;
@@ -35,6 +36,11 @@ public class ConvertToInstanceMethodTest extends LightRefactoringTestCase {
   public void testInterfaceTypeParameter() throws Exception { doTest(0); }
 
   public void testJavadocParameter() throws Exception { doTest(0); }
+
+  public void testConflictingParameterName() throws Exception {
+    doTest(0);
+  }
+
   public void testVisibilityConflict() throws Exception {
     try {
       doTest(0, PsiModifier.PRIVATE);
@@ -50,7 +56,7 @@ public class ConvertToInstanceMethodTest extends LightRefactoringTestCase {
   }
 
   private void doTest(final int targetParameter, final String visibility) throws Exception {
-    final String filePath = "/refactoring/convertToInstanceMethod/" + getTestName(false) + ".java";
+    final String filePath = getBasePath() + getTestName(false) + ".java";
     configureByFile(filePath);
     final PsiElement targetElement = TargetElementUtil.findTargetElement(getEditor(), TargetElementUtil.ELEMENT_NAME_ACCEPTED);
     assertTrue("<caret> is not on method name", targetElement instanceof PsiMethod);
@@ -60,5 +66,14 @@ public class ConvertToInstanceMethodTest extends LightRefactoringTestCase {
                                          visibility).run();
     checkResultByFile(filePath + ".after");
 
+  }
+
+  protected String getBasePath() {
+    return "/refactoring/convertToInstanceMethod/";
+  }
+
+  @Override
+  protected LanguageLevel getLanguageLevel() {
+    return LanguageLevel.JDK_1_6;
   }
 }

@@ -23,6 +23,7 @@ import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
 import com.jetbrains.python.PyBundle;
 import com.jetbrains.python.PythonFileType;
+import com.jetbrains.python.documentation.docstrings.DocStringFormat;
 import com.jetbrains.python.fixtures.PyTestCase;
 import com.jetbrains.python.psi.LanguageLevel;
 import com.jetbrains.python.psi.PyFunction;
@@ -93,6 +94,7 @@ public class PyChangeSignatureTest extends PyTestCase {
   }
 
   public void testUpdateDocstring() {
+    getIndentOptions().INDENT_SIZE = 2;
     final PyParameterInfo a = new PyParameterInfo(0, "a", null, false);
     final PyParameterInfo d1 = new PyParameterInfo(1, "d", "1", true);
     d1.setName("d1");
@@ -100,7 +102,25 @@ public class PyChangeSignatureTest extends PyTestCase {
   }
 
   public void testFixDocstringRemove() {
+    getIndentOptions().INDENT_SIZE = 2;
     doChangeSignatureTest(null, Arrays.asList(new PyParameterInfo(0, "a", null, false)));
+  }
+
+  // PY-9795
+  public void testFixGoogleDocStringRemoveMultiple() {
+    runWithDocStringFormat(DocStringFormat.GOOGLE, () -> doChangeSignatureTest(null, Arrays.asList(new PyParameterInfo(0, "a", null, false),
+                                                                                               new PyParameterInfo(3, "d", null, false))));
+  }
+
+  // PY-16761
+  public void testGoogleDocStringRemoveVarargs() {
+    runWithDocStringFormat(DocStringFormat.GOOGLE,
+                           () -> doChangeSignatureTest(null, Arrays.asList(new PyParameterInfo(0, "x", null, false))));
+  }
+
+  public void testFixSphinxDocStringRemoveMultiple() {
+    runWithDocStringFormat(DocStringFormat.REST, () -> doChangeSignatureTest(null, Arrays.asList(new PyParameterInfo(0, "a", null, false),
+                                                                                             new PyParameterInfo(3, "d", null, false))));
   }
 
   public void testClassMethod() {
@@ -211,21 +231,14 @@ public class PyChangeSignatureTest extends PyTestCase {
 
   // PY-14774
   public void testAnnotationsForStarredParametersAreNotShownInDialog() throws Exception {
-    runWithLanguageLevel(LanguageLevel.PYTHON30, new Runnable() {
-      public void run() {
-        myFixture.configureByText(PythonFileType.INSTANCE, "def func(a, b:int, *args: tuple, c:list, d:str='foo', ** kwargs:dict):\n" +
-                                                           "    pass");
-        final PyFunction function = (PyFunction)new PyChangeSignatureHandler().findTargetMember(myFixture.getFile(), myFixture.getEditor());
-        assertNotNull(function);
-        final List<String> expected = Arrays.asList("a", "b", "*args", "c", "d", "**kwargs");
-        final List<PyParameterInfo> parameters = new PyMethodDescriptor(function).getParameters();
-        assertEquals(expected, ContainerUtil.map(parameters, new Function<PyParameterInfo, String>() {
-          @Override
-          public String fun(PyParameterInfo info) {
-            return info.getOldName();
-          }
-        }));
-      }
+    runWithLanguageLevel(LanguageLevel.PYTHON30, () -> {
+      myFixture.configureByText(PythonFileType.INSTANCE, "def func(a, b:int, *args: tuple, c:list, d:str='foo', ** kwargs:dict):\n" +
+                                                         "    pass");
+      final PyFunction function = (PyFunction)new PyChangeSignatureHandler().findTargetMember(myFixture.getFile(), myFixture.getEditor());
+      assertNotNull(function);
+      final List<String> expected = Arrays.asList("a", "b", "*args", "c", "d", "**kwargs");
+      final List<PyParameterInfo> parameters = new PyMethodDescriptor(function).getParameters();
+      assertEquals(expected, ContainerUtil.map(parameters, info -> info.getOldName()));
     });
   }
 

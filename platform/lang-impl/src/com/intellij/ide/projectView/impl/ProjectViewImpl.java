@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -105,13 +105,7 @@ import java.awt.*;
 import java.util.*;
 import java.util.List;
 
-@State(
-  name="ProjectView",
-  storages= {
-    @Storage(
-      file = StoragePathMacros.WORKSPACE_FILE
-    )}
-)
+@State(name = "ProjectView", storages = @Storage(StoragePathMacros.WORKSPACE_FILE))
 public class ProjectViewImpl extends ProjectView implements PersistentStateComponent<Element>, Disposable, QuickActionProvider, BusyObject  {
   private static final Logger LOG = Logger.getInstance("#com.intellij.ide.projectView.impl.ProjectViewImpl");
   private static final Key<String> ID_KEY = Key.create("pane-id");
@@ -141,6 +135,9 @@ public class ProjectViewImpl extends ProjectView implements PersistentStateCompo
   private final Map<String, Boolean> myAutoscrollToSource = new THashMap<String, Boolean>();
   private final Map<String, Boolean> myAutoscrollFromSource = new THashMap<String, Boolean>();
   private static final boolean ourAutoscrollFromSourceDefaults = false;
+  
+  private boolean myFoldersAlwaysOnTop = true;
+  
 
   private String myCurrentViewId;
   private String myCurrentViewSubId;
@@ -178,15 +175,12 @@ public class ProjectViewImpl extends ProjectView implements PersistentStateCompo
   @NonNls private static final String ELEMENT_AUTOSCROLL_TO_SOURCE = "autoscrollToSource";
   @NonNls private static final String ELEMENT_AUTOSCROLL_FROM_SOURCE = "autoscrollFromSource";
   @NonNls private static final String ELEMENT_SORT_BY_TYPE = "sortByType";
+  @NonNls private static final String ELEMENT_FOLDERS_ALWAYS_ON_TOP = "foldersAlwaysOnTop";
+  @NonNls private static final String ELEMENT_MANUAL_ORDER = "manualOrder";
 
   private static final String ATTRIBUTE_ID = "id";
   private JPanel myViewContentPanel;
-  private static final Comparator<AbstractProjectViewPane> PANE_WEIGHT_COMPARATOR = new Comparator<AbstractProjectViewPane>() {
-    @Override
-    public int compare(final AbstractProjectViewPane o1, final AbstractProjectViewPane o2) {
-      return o1.getWeight() - o2.getWeight();
-    }
-  };
+  private static final Comparator<AbstractProjectViewPane> PANE_WEIGHT_COMPARATOR = (o1, o2) -> o1.getWeight() - o2.getWeight();
   private final FileEditorManager myFileEditorManager;
   private final MyPanel myDataProvider;
   private final SplitterProportionsData splitterProportions = new SplitterProportionsDataImpl();
@@ -194,15 +188,12 @@ public class ProjectViewImpl extends ProjectView implements PersistentStateCompo
   private final Map<String, Element> myUninitializedPaneState = new HashMap<String, Element>();
   private final Map<String, SelectInTarget> mySelectInTargets = new LinkedHashMap<String, SelectInTarget>();
   private ContentManager myContentManager;
-  private boolean myFoldersAlwaysOnTop = true;
 
   public ProjectViewImpl(@NotNull Project project, final FileEditorManager fileEditorManager, final ToolWindowManagerEx toolWindowManager) {
     myProject = project;
 
     constructUi();
 
-
-    Disposer.register(myProject, this);
     myFileEditorManager = fileEditorManager;
 
     myConnection = project.getMessageBus().connect();
@@ -440,10 +431,8 @@ public class ProjectViewImpl extends ProjectView implements PersistentStateCompo
       AbstractProjectViewPane pane = myId2Pane.get(id);
 
       int comp = PANE_WEIGHT_COMPARATOR.compare(pane, newPane);
-      if (comp == 0) {
-        System.out.println("here");
-      }
-      LOG.assertTrue(comp != 0);
+      LOG.assertTrue(comp != 0, "Project view pane " + newPane + " has the same weight as " + pane +
+                                ". Please make sure that you overload getWeight() and return a distinct weight value.");
       if (comp > 0) {
         break;
       }
@@ -462,12 +451,9 @@ public class ProjectViewImpl extends ProjectView implements PersistentStateCompo
       content.putUserData(ToolWindow.SHOW_CONTENT_ICON, Boolean.TRUE);
       content.setIcon(newPane.getIcon());
       content.setPopupIcon(subId != null ? AllIcons.General.Bullet : newPane.getIcon());
-      content.setPreferredFocusedComponent(new Computable<JComponent>() {
-        @Override
-        public JComponent compute() {
-          final AbstractProjectViewPane current = getCurrentProjectViewPane();
-          return current != null ? current.getComponentToFocus() : null;
-        }
+      content.setPreferredFocusedComponent(() -> {
+        final AbstractProjectViewPane current = getCurrentProjectViewPane();
+        return current != null ? current.getComponentToFocus() : null;
       });
       content.setBusyObject(this);
       if (first && subId != null) {
@@ -476,7 +462,6 @@ public class ProjectViewImpl extends ProjectView implements PersistentStateCompo
       manager.addContent(content, index++);
       first = false;
     }
-    Disposer.register(this, newPane);
   }
 
   private void showPane(@NotNull AbstractProjectViewPane newPane) {
@@ -507,7 +492,7 @@ public class ProjectViewImpl extends ProjectView implements PersistentStateCompo
     IdeFocusManager.getInstance(myProject).requestFocus(newPane.getComponentToFocus(), false);
 
     newPane.restoreExpandedPaths();
-    if (selectedPsiElement != null) {
+    if (selectedPsiElement != null && newSubId != null) {
       final VirtualFile virtualFile = PsiUtilCore.getVirtualFile(selectedPsiElement);
       if (virtualFile != null && ((ProjectViewSelectInTarget)newPane.createSelectInTarget()).isSubIdSelectable(newSubId, new SelectInContext() {
         @Override
@@ -552,18 +537,13 @@ public class ProjectViewImpl extends ProjectView implements PersistentStateCompo
 
     myContentManager = toolWindow.getContentManager();
     if (!ApplicationManager.getApplication().isUnitTestMode()) {
-      toolWindow.setContentUiType(ToolWindowContentUiType.COMBO, null);
+      toolWindow.setDefaultContentUiType(ToolWindowContentUiType.COMBO);
       ((ToolWindowEx)toolWindow).setAdditionalGearActions(myActionGroup);
       toolWindow.getComponent().putClientProperty(ToolWindowContentUi.HIDE_ID_LABEL, "true");
     }
 
     GuiUtils.replaceJSplitPaneWithIDEASplitter(myPanel);
-    SwingUtilities.invokeLater(new Runnable() {
-      @Override
-      public void run() {
-        splitterProportions.restoreSplitterProportions(myPanel);
-      }
-    });
+    SwingUtilities.invokeLater(() -> splitterProportions.restoreSplitterProportions(myPanel));
 
     if (loadPaneExtensions) {
       ensurePanesLoaded();
@@ -600,7 +580,6 @@ public class ProjectViewImpl extends ProjectView implements PersistentStateCompo
       if (pane.isInitiallyVisible() && !myId2Pane.containsKey(pane.getId())) {
         addProjectPane(pane);
       }
-      Disposer.register(this, pane);
     }
   }
 
@@ -783,7 +762,7 @@ public class ProjectViewImpl extends ProjectView implements PersistentStateCompo
       return ((AbstractProjectViewPSIPane)viewPane).selectCB(element, file, requestFocus);
     }
     select(element, file, requestFocus);
-    return new ActionCallback.Done();
+    return ActionCallback.DONE;
   }
 
   @Override
@@ -878,13 +857,10 @@ public class ProjectViewImpl extends ProjectView implements PersistentStateCompo
     if (!views.isEmpty()) {
       list.setSelectedValue(views.get(0), true);
     }
-    Runnable runnable = new Runnable() {
-      @Override
-      public void run() {
-        if (list.getSelectedIndex() < 0) return;
-        AbstractProjectViewPane pane = (AbstractProjectViewPane)list.getSelectedValue();
-        changeView(pane.getId());
-      }
+    Runnable runnable = () -> {
+      if (list.getSelectedIndex() < 0) return;
+      AbstractProjectViewPane pane = (AbstractProjectViewPane)list.getSelectedValue();
+      changeView(pane.getId());
     };
 
     new PopupChooserBuilder(list).
@@ -1162,27 +1138,21 @@ public class ProjectViewImpl extends ProjectView implements PersistentStateCompo
       String title = IdeBundle.message("detach.library");
       int ret = Messages.showOkCancelDialog(project, message, title, Messages.getQuestionIcon());
       if (ret != Messages.OK) return;
-      CommandProcessor.getInstance().executeCommand(module.getProject(), new Runnable() {
-        @Override
-        public void run() {
-          final Runnable action = new Runnable() {
-            @Override
-            public void run() {
-              ModuleRootManager rootManager = ModuleRootManager.getInstance(module);
-              OrderEntry[] orderEntries = rootManager.getOrderEntries();
-              ModifiableRootModel model = rootManager.getModifiableModel();
-              OrderEntry[] modifiableEntries = model.getOrderEntries();
-              for (int i = 0; i < orderEntries.length; i++) {
-                OrderEntry entry = orderEntries[i];
-                if (entry instanceof LibraryOrderEntry && ((LibraryOrderEntry)entry).getLibrary() == orderEntry.getLibrary()) {
-                  model.removeOrderEntry(modifiableEntries[i]);
-                }
-              }
-              model.commit();
+      CommandProcessor.getInstance().executeCommand(module.getProject(), () -> {
+        final Runnable action = () -> {
+          ModuleRootManager rootManager = ModuleRootManager.getInstance(module);
+          OrderEntry[] orderEntries = rootManager.getOrderEntries();
+          ModifiableRootModel model = rootManager.getModifiableModel();
+          OrderEntry[] modifiableEntries = model.getOrderEntries();
+          for (int i = 0; i < orderEntries.length; i++) {
+            OrderEntry entry = orderEntries[i];
+            if (entry instanceof LibraryOrderEntry && ((LibraryOrderEntry)entry).getLibrary() == orderEntry.getLibrary()) {
+              model.removeOrderEntry(modifiableEntries[i]);
             }
-          };
-          ApplicationManager.getApplication().runWriteAction(action);
-        }
+          }
+          model.commit();
+        };
+        ApplicationManager.getApplication().runWriteAction(action);
       }, title, null);
     }
 
@@ -1303,9 +1273,7 @@ public class ProjectViewImpl extends ProjectView implements PersistentStateCompo
 
   private static void readOption(Element node, @NotNull Map<String, Boolean> options) {
     if (node == null) return;
-    List attributes = node.getAttributes();
-    for (final Object attribute1 : attributes) {
-      Attribute attribute = (Attribute)attribute1;
+    for (Attribute attribute : node.getAttributes()) {
       options.put(attribute.getName(), Boolean.TRUE.toString().equals(attribute.getValue()) ? Boolean.TRUE : Boolean.FALSE);
     }
   }
@@ -1341,7 +1309,11 @@ public class ProjectViewImpl extends ProjectView implements PersistentStateCompo
       readOption(navigatorElement.getChild(ELEMENT_AUTOSCROLL_TO_SOURCE), myAutoscrollToSource);
       readOption(navigatorElement.getChild(ELEMENT_AUTOSCROLL_FROM_SOURCE), myAutoscrollFromSource);
       readOption(navigatorElement.getChild(ELEMENT_SORT_BY_TYPE), mySortByType);
+      readOption(navigatorElement.getChild(ELEMENT_MANUAL_ORDER), myManualOrder);
 
+      Element foldersElement = navigatorElement.getChild(ELEMENT_FOLDERS_ALWAYS_ON_TOP);
+      if (foldersElement != null) myFoldersAlwaysOnTop = Boolean.valueOf(foldersElement.getAttributeValue("value"));
+      
       try {
         splitterProportions.readExternal(navigatorElement);
       }
@@ -1397,6 +1369,11 @@ public class ProjectViewImpl extends ProjectView implements PersistentStateCompo
     writeOption(navigatorElement, myAutoscrollToSource, ELEMENT_AUTOSCROLL_TO_SOURCE);
     writeOption(navigatorElement, myAutoscrollFromSource, ELEMENT_AUTOSCROLL_FROM_SOURCE);
     writeOption(navigatorElement, mySortByType, ELEMENT_SORT_BY_TYPE);
+    writeOption(navigatorElement, myManualOrder, ELEMENT_MANUAL_ORDER);
+    
+    Element foldersElement = new Element(ELEMENT_FOLDERS_ALWAYS_ON_TOP);
+    foldersElement.setAttribute("value", Boolean.toString(myFoldersAlwaysOnTop));
+    navigatorElement.addContent(foldersElement);
 
     splitterProportions.saveSplitterProportions(myPanel);
     try {
@@ -1436,7 +1413,7 @@ public class ProjectViewImpl extends ProjectView implements PersistentStateCompo
   }
 
   public void setAutoscrollToSource(boolean autoscrollMode, String paneId) {
-    myAutoscrollToSource.put(paneId, autoscrollMode ? Boolean.TRUE : Boolean.FALSE);
+    myAutoscrollToSource.put(paneId, autoscrollMode);
   }
 
   @Override
@@ -1528,14 +1505,14 @@ public class ProjectViewImpl extends ProjectView implements PersistentStateCompo
 
   @NotNull
   private ActionCallback setPaneOption(@NotNull Map<String, Boolean> optionsMap, boolean value, String paneId, final boolean updatePane) {
-    optionsMap.put(paneId, value ? Boolean.TRUE : Boolean.FALSE);
+    optionsMap.put(paneId, value);
     if (updatePane) {
       final AbstractProjectViewPane pane = getProjectViewPaneById(paneId);
       if (pane != null) {
         return pane.updateFromRoot(false);
       }
     }
-    return new ActionCallback.Done();
+    return ActionCallback.DONE;
   }
 
   private static boolean getPaneOptionValue(@NotNull Map<String, Boolean> optionsMap, String paneId, boolean defaultValue) {
@@ -1906,6 +1883,6 @@ public class ProjectViewImpl extends ProjectView implements PersistentStateCompo
     if (pane == null) {
       pane = myId2Pane.get(myCurrentViewId);
     }
-    return pane != null ? pane.getReady(requestor) : new ActionCallback.Done();
+    return pane != null ? pane.getReady(requestor) : ActionCallback.DONE;
   }
 }

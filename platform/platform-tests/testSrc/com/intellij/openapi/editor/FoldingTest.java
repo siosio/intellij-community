@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,8 +19,7 @@ import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.ex.FoldingModelEx;
 import com.intellij.openapi.editor.impl.AbstractEditorTest;
 import com.intellij.testFramework.TestFileType;
-
-import static org.junit.Assert.assertArrayEquals;
+import org.junit.Assert;
 
 /**
  * @author max
@@ -42,56 +41,42 @@ public class FoldingTest extends AbstractEditorTest {
   }
 
   public void testCleanupInvalidRegions() {
-    myModel.runBatchFoldingOperation(new Runnable() {
-      @Override
-      public void run() {
-        myModel.addFoldRegion(0, 4, "/*...*/");
-        myModel.addFoldRegion(5, 9, "/*...*/");
-      }
+    myModel.runBatchFoldingOperation(() -> {
+      myModel.addFoldRegion(0, 4, "/*...*/");
+      myModel.addFoldRegion(5, 9, "/*...*/");
     });
     assertSize(2, myModel.getAllFoldRegions());
-    WriteCommandAction.runWriteCommandAction(getProject(), new Runnable() {
-      @Override
-      public void run() {
-        myEditor.getDocument().deleteString(0, 5);
-      }
-    });
+    WriteCommandAction.runWriteCommandAction(getProject(), () -> myEditor.getDocument().deleteString(0, 5));
     assertSize(1, myModel.getAllFoldRegions());
   }
 
   public void testIntersects () throws Exception {
-    myModel.runBatchFoldingOperation(new Runnable() {
-      @Override
-      public void run() {
-        FoldRegion region = myModel.addFoldRegion(5, 10, ".");
-        assertNotNull(region);
-        region = myModel.addFoldRegion(7, 11, ".");
-        assertNull(region);
-        region = myModel.addFoldRegion(20, 30, ".");
-        assertNotNull(region);
-        region = myModel.addFoldRegion(9, 12, ".");
-        assertNull(region);
-        region = myModel.addFoldRegion(7, 10, ".");
-        assertNotNull(region);
-        region = myModel.addFoldRegion(7, 10, ".");
-        assertNull(region);
-        region = myModel.addFoldRegion(5, 30, ".");
-        assertNotNull(region);
-      }
+    myModel.runBatchFoldingOperation(() -> {
+      FoldRegion region = myModel.addFoldRegion(5, 10, ".");
+      assertNotNull(region);
+      region = myModel.addFoldRegion(7, 11, ".");
+      assertNull(region);
+      region = myModel.addFoldRegion(20, 30, ".");
+      assertNotNull(region);
+      region = myModel.addFoldRegion(9, 12, ".");
+      assertNull(region);
+      region = myModel.addFoldRegion(7, 10, ".");
+      assertNotNull(region);
+      region = myModel.addFoldRegion(7, 10, ".");
+      assertNull(region);
+      region = myModel.addFoldRegion(5, 30, ".");
+      assertNotNull(region);
     });
   }
 
   public void testIntersectsWithRegionFarInStorageOrder() {
-    myModel.runBatchFoldingOperation(new Runnable() {
-      @Override
-      public void run() {
-        FoldRegion region = myModel.addFoldRegion(0, 10, ".");
-        assertNotNull(region);
-        region = myModel.addFoldRegion(1, 5, ".");
-        assertNotNull(region);
-        region = myModel.addFoldRegion(6, 11, ".");
-        assertNull(region);
-      }
+    myModel.runBatchFoldingOperation(() -> {
+      FoldRegion region = myModel.addFoldRegion(0, 10, ".");
+      assertNotNull(region);
+      region = myModel.addFoldRegion(1, 5, ".");
+      assertNotNull(region);
+      region = myModel.addFoldRegion(6, 11, ".");
+      assertNull(region);
     });
   }
 
@@ -157,7 +142,7 @@ public class FoldingTest extends AbstractEditorTest {
     addCollapsedFoldRegion(10, 12, "???");
 
     FoldRegion[] topLevelRegions = myModel.fetchTopLevel();
-    assertArrayEquals(new FoldRegion[]{region}, topLevelRegions);
+    Assert.assertArrayEquals(new FoldRegion[]{region}, topLevelRegions);
   }
 
   public void testLastCollapsedRegionBefore() {
@@ -184,8 +169,9 @@ public class FoldingTest extends AbstractEditorTest {
   public void testModelRemainsConsistentOnTextRemoval() {
     addCollapsedFoldRegion(0, 10, "...");
     addCollapsedFoldRegion(1, 9, "...");
-    
-    myEditor.getDocument().deleteString(0, 1);
+
+    WriteCommandAction.runWriteCommandAction(getProject(), () -> myEditor.getDocument().deleteString(0, 1));
+
     addFoldRegion(20, 21, "..."); // an arbitrary action to rebuild folding caches
     
     assertTrue(myModel.isOffsetCollapsed(5));
@@ -195,8 +181,9 @@ public class FoldingTest extends AbstractEditorTest {
     addFoldRegion(0, 5, "...");
     addFoldRegion(0, 4, "...");
     assertNumberOfValidFoldRegions(2);
-    
-    myEditor.getDocument().deleteString(4, 5);
+
+    WriteCommandAction.runWriteCommandAction(getProject(), () -> myEditor.getDocument().deleteString(4, 5));
+
 
     assertNumberOfValidFoldRegions(1);
   }
@@ -204,7 +191,8 @@ public class FoldingTest extends AbstractEditorTest {
   public void testTopLevelRegionRemainsTopLevelAfterMergingIdenticalRegions() {
     addCollapsedFoldRegion(10, 15, "...");
     addCollapsedFoldRegion(10, 14, "...");
-    myEditor.getDocument().deleteString(14, 15);
+    WriteCommandAction.runWriteCommandAction(getProject(), () -> myEditor.getDocument().deleteString(14, 15));
+
 
     FoldRegion region = myModel.getCollapsedRegionAtOffset(10);
     assertNotNull(region);

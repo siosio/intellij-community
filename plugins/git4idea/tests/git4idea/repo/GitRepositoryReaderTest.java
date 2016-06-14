@@ -1,3 +1,18 @@
+/*
+ * Copyright 2000-2015 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package git4idea.repo;
 
 import com.intellij.openapi.application.PluginPathManager;
@@ -5,10 +20,13 @@ import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.VcsTestUtil;
+import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.testFramework.EdtTestUtil;
 import com.intellij.util.Function;
+import com.intellij.util.ThrowableRunnable;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.io.ZipUtil;
-import com.intellij.util.ui.UIUtil;
 import com.intellij.vcs.log.Hash;
 import com.intellij.vcs.log.impl.HashImpl;
 import git4idea.GitBranch;
@@ -26,6 +44,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 
 @RunWith(Parameterized.class)
 public class GitRepositoryReaderTest extends GitPlatformTest {
@@ -49,7 +68,7 @@ public class GitRepositoryReaderTest extends GitPlatformTest {
     });
   }
 
-  @SuppressWarnings({"UnusedParameters"})
+  @SuppressWarnings({"UnusedParameters", "JUnitTestCaseWithNonTrivialConstructors"})
   public GitRepositoryReaderTest(@NotNull String name, @NotNull File testDir) {
     myTestCaseDir = testDir;
   }
@@ -57,7 +76,12 @@ public class GitRepositoryReaderTest extends GitPlatformTest {
   @Override
   @Before
   public void setUp() throws Exception {
-    super.setUp();
+    EdtTestUtil.runInEdtAndWait(new ThrowableRunnable() {
+      @Override
+      public void run() throws Exception {
+        GitRepositoryReaderTest.super.setUp();
+      }
+    });
     myTempDir = new File(myProjectRoot.getPath(), "test");
     prepareTest(myTestCaseDir);
   }
@@ -65,18 +89,19 @@ public class GitRepositoryReaderTest extends GitPlatformTest {
   @After
   @Override
   public void tearDown() throws Exception {
-    FileUtil.delete(myTempDir);
-    UIUtil.invokeAndWaitIfNeeded(new Runnable() {
-      @Override
-      public void run() {
-        try {
-          GitRepositoryReaderTest.super.tearDown();
-        }
-        catch (Exception e) {
-          throw new RuntimeException(e);
-        }
+    try {
+      if (myTempDir != null) {
+        FileUtil.delete(myTempDir);
       }
-    });
+    }
+    finally {
+      EdtTestUtil.runInEdtAndWait(new ThrowableRunnable() {
+          @Override
+          public void run() throws Throwable {
+            GitRepositoryReaderTest.super.tearDown();
+          }
+        });
+    }
   }
 
   private void prepareTest(File testDir) throws IOException {
@@ -91,7 +116,8 @@ public class GitRepositoryReaderTest extends GitPlatformTest {
     }
     FileUtil.rename(dotGit, myGitDir);
     TestCase.assertTrue(myGitDir.exists());
-    myRepositoryReader = new GitRepositoryReader(myGitDir);
+    VirtualFile gitDir = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(myGitDir);
+    myRepositoryReader = new GitRepositoryReader(GitRepositoryFiles.getInstance(gitDir));
   }
 
 
@@ -114,25 +140,25 @@ public class GitRepositoryReaderTest extends GitPlatformTest {
 
   @Test
   public void testBranches() throws Exception {
-    Collection<GitRemote> remotes = GitConfig.read(myPlatformFacade, new File(myGitDir, "config")).parseRemotes();
+    Collection<GitRemote> remotes = GitConfig.read(new File(myGitDir, "config")).parseRemotes();
     GitBranchState state = myRepositoryReader.readState(remotes);
 
     assertEquals("HEAD revision is incorrect", readHead(myTempDir), state.getCurrentRevision());
-    assertEqualBranches(readCurrentBranch(myTempDir), state.getCurrentBranch());
+    assertEqualBranches(readCurrentBranch(myTempDir), state.getCurrentBranch(), state.getLocalBranches().get(state.getCurrentBranch()));
     assertBranches(state.getLocalBranches(), readBranches(myTempDir, true));
     assertBranches(state.getRemoteBranches(), readBranches(myTempDir, false));
   }
 
-  private static void assertEqualBranches(@NotNull Branch expected, @NotNull GitLocalBranch actual) {
+  private static void assertEqualBranches(@NotNull Branch expected, @NotNull GitLocalBranch actual, @NotNull Hash hash) {
     assertEquals(expected.name, actual.getName());
-    assertEquals("Incorrect hash of branch " + actual.getName(), expected.hash, actual.getHash());
+    assertEquals("Incorrect hash of branch " + actual.getName(), expected.hash, hash);
   }
 
-  private static void assertBranches(Collection<? extends GitBranch> actualBranches, Collection<Branch> expectedBranches) {
-    VcsTestUtil.assertEqualCollections(actualBranches, expectedBranches, new VcsTestUtil.EqualityChecker<GitBranch, Branch>() {
+  private static void assertBranches(Map<? extends GitBranch, Hash> actualBranches, Collection<Branch> expectedBranches) {
+    VcsTestUtil.assertEqualCollections(actualBranches.entrySet(), expectedBranches, new VcsTestUtil.EqualityChecker<Map.Entry<? extends GitBranch, Hash>, Branch>() {
       @Override
-      public boolean areEqual(GitBranch actual, Branch expected) {
-        return branchesAreEqual(actual, expected);
+      public boolean areEqual(Map.Entry<? extends GitBranch, Hash> actual, Branch expected) {
+        return branchesAreEqual(actual.getKey(), actual.getValue(), expected);
       }
     });
   }
@@ -147,8 +173,8 @@ public class GitRepositoryReaderTest extends GitPlatformTest {
     return branches;
   }
 
-  private static boolean branchesAreEqual(GitBranch actual, Branch expected) {
-    return actual.getFullName().equals(expected.name) && actual.getHash().equals(expected.hash);
+  private static boolean branchesAreEqual(GitBranch actualBranch, Hash actualHash, Branch expected) {
+    return actualBranch.getFullName().equals(expected.name) && actualHash.equals(expected.hash);
   }
 
   private static class Branch {

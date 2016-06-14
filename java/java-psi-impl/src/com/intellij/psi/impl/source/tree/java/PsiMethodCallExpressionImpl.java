@@ -15,6 +15,7 @@
  */
 package com.intellij.psi.impl.source.tree.java;
 
+import com.intellij.codeInsight.daemon.impl.analysis.JavaGenericsUtil;
 import com.intellij.lang.ASTNode;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.projectRoots.JavaSdkVersion;
@@ -25,15 +26,16 @@ import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.DebugUtil;
 import com.intellij.psi.impl.PsiClassImplUtil;
-import com.intellij.psi.impl.PsiImplUtil;
 import com.intellij.psi.impl.source.resolve.JavaResolveCache;
 import com.intellij.psi.impl.source.resolve.graphInference.InferenceSession;
+import com.intellij.psi.impl.source.resolve.graphInference.PsiPolyExpressionUtil;
 import com.intellij.psi.impl.source.tree.ChildRole;
 import com.intellij.psi.impl.source.tree.ElementType;
 import com.intellij.psi.impl.source.tree.JavaElementType;
 import com.intellij.psi.infos.MethodCandidateInfo;
 import com.intellij.psi.tree.ChildRoleBase;
 import com.intellij.psi.tree.IElementType;
+import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiTypesUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.psi.util.TypeConversionUtil;
@@ -158,8 +160,30 @@ public class PsiMethodCallExpressionImpl extends ExpressionPsiElement implements
       PsiType theOnly = null;
       final JavaResolveResult[] results = methodExpression.multiResolve(false);
       LanguageLevel languageLevel = PsiUtil.getLanguageLevel(call);
+
+      final PsiElement callParent = PsiUtil.skipParenthesizedExprUp(call.getParent());
+      final PsiExpressionList parentArgList;
+      if (languageLevel.isAtLeast(LanguageLevel.JDK_1_8)) {
+        parentArgList = callParent instanceof PsiConditionalExpression && !PsiPolyExpressionUtil.isPolyExpression((PsiExpression)callParent)
+                        ? null : PsiTreeUtil.getParentOfType(call, PsiExpressionList.class);
+      }
+      else {
+        parentArgList = null;
+      }
+      final MethodCandidateInfo.CurrentCandidateProperties properties = MethodCandidateInfo.getCurrentMethod(parentArgList);
+      final boolean genericMethodCall = properties != null && properties.getInfo().isToInferApplicability();
+      
       for (int i = 0; i < results.length; i++) {
-        final PsiType type = getResultType(call, methodExpression, results[i], languageLevel);
+        final JavaResolveResult candidateInfo = results[i];
+
+        if (genericMethodCall && PsiPolyExpressionUtil.isMethodCallPolyExpression(call, (PsiMethod)candidateInfo.getElement())) {
+          if (callParent instanceof PsiAssignmentExpression) {
+            return null;
+          }
+          LOG.error("poly expression evaluation during overload resolution");
+        }
+
+        final PsiType type = getResultType(call, methodExpression, candidateInfo, languageLevel);
         if (type == null) {
           return null;
         }
@@ -223,6 +247,7 @@ public class PsiMethodCallExpressionImpl extends ExpressionPsiElement implements
       // 18.5.2
       // if unchecked conversion was necessary, then this substitution provides the parameter types of the invocation type, 
       // while the return type and thrown types are given by the erasure of m's type (without applying θ').
+      //due to https://bugs.openjdk.java.net/browse/JDK-8135087 erasure is called on substitutedReturnType and not on ret type itself as by spec
       return TypeConversionUtil.erasure(substitutedReturnType);
     }
 
@@ -230,14 +255,18 @@ public class PsiMethodCallExpressionImpl extends ExpressionPsiElement implements
     // If unchecked conversion was necessary for the method to be applicable, 
     // the parameter types of the invocation type are the parameter types of the method's type,
     // and the return type and thrown types are given by the erasures of the return type and thrown types of the method's type.
-    if (!languageLevel.isAtLeast(LanguageLevel.JDK_1_8) && 
-        (method.hasTypeParameters() || JavaVersionService.getInstance().isAtLeast(call, JavaSdkVersion.JDK_1_8)) &&
+    if ((!languageLevel.isAtLeast(LanguageLevel.JDK_1_8) && method.hasTypeParameters() ||
+         !method.hasTypeParameters() && JavaVersionService.getInstance().isAtLeast(call, JavaSdkVersion.JDK_1_8)) &&
         result instanceof MethodCandidateInfo && ((MethodCandidateInfo)result).isApplicable()) {
       final PsiType[] args = call.getArgumentList().getExpressionTypes();
-      final boolean allowUncheckedConversion = false;
-      final int applicabilityLevel = PsiUtil.getApplicabilityLevel(method, substitutor, args, languageLevel, allowUncheckedConversion, true);
-      if (applicabilityLevel == MethodCandidateInfo.ApplicabilityLevel.NOT_APPLICABLE) {
-        return TypeConversionUtil.erasure(substitutedReturnType);
+      final PsiParameter[] parameters = method.getParameterList().getParameters();
+      final boolean varargs = ((MethodCandidateInfo)result).getApplicabilityLevel() == MethodCandidateInfo.ApplicabilityLevel.VARARGS;
+      for (int i = 0; i < args.length; i++) {
+        final PsiType parameterType = substitutor.substitute(PsiTypesUtil.getParameterType(parameters, i, varargs));
+        final PsiType expressionType = args[i];
+        if (expressionType != null && parameterType != null && JavaGenericsUtil.isRawToGeneric(parameterType, expressionType)) {
+          return TypeConversionUtil.erasure(substitutedReturnType);
+        }
       }
     }
 
@@ -247,7 +276,7 @@ public class PsiMethodCallExpressionImpl extends ExpressionPsiElement implements
         return returnTypeErasure;
       }
     }
-    return PsiImplUtil.normalizeWildcardTypeByPosition(substitutedReturnType, call);
+    return PsiUtil.captureToplevelWildcards(substitutedReturnType, call);
   }
 }
 

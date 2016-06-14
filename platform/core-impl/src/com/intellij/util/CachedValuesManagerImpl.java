@@ -54,11 +54,12 @@ public class CachedValuesManagerImpl extends CachedValuesManager {
                                                         @NotNull Key<CachedValue<T>> key,
                                                         @NotNull CachedValueProvider<T> provider,
                                                         boolean trackValue) {
+    CachedValueChecker.checkProvider(provider, key, dataHolder);
     CachedValue<T> value;
     if (dataHolder instanceof UserDataHolderEx) {
       UserDataHolderEx dh = (UserDataHolderEx)dataHolder;
       value = dh.getUserData(key);
-      if (value instanceof CachedValueBase && !((CachedValueBase)value).isFromMyProject(myProject)) {
+      if (isOutdated(value)) {
         value = null;
         dh.putUserData(key, null);
       }
@@ -71,7 +72,7 @@ public class CachedValuesManagerImpl extends CachedValuesManager {
     else {
       synchronized (dataHolder) {
         value = dataHolder.getUserData(key);
-        if (value instanceof CachedValueBase && !((CachedValueBase)value).isFromMyProject(myProject)) {
+        if (isOutdated(value)) {
           value = null;
         }
         if (value == null) {
@@ -81,6 +82,11 @@ public class CachedValuesManagerImpl extends CachedValuesManager {
       }
     }
     return value.getValue();
+  }
+
+  private boolean isOutdated(CachedValue<?> value) {
+    return value instanceof CachedValueBase &&
+           (!((CachedValueBase)value).isFromMyProject(myProject) || !value.hasUpToDateValue());
   }
 
   public Project getProject() {

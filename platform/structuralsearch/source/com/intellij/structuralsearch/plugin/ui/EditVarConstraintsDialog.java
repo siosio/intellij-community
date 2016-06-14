@@ -28,6 +28,7 @@ import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiFileFactory;
 import com.intellij.structuralsearch.*;
 import com.intellij.structuralsearch.impl.matcher.CompiledPattern;
+import com.intellij.structuralsearch.impl.matcher.predicates.ScriptLog;
 import com.intellij.structuralsearch.impl.matcher.predicates.ScriptSupport;
 import com.intellij.structuralsearch.plugin.replace.ReplaceOptions;
 import com.intellij.structuralsearch.plugin.replace.ui.ReplaceConfiguration;
@@ -91,6 +92,11 @@ class EditVarConstraintsDialog extends DialogWrapper {
   private JPanel occurencePanel;
   private JPanel textConstraintsPanel;
   private JLabel myRegExHelpLabel;
+  private JButton myZeroZeroButton;
+  private JButton myOneOneButton;
+  private JButton myZeroInfinityButton;
+  private JButton myOneInfinityButton;
+  private JButton myZeroOneButton;
 
   private static Project myProject;
 
@@ -107,6 +113,44 @@ class EditVarConstraintsDialog extends DialogWrapper {
       @Override
       public void documentChanged(DocumentEvent e) {
         applyWithinTypeHierarchy.setEnabled(e.getDocument().getTextLength() > 0 && fileType == StdFileTypes.JAVA);
+      }
+    });
+    myZeroZeroButton.addActionListener(new ActionListener() {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        minoccurs.setText("0");
+        maxoccurs.setText("0");
+        maxoccursUnlimited.setSelected(false);
+      }
+    });
+    myZeroOneButton.addActionListener(new ActionListener() {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        minoccurs.setText("0");
+        maxoccurs.setText("1");
+        maxoccursUnlimited.setSelected(false);
+      }
+    });
+    myOneOneButton.addActionListener(new ActionListener() {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        minoccurs.setText("1");
+        maxoccurs.setText("1");
+        maxoccursUnlimited.setSelected(false);
+      }
+    });
+    myZeroInfinityButton.addActionListener(new ActionListener() {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        minoccurs.setText("0");
+        maxoccursUnlimited.setSelected(true);
+      }
+    });
+    myOneInfinityButton.addActionListener(new ActionListener() {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        minoccurs.setText("1");
+        maxoccursUnlimited.setSelected(true);
       }
     });
     read.addChangeListener(new MyChangeListener(notRead, false));
@@ -201,7 +245,7 @@ class EditVarConstraintsDialog extends DialogWrapper {
           final Variable var = variables.get(parameterList.getSelectedIndex());
           if (validateParameters()) {
             if (current!=null) copyValuesFromUI(current);
-            ApplicationManager.getApplication().runWriteAction(new Runnable() { public void run() { copyValuesToUI(var); }});
+            ApplicationManager.getApplication().runWriteAction(() -> copyValuesToUI(var));
             current = var;
           } else {
             rollingBackSelection = true;
@@ -229,7 +273,7 @@ class EditVarConstraintsDialog extends DialogWrapper {
     customScriptCode.getButton().addActionListener(new ActionListener() {
       public void actionPerformed(@NotNull final ActionEvent e) {
         final List<String> variableNames = ContainerUtil.newArrayList(myConfiguration.getMatchOptions().getVariableConstraintNames());
-        variableNames.remove(current.getName());
+        variableNames.add(ScriptLog.SCRIPT_LOG_VAR_NAME);
         variableNames.remove(CompiledPattern.ALL_CLASS_UNMATCHED_CONTENT_VAR_ARTIFICIAL_NAME);
         final EditScriptDialog dialog = new EditScriptDialog(project, customScriptCode.getChildComponent().getText(), variableNames);
         dialog.show();
@@ -422,7 +466,6 @@ class EditVarConstraintsDialog extends DialogWrapper {
     final boolean contextVar = Configuration.CONTEXT_VAR_NAME.equals(var.getName());
     containedInConstraints.setVisible(contextVar);
     textConstraintsPanel.setVisible(!contextVar);
-    expressionConstraints.setVisible(!contextVar);
     partOfSearchResults.setEnabled(!contextVar);
     occurencePanel.setVisible(!contextVar);
   }
@@ -577,7 +620,7 @@ class EditVarConstraintsDialog extends DialogWrapper {
     settings.setRightMarginShown(false);
     settings.setLineMarkerAreaShown(false);
     settings.setIndentGuidesShown(false);
-    ((EditorEx)editor).setHighlighter(HighlighterFactory.createHighlighter(fileType, DefaultColorSchemesManager.getInstance().getAllSchemes()[0], project));
+    ((EditorEx)editor).setHighlighter(HighlighterFactory.createHighlighter(fileType, DefaultColorSchemesManager.getInstance().getFirstScheme(), project));
 
     return editor;
   }

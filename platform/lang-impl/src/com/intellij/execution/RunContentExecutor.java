@@ -19,6 +19,7 @@ import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.wm.ToolWindowId;
 import com.intellij.openapi.wm.ToolWindowManager;
 import org.jetbrains.annotations.NotNull;
@@ -94,7 +95,7 @@ public class RunContentExecutor implements Disposable {
   private ConsoleView createConsole(@NotNull Project project) {
     TextConsoleBuilder consoleBuilder = TextConsoleBuilderFactory.getInstance().createBuilder(project);
     consoleBuilder.filters(myFilterList);
-    ConsoleView console = consoleBuilder.getConsole();
+    final ConsoleView console = consoleBuilder.getConsole();
 
     if (myHelpId != null) {
       console.setHelpId(myHelpId);
@@ -105,8 +106,9 @@ public class RunContentExecutor implements Disposable {
     final JComponent consolePanel = createConsolePanel(console, actions);
     RunContentDescriptor descriptor = new RunContentDescriptor(console, myProcess, consolePanel, myTitle);
 
-    Disposer.register(console, descriptor);
-
+    Disposer.register(descriptor, this);
+    Disposer.register(descriptor, console);
+    
     actions.add(new RerunAction(consolePanel));
     actions.add(new StopAction());
     actions.add(new CloseAction(executor, descriptor, myProject));
@@ -116,8 +118,7 @@ public class RunContentExecutor implements Disposable {
     if (myActivateToolWindow) {
       activateToolWindow();
     }
-
-    Disposer.register(this, console);
+    
     return console;
   }
 
@@ -139,12 +140,8 @@ public class RunContentExecutor implements Disposable {
   }
 
   public void activateToolWindow() {
-    ApplicationManager.getApplication().invokeLater(new Runnable() {
-      @Override
-      public void run() {
-        ToolWindowManager.getInstance(myProject).getToolWindow(ToolWindowId.RUN).activate(null);
-      }
-    });
+    ApplicationManager.getApplication().invokeLater(
+      () -> ToolWindowManager.getInstance(myProject).getToolWindow(ToolWindowId.RUN).activate(null));
   }
 
   private static JComponent createConsolePanel(ConsoleView view, ActionGroup actions) {
@@ -162,7 +159,6 @@ public class RunContentExecutor implements Disposable {
 
   @Override
   public void dispose() {
-    Disposer.dispose(this);
   }
 
   /**
@@ -174,7 +170,7 @@ public class RunContentExecutor implements Disposable {
     return this;
   }
 
-  private class RerunAction extends AnAction implements DumbAware {
+  private class RerunAction extends AnAction {
     public RerunAction(JComponent consolePanel) {
       super("Rerun", "Rerun",
             AllIcons.Actions.Restart);
@@ -190,6 +186,11 @@ public class RunContentExecutor implements Disposable {
     public void update(AnActionEvent e) {
       e.getPresentation().setVisible(myRerunAction != null);
       e.getPresentation().setEnabled(myRerunAction != null);
+    }
+
+    @Override
+    public boolean isDumbAware() {
+      return Registry.is("dumb.aware.run.configurations");
     }
   }
 

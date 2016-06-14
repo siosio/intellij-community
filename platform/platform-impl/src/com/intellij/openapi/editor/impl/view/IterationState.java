@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,14 +17,11 @@ package com.intellij.openapi.editor.impl.view;
 
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.editor.Caret;
-import com.intellij.openapi.editor.CaretModel;
-import com.intellij.openapi.editor.FoldRegion;
-import com.intellij.openapi.editor.RangeMarker;
+import com.intellij.openapi.editor.*;
 import com.intellij.openapi.editor.colors.EditorColors;
 import com.intellij.openapi.editor.ex.*;
+import com.intellij.openapi.editor.ex.util.EditorUtil;
 import com.intellij.openapi.editor.highlighter.HighlighterIterator;
-import com.intellij.openapi.editor.impl.DocumentMarkupModel;
 import com.intellij.openapi.editor.markup.EffectType;
 import com.intellij.openapi.editor.markup.HighlighterLayer;
 import com.intellij.openapi.editor.markup.HighlighterTargetArea;
@@ -50,49 +47,42 @@ import java.util.List;
 public class IterationState {
   private static final Logger LOG = Logger.getInstance(IterationState.class);
 
-  private static final Comparator<RangeHighlighterEx> BY_LAYER_THEN_ATTRIBUTES = new Comparator<RangeHighlighterEx>() {
-    @Override
-    public int compare(RangeHighlighterEx o1, RangeHighlighterEx o2) {
-      final int result = LayerComparator.INSTANCE.compare(o1, o2);
-      if (result != 0) {
-        return result;
-      }
-
-      // There is a possible case when more than one highlighter target the same region (e.g. 'identifier under caret' and 'identifier').
-      // We want to prefer the one that defines foreground color to the one that doesn't define (has either fore- or background colors
-      // while the other one has only foreground color). See IDEA-85697 for concrete example.
-      final TextAttributes a1 = o1.getTextAttributes();
-      final TextAttributes a2 = o2.getTextAttributes();
-      if (a1 == null ^ a2 == null) {
-        return a1 == null ? 1 : -1;
-      }
-
-      if (a1 == null) {
-        return result;
-      }
-
-      final Color fore1 = a1.getForegroundColor();
-      final Color fore2 = a2.getForegroundColor();
-      if (fore1 == null ^ fore2 == null) {
-        return fore1 == null ? 1 : -1;
-      }
-
-      final Color back1 = a1.getBackgroundColor();
-      final Color back2 = a2.getBackgroundColor();
-      if (back1 == null ^ back2 == null) {
-        return back1 == null ? 1 : -1;
-      }
-
+  private static final Comparator<RangeHighlighterEx> BY_LAYER_THEN_ATTRIBUTES = (o1, o2) -> {
+    final int result = LayerComparator.INSTANCE.compare(o1, o2);
+    if (result != 0) {
       return result;
     }
+
+    // There is a possible case when more than one highlighter target the same region (e.g. 'identifier under caret' and 'identifier').
+    // We want to prefer the one that defines foreground color to the one that doesn't define (has either fore- or background colors
+    // while the other one has only foreground color). See IDEA-85697 for concrete example.
+    final TextAttributes a1 = o1.getTextAttributes();
+    final TextAttributes a2 = o2.getTextAttributes();
+    if (a1 == null ^ a2 == null) {
+      return a1 == null ? 1 : -1;
+    }
+
+    if (a1 == null) {
+      return result;
+    }
+
+    final Color fore1 = a1.getForegroundColor();
+    final Color fore2 = a2.getForegroundColor();
+    if (fore1 == null ^ fore2 == null) {
+      return fore1 == null ? 1 : -1;
+    }
+
+    final Color back1 = a1.getBackgroundColor();
+    final Color back2 = a2.getBackgroundColor();
+    if (back1 == null ^ back2 == null) {
+      return back1 == null ? 1 : -1;
+    }
+
+    return result;
   };
 
-  private static final Comparator<RangeHighlighterEx> BY_AFFECTED_END_OFFSET_REVERSED = new Comparator<RangeHighlighterEx>() {
-    @Override
-    public int compare(RangeHighlighterEx r1, RangeHighlighterEx r2) {
-      return r2.getAffectedAreaEndOffset() - r1.getAffectedAreaEndOffset();
-    }
-  };
+  private static final Comparator<RangeHighlighterEx> BY_AFFECTED_END_OFFSET_REVERSED =
+    (r1, r2) -> r2.getAffectedAreaEndOffset() - r1.getAffectedAreaEndOffset();
 
   private final TextAttributes myMergedAttributes = new TextAttributes();
 
@@ -108,13 +98,9 @@ public class IterationState {
 
   private final int[] mySelectionStarts;
   private final int[] mySelectionEnds;
-  private final int[] myVirtualSelectionStarts;
-  private final int[] myVirtualSelectionEnds;
   private int myCurrentSelectionIndex = 0;
-  private int myCurrentVirtualSelectionIndex = 0;
-  private boolean myCurrentLineHasVirtualSelection;
-  private int myCurrentPastLineEndBackgroundSegment; // 0 - before selection, 1 - in selection, 2 - after selection
   private Color myCurrentBackgroundColor;
+  private Color myLastBackgroundColor;
 
   private final List<RangeHighlighterEx> myCurrentHighlighters = new ArrayList<RangeHighlighterEx>();
 
@@ -126,8 +112,11 @@ public class IterationState {
   private final TextAttributes myCaretRowAttributes;
   private final Color myDefaultBackground;
   private final Color myDefaultForeground;
+  private final int myDefaultFontType;
   private final int myCaretRowStart;
   private final int myCaretRowEnd;
+  private final boolean myCaretRowStartsWithSoftWrap;
+  private final boolean myCaretRowEndsWithSoftWrap;
   private final List<TextAttributes> myCachedAttributesList = new ArrayList<TextAttributes>(5);
   private final DocumentEx myDocument;
   private final EditorEx myEditor;
@@ -136,7 +125,7 @@ public class IterationState {
   private final boolean myReverseIteration;
 
   public IterationState(@NotNull EditorEx editor, int start, int end, boolean useCaretAndSelection, boolean useOnlyFullLineHighlighters,
-                        boolean useFoldRegions, boolean iterateBackwards) {
+                        boolean useOnlyFontAffectingHighlighters, boolean useFoldRegions, boolean iterateBackwards) {
     ApplicationManager.getApplication().assertReadAccessAllowed();
     myDocument = editor.getDocument();
     myStartOffset = start;
@@ -152,32 +141,16 @@ public class IterationState {
     if (!useCaretAndSelection) {
       mySelectionStarts = ArrayUtilRt.EMPTY_INT_ARRAY;
       mySelectionEnds = ArrayUtilRt.EMPTY_INT_ARRAY;
-      myVirtualSelectionStarts = ArrayUtilRt.EMPTY_INT_ARRAY;
-      myVirtualSelectionEnds = ArrayUtilRt.EMPTY_INT_ARRAY;
     }
     else {
       List<Caret> carets = editor.getCaretModel().getAllCarets();
       int caretCount = carets.size();
       mySelectionStarts = new int[caretCount];
       mySelectionEnds = new int[caretCount];
-      if (iterateBackwards) {
-        myVirtualSelectionStarts = ArrayUtilRt.EMPTY_INT_ARRAY;
-        myVirtualSelectionEnds = ArrayUtilRt.EMPTY_INT_ARRAY;
-      }
-      else {
-        myVirtualSelectionStarts = new int[caretCount];
-        myVirtualSelectionEnds = new int[caretCount];
-      }
       for (int i = 0; i < caretCount; i++) {
         Caret caret = carets.get(i);
         mySelectionStarts[iterateBackwards ? caretCount - i - 1 : i] = caret.getSelectionStart();
         mySelectionEnds[iterateBackwards ? caretCount - i - 1 : i] = caret.getSelectionEnd();
-        if (!iterateBackwards && caret.hasSelection()) {
-          myVirtualSelectionStarts[i] = caret.getSelectionStartPosition().column -
-                                        editor.offsetToVisualPosition(mySelectionStarts[i], true).column;
-          myVirtualSelectionEnds[i] = caret.getSelectionEndPosition().column -
-                                      editor.offsetToVisualPosition(mySelectionEnds[i]).column;
-        }
       }
     }
 
@@ -191,15 +164,24 @@ public class IterationState {
     myCaretRowAttributes = editor.isRendererMode() ? null : caretModel.getTextAttributes();
     myDefaultBackground = editor.getColorsScheme().getDefaultBackground();
     myDefaultForeground = editor.getColorsScheme().getDefaultForeground();
+    TextAttributes defaultAttributes = editor.getColorsScheme().getAttributes(HighlighterColors.TEXT);
+    myDefaultFontType = defaultAttributes == null ? Font.PLAIN : defaultAttributes.getFontType();
 
-    myCaretRowStart = caretModel.getVisualLineStart();
-    myCaretRowEnd = caretModel.getVisualLineEnd();
+    myCaretRowStart = useCaretAndSelection ? caretModel.getVisualLineStart() : -1;
+    int visualLineEnd = caretModel.getVisualLineEnd();
+    if (visualLineEnd == myDocument.getTextLength() && myDocument.getLineCount() > 0 && 
+        visualLineEnd > myDocument.getLineStartOffset(myDocument.getLineCount() - 1)) {
+      visualLineEnd++;
+    }
+    myCaretRowEnd = useCaretAndSelection ? visualLineEnd : -1;
+    myCaretRowStartsWithSoftWrap = editor.getSoftWrapModel().getSoftWrap(myCaretRowStart) != null;
+    myCaretRowEndsWithSoftWrap = editor.getSoftWrapModel().getSoftWrap(myCaretRowEnd) != null;
 
     MarkupModelEx editorMarkup = editor.getMarkupModel();
-    myView = new HighlighterSweep(editorMarkup, start, myEnd, useOnlyFullLineHighlighters);
+    myView = new HighlighterSweep(editorMarkup, start, myEnd, useOnlyFullLineHighlighters, useOnlyFontAffectingHighlighters);
 
-    final MarkupModelEx docMarkup = (MarkupModelEx)DocumentMarkupModel.forDocument(editor.getDocument(), editor.getProject(), true);
-    myDoc = new HighlighterSweep(docMarkup, start, myEnd, useOnlyFullLineHighlighters);
+    MarkupModelEx docMarkup = editor.getFilteredDocumentMarkupModel();
+    myDoc = new HighlighterSweep(docMarkup, start, myEnd, useOnlyFullLineHighlighters, useOnlyFontAffectingHighlighters);
 
     myEndOffset = myStartOffset;
 
@@ -211,16 +193,19 @@ public class IterationState {
     int i;
     private final RangeHighlighterEx[] highlighters;
 
-    private HighlighterSweep(@NotNull MarkupModelEx markupModel, int start, int end, final boolean onlyFullLine) {
+    private HighlighterSweep(@NotNull MarkupModelEx markupModel, int start, int end, 
+                             final boolean onlyFullLine, final boolean onlyFontAffecting) {
       // we have to get all highlighters in advance and sort them by affected offsets
       // since these can be different from the real offsets the highlighters are sorted by in the tree.  (See LINES_IN_RANGE perverts)
       final List<RangeHighlighterEx> list = new ArrayList<RangeHighlighterEx>();
-      markupModel.processRangeHighlightersOverlappingWith(myReverseIteration ? end : start, 
-                                                          myReverseIteration ? start : end,
+      markupModel.processRangeHighlightersOverlappingWith(myReverseIteration ? end : start, myReverseIteration ? start : end,
                                                           new CommonProcessors.CollectProcessor<RangeHighlighterEx>(list) {
                                                             @Override
                                                             protected boolean accept(RangeHighlighterEx ex) {
-                                                              return !onlyFullLine || ex.getTargetArea() == HighlighterTargetArea.LINES_IN_RANGE;
+                                                              return (!onlyFullLine || 
+                                                                      ex.getTargetArea() == HighlighterTargetArea.LINES_IN_RANGE) && 
+                                                                     (!onlyFontAffecting ||
+                                                                      EditorUtil.attributesImpactFontStyle(ex.getTextAttributes()));
                                                             }
                                                           });
       highlighters = list.isEmpty() ? RangeHighlighterEx.EMPTY_ARRAY : list.toArray(new RangeHighlighterEx[list.size()]);
@@ -276,14 +261,13 @@ public class IterationState {
     final FoldRegion region = myFoldingModel == null ? null :
                               myFoldingModel.getCollapsedRegionAtOffset(highlighter.getAffectedAreaStartOffset());
     if (region != null && region == myFoldingModel.getCollapsedRegionAtOffset(highlighter.getAffectedAreaEndOffset())) return true;
-    return !highlighter.getEditorFilter().avaliableIn(myEditor);
+    return false;
   }
 
   public void advance() {
     myStartOffset = myEndOffset;
     advanceSegmentHighlighters();
     advanceCurrentSelectionIndex();
-    advanceCurrentVirtualSelectionIndex();
 
     if (!myUseOnlyFullLineHighlighters) {
       myCurrentFold = myFoldingModel == null ? null :
@@ -377,14 +361,6 @@ public class IterationState {
     }
   }
 
-  private void advanceCurrentVirtualSelectionIndex() {
-    if (myReverseIteration) return;
-    while (myCurrentVirtualSelectionIndex < mySelectionEnds.length
-           && (myStartOffset > mySelectionEnds[myCurrentVirtualSelectionIndex] || myVirtualSelectionEnds[myCurrentVirtualSelectionIndex] <= 0)) {
-      myCurrentVirtualSelectionIndex++;
-    }
-  }
-
   private int getSelectionEnd() {
     if (myCurrentSelectionIndex >= mySelectionStarts.length) {
       return myEnd;
@@ -403,10 +379,13 @@ public class IterationState {
     myDoc.advance();
     myView.advance();
 
+    boolean fileEnd = myStartOffset == myDocument.getTextLength();
     for (int i = myCurrentHighlighters.size() - 1; i >= 0; i--) {
       RangeHighlighterEx highlighter = myCurrentHighlighters.get(i);
       if (myReverseIteration ?
           highlighter.getAffectedAreaStartOffset() >= myStartOffset :
+          fileEnd && highlighter.getTargetArea() == HighlighterTargetArea.LINES_IN_RANGE ? 
+          highlighter.getAffectedAreaEndOffset() < myStartOffset : 
           highlighter.getAffectedAreaEndOffset() <= myStartOffset) {
         myCurrentHighlighters.remove(i);
       }
@@ -486,17 +465,13 @@ public class IterationState {
   }
 
   private void reinit() {
-    if (myHighlighterIterator != null && myHighlighterIterator.atEnd()) {
-      return;
-    }
-
     boolean isInSelection = isInSelection();
-    boolean isInCaretRow = myStartOffset > myCaretRowStart && myStartOffset < myCaretRowEnd ||
-                           myStartOffset == (myReverseIteration ? myCaretRowEnd : myCaretRowStart);
+    boolean isInCaretRow = isInCaretRow(!myReverseIteration, myReverseIteration);
     boolean isInGuardedBlock = !myUseOnlyFullLineHighlighters &&
                                myDocument.getOffsetGuard(myReverseIteration ? myStartOffset - 1 : myStartOffset) != null;
 
-    TextAttributes syntax = myHighlighterIterator == null ? null : myHighlighterIterator.getTextAttributes();
+    TextAttributes syntax = myHighlighterIterator == null || myHighlighterIterator.atEnd() ? 
+                            null : myHighlighterIterator.getTextAttributes();
 
     TextAttributes selection = isInSelection ? mySelectionAttributes : null;
     TextAttributes caret = isInCaretRow ? myCaretRowAttributes : null;
@@ -521,29 +496,19 @@ public class IterationState {
     List<TextAttributes> cachedAttributes = myCachedAttributesList;
     cachedAttributes.clear();
 
-    int selectionAttributesIndex = -1; // a 'would-be' or real position of selection attributes in attributes list
-
     //noinspection ForLoopReplaceableByForEach
     for (int i = 0; i < size; i++) {
       RangeHighlighterEx highlighter = myCurrentHighlighters.get(i);
       if (highlighter.getLayer() < HighlighterLayer.SELECTION) {
-        if (selectionAttributesIndex < 0) {
-          selectionAttributesIndex = cachedAttributes.size();
-        }
         if (selection != null) {
           cachedAttributes.add(selection);
           selection = null;
         }
       }
 
-      if (syntax != null && highlighter.getLayer() < HighlighterLayer.SYNTAX) {
-        if (fold != null) {
-          cachedAttributes.add(fold);
-          fold = null;
-        }
-
-        cachedAttributes.add(syntax);
-        syntax = null;
+      if (fold != null && highlighter.getLayer() < HighlighterLayer.GUARDED_BLOCKS) {
+        cachedAttributes.add(fold);
+        fold = null;
       }
 
       if (guard != null && highlighter.getLayer() < HighlighterLayer.GUARDED_BLOCKS) {
@@ -556,15 +521,17 @@ public class IterationState {
         caret = null;
       }
 
+      if (syntax != null && highlighter.getLayer() < HighlighterLayer.SYNTAX) {
+        cachedAttributes.add(syntax);
+        syntax = null;
+      }
+
       TextAttributes textAttributes = highlighter.getTextAttributes();
       if (textAttributes != null && textAttributes != TextAttributes.ERASE_MARKER) {
         cachedAttributes.add(textAttributes);
       }
     }
 
-    if (selectionAttributesIndex < 0) {
-      selectionAttributesIndex = cachedAttributes.size();
-    }
     if (selection != null) cachedAttributes.add(selection);
     if (fold != null) cachedAttributes.add(fold);
     if (guard != null) cachedAttributes.add(guard);
@@ -577,21 +544,16 @@ public class IterationState {
     EffectType effectType = null;
     int fontType = 0;
 
-    boolean selectionBackgroundIsPotentiallyVisible = cachedAttributes.isEmpty();
-
     //noinspection ForLoopReplaceableByForEach
     for (int i = 0; i < cachedAttributes.size(); i++) {
       TextAttributes attrs = cachedAttributes.get(i);
 
       if (fore == null) {
-        fore = ifDiffers(attrs.getForegroundColor(), myDefaultForeground);
+        fore = attrs.getForegroundColor();
       }
 
       if (back == null) {
-        if (isInSelection && i == selectionAttributesIndex || !isInSelection && i >= selectionAttributesIndex) {
-          selectionBackgroundIsPotentiallyVisible = true;
-        }
-        back = ifDiffers(attrs.getBackgroundColor(), myDefaultBackground);
+        back = attrs.getBackgroundColor();
       }
 
       if (fontType == Font.PLAIN) {
@@ -607,25 +569,17 @@ public class IterationState {
     if (fore == null) fore = myDefaultForeground;
     if (back == null) back = myDefaultBackground;
     if (effectType == null) effectType = EffectType.BOXED;
+    if (fontType == Font.PLAIN) fontType = myDefaultFontType;
 
     myMergedAttributes.setAttributes(fore, back, effect, null, effectType, fontType);
 
+    myLastBackgroundColor = myCurrentBackgroundColor;
     myCurrentBackgroundColor = back;
-    if (selectionBackgroundIsPotentiallyVisible &&
-        myCurrentVirtualSelectionIndex < myVirtualSelectionStarts.length &&
-        myStartOffset == mySelectionEnds[myCurrentVirtualSelectionIndex]) {
-      myCurrentLineHasVirtualSelection = true;
-      myCurrentPastLineEndBackgroundSegment = myVirtualSelectionStarts[myCurrentVirtualSelectionIndex] > 0 ? 0 : 1;
-    }
-    else {
-      myCurrentLineHasVirtualSelection = false;
-      myCurrentPastLineEndBackgroundSegment = 0;
-    }
   }
 
-  @Nullable
-  private static Color ifDiffers(final Color c1, final Color c2) {
-    return Comparing.equal(c1, c2) ? null : c1;
+  private boolean isInCaretRow(boolean includeLineStart, boolean includeLineEnd) {
+    return myStartOffset > myCaretRowStart && myStartOffset < myCaretRowEnd ||
+           includeLineStart && myStartOffset == myCaretRowStart || includeLineEnd && myStartOffset == myCaretRowEnd;
   }
 
   public boolean atEnd() {
@@ -646,73 +600,22 @@ public class IterationState {
     return myMergedAttributes;
   }
 
-  public FoldRegion getCurrentFold() {
-    return myCurrentFold;
-  }
-
-  public boolean hasPastLineEndBackgroundSegment() {
-    return myCurrentLineHasVirtualSelection && myCurrentPastLineEndBackgroundSegment < 2;
-  }
-
-  public int getPastLineEndBackgroundSegmentWidth() {
-    switch (myCurrentPastLineEndBackgroundSegment) {
-      case 0: return myVirtualSelectionStarts[myCurrentVirtualSelectionIndex];
-      case 1: return myVirtualSelectionEnds[myCurrentVirtualSelectionIndex] - myVirtualSelectionStarts[myCurrentVirtualSelectionIndex];
-      default: return 0;
-    }
-  }
-
   @NotNull
   public TextAttributes getPastLineEndBackgroundAttributes() {
-    myMergedAttributes.setBackgroundColor(myCurrentPastLineEndBackgroundSegment == 1 ? mySelectionAttributes.getBackgroundColor() : myCurrentBackgroundColor);
+    myMergedAttributes.setBackgroundColor(myEditor.getSoftWrapModel().getSoftWrap(myStartOffset) != null ? getBreakBackgroundColor(true) : 
+                                          myCurrentBackgroundColor);
     return myMergedAttributes;
   }
-
-  public void advanceToNextPastLineEndBackgroundSegment() {
-    myCurrentPastLineEndBackgroundSegment++;
+  
+  @NotNull
+  public TextAttributes getBeforeLineStartBackgroundAttributes() {
+    return new TextAttributes(null, getBreakBackgroundColor(false), null, null, Font.PLAIN);
   }
 
-  public boolean hasPastFileEndBackgroundSegments() {
-    myCurrentLineHasVirtualSelection = myVirtualSelectionEnds.length > 0
-                                       && myVirtualSelectionEnds[myVirtualSelectionEnds.length - 1] > 0
-                                       && myEndOffset == myEnd
-                                       && mySelectionEnds[mySelectionStarts.length - 1] == myEndOffset;
-    if (myCurrentLineHasVirtualSelection) {
-      myCurrentVirtualSelectionIndex = myVirtualSelectionStarts.length - 1;
-      myCurrentPastLineEndBackgroundSegment = myVirtualSelectionStarts[myCurrentVirtualSelectionIndex] > 0 ? 0 : 1;
-      myCurrentBackgroundColor = myEndOffset >= myCaretRowStart ? myCaretRowAttributes.getBackgroundColor() : myDefaultBackground;
-    }
-    return myCurrentLineHasVirtualSelection;
-  }
-
-  @Nullable
-  public Color getPastFileEndBackground() {
-    boolean isInCaretRow = myEditor.getCaretModel().getLogicalPosition().line >= myDocument.getLineCount() - 1;
-
-    Color caret = isInCaretRow && myCaretRowAttributes != null ? myCaretRowAttributes.getBackgroundColor() : null;
-
-    ContainerUtil.quickSort(myCurrentHighlighters, LayerComparator.INSTANCE);
-
-    //noinspection ForLoopReplaceableByForEach
-    for (int i = 0; i < myCurrentHighlighters.size(); i++) {
-      RangeHighlighterEx highlighter = myCurrentHighlighters.get(i);
-      if (caret != null && highlighter.getLayer() < HighlighterLayer.CARET_ROW) {
-        return caret;
-      }
-
-      if (highlighter.getTargetArea() != HighlighterTargetArea.LINES_IN_RANGE
-          || myDocument.getLineNumber(highlighter.getEndOffset()) < myDocument.getLineCount() - 1) {
-        continue;
-      }
-
-      TextAttributes textAttributes = highlighter.getTextAttributes();
-      if (textAttributes != null) {
-        Color backgroundColor = textAttributes.getBackgroundColor();
-        if (backgroundColor != null) return backgroundColor;
-      }
-    }
-
-    return caret;
+  private Color getBreakBackgroundColor(boolean lineEnd) {
+    return Comparing.equal(myCurrentBackgroundColor, myLastBackgroundColor) ? myCurrentBackgroundColor : 
+           isInCaretRow(!myCaretRowStartsWithSoftWrap || !lineEnd, myCaretRowEndsWithSoftWrap && lineEnd) ? 
+           myCaretRowAttributes.getBackgroundColor() : myDefaultBackground;
   }
 
   private static class LayerComparator implements Comparator<RangeHighlighterEx> {

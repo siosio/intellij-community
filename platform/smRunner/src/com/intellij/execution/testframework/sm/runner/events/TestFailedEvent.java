@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,13 +15,11 @@
  */
 package com.intellij.execution.testframework.sm.runner.events;
 
+import com.intellij.openapi.util.text.StringUtil;
 import jetbrains.buildServer.messages.serviceMessages.TestFailed;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-/**
- * @author Sergey Simonchik
- */
 public class TestFailedEvent extends TreeNodeEvent {
 
   private final String myLocalizedFailureMessage;
@@ -29,12 +27,20 @@ public class TestFailedEvent extends TreeNodeEvent {
   private final boolean myTestError;
   private final String myComparisonFailureActualText;
   private final String myComparisonFailureExpectedText;
-  private final String myFilePath;
+  private final String myExpectedFilePath;
+  private final String myActualFilePath;
+  private final long myDurationMillis;
 
   public TestFailedEvent(@NotNull TestFailed testFailed, boolean testError) {
     this(testFailed, testError, null);
   }
-  public TestFailedEvent(@NotNull TestFailed testFailed, boolean testError, String filePath) {
+  public TestFailedEvent(@NotNull TestFailed testFailed, boolean testError, @Nullable String expectedFilePath) {
+    this(testFailed, testError, expectedFilePath, null);
+  }  
+  public TestFailedEvent(@NotNull TestFailed testFailed,
+                         boolean testError,
+                         @Nullable String expectedFilePath,
+                         @Nullable String actualFilePath) {
     super(testFailed.getTestName(), TreeNodeEvent.getNodeId(testFailed));
     if (testFailed.getFailureMessage() == null) throw new NullPointerException();
     myLocalizedFailureMessage = testFailed.getFailureMessage();
@@ -42,7 +48,20 @@ public class TestFailedEvent extends TreeNodeEvent {
     myTestError = testError;
     myComparisonFailureActualText = testFailed.getActual();
     myComparisonFailureExpectedText = testFailed.getExpected();
-    myFilePath = filePath;
+    myExpectedFilePath = expectedFilePath;
+    myActualFilePath = actualFilePath;
+    myDurationMillis = parseDuration(testFailed.getAttributes().get("duration"));
+  }
+
+  private static long parseDuration(@Nullable String durationStr) {
+    if (!StringUtil.isEmpty(durationStr)) {
+      try {
+        return Long.parseLong(durationStr);
+      }
+      catch (NumberFormatException ignored) {
+      }
+    }
+    return -1;
   }
 
   public TestFailedEvent(@NotNull String testName,
@@ -51,13 +70,35 @@ public class TestFailedEvent extends TreeNodeEvent {
                          boolean testError,
                          @Nullable String comparisonFailureActualText,
                          @Nullable String comparisonFailureExpectedText) {
-    super(testName, -1);
+    this(testName,
+         null,
+         localizedFailureMessage,
+         stackTrace,
+         testError,
+         comparisonFailureActualText,
+         comparisonFailureExpectedText,
+         null,
+         -1);
+  }
+
+  public TestFailedEvent(@Nullable String testName,
+                         @Nullable String id,
+                         @NotNull String localizedFailureMessage,
+                         @Nullable String stackTrace,
+                         boolean testError,
+                         @Nullable String comparisonFailureActualText,
+                         @Nullable String comparisonFailureExpectedText,
+                         @Nullable String expectedFilePath,
+                         long durationMillis) {
+    super(testName, id);
     myLocalizedFailureMessage = localizedFailureMessage;
     myStacktrace = stackTrace;
     myTestError = testError;
     myComparisonFailureActualText = comparisonFailureActualText;
     myComparisonFailureExpectedText = comparisonFailureExpectedText;
-    myFilePath = null;
+    myExpectedFilePath = expectedFilePath;
+    myActualFilePath = null;
+    myDurationMillis = durationMillis;
   }
 
   @NotNull
@@ -93,7 +134,27 @@ public class TestFailedEvent extends TreeNodeEvent {
     append(buf, "comparisonFailureExpectedText", myComparisonFailureExpectedText);
   }
 
+  /**
+   * @deprecated use {@link #getExpectedFilePath()} instead
+   */
   public String getFilePath() {
-    return myFilePath;
+    return myExpectedFilePath;
+  }
+
+  @Nullable
+  public String getExpectedFilePath() {
+    return myExpectedFilePath;
+  }
+
+  @Nullable
+  public String getActualFilePath() {
+    return myActualFilePath;
+  }
+  
+  /**
+   * @return the test duration in milliseconds, or -1 if undefined
+   */
+  public long getDurationMillis() {
+    return myDurationMillis;
   }
 }

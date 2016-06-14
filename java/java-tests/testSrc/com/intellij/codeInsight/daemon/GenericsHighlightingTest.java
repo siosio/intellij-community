@@ -24,7 +24,10 @@ import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.LanguageLevelProjectExtension;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.pom.java.LanguageLevel;
+import com.intellij.psi.GenericsUtil;
 import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiType;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.testFramework.IdeaTestUtil;
 import org.jetbrains.annotations.NonNls;
@@ -512,6 +515,80 @@ public class GenericsHighlightingTest extends LightDaemonAnalyzerTestCase {
     doTest(LanguageLevel.JDK_1_7, JavaSdkVersion.JDK_1_7, false);
   }
 
+  public void testWildcardsWithRawBound() throws Exception {
+    doTest(LanguageLevel.JDK_1_7, JavaSdkVersion.JDK_1_7, false);
+  }
+
+  public void testIDEA98866() throws Exception {
+    doTest(LanguageLevel.JDK_1_7, JavaSdkVersion.JDK_1_7, false);
+  }
+
+  public void testIDEA81318() throws Exception {
+    doTest(LanguageLevel.JDK_1_7, JavaSdkVersion.JDK_1_7, false);
+  }
+
+  public void testIDEA138957() throws Exception {
+    doTest(LanguageLevel.JDK_1_7, JavaSdkVersion.JDK_1_7, false);
+  }
+
+  public void testIDEA130453() throws Exception {
+    doTest(LanguageLevel.JDK_1_7, JavaSdkVersion.JDK_1_7, false);
+  }
+
+  public void testReifiableTypeWithLocalClasses() throws Exception {
+    doTest(LanguageLevel.JDK_1_7, JavaSdkVersion.JDK_1_7, false);
+  }
+
+  public void testStopBoundsPromotionInsideNestedWildcards() throws Exception {
+    doTest(LanguageLevel.JDK_1_7, JavaSdkVersion.JDK_1_7, false);
+  }
+
+  public void testIDEA130243() throws Exception {
+    doTest(LanguageLevel.JDK_1_7, JavaSdkVersion.JDK_1_7, false);
+  }
+
+  public void testCastingToPrimitive() throws Exception {
+    doTest(LanguageLevel.JDK_1_7, JavaSdkVersion.JDK_1_7, false);
+  }
+
+  public void testProvablyDistinctForWildcardsWithArrayBounds() throws Exception {
+    doTest(LanguageLevel.JDK_1_7, JavaSdkVersion.JDK_1_7, false);
+  }
+
+  public void testReturnTypeOverrideEquivalenceWithTypeHierarchy() throws Exception {
+    doTest(LanguageLevel.JDK_1_7, JavaSdkVersion.JDK_1_7, false);
+  }
+
+  public void testIgnoreReturnTypeClashForObjectProtectedMethodsAndInterfaceMethodsWithSameSignature() throws Exception {
+    doTest(LanguageLevel.JDK_1_7, JavaSdkVersion.JDK_1_7, false);
+  }
+
+  public void testIDEA150499() throws Exception {
+    doTest(LanguageLevel.JDK_1_7, JavaSdkVersion.JDK_1_7, false);
+  }
+
+  public void testRecursiveTypesTypeArgumentDistinction() throws Exception {
+    doTest(LanguageLevel.JDK_1_7, JavaSdkVersion.JDK_1_7, true);
+  }
+
+  public void testRecursiveBoundsDependencies() throws Exception {
+    doTest(LanguageLevel.JDK_1_7, JavaSdkVersion.JDK_1_7, false);
+  }
+
+  public void testUnboxingFromTypeParameter() throws Exception {
+    doTest(LanguageLevel.JDK_1_7, JavaSdkVersion.JDK_1_7, false);
+  }
+
+  public void testLeastUpperBoundWithRecursiveTypes() throws Exception {
+    final PsiManager manager = getPsiManager();
+    final GlobalSearchScope scope = GlobalSearchScope.allScope(getProject());
+    final PsiType leastUpperBound = GenericsUtil.getLeastUpperBound(PsiType.INT.getBoxedType(manager, scope), 
+                                                                    PsiType.LONG.getBoxedType(manager, scope), 
+                                                                    manager);
+    assertNotNull(leastUpperBound);
+    assertEquals("Number & Comparable<? extends Number & Comparable<?>>", leastUpperBound.getPresentableText());
+  }
+
   public void testJavaUtilCollections_NoVerify() throws Exception {
     PsiClass collectionsClass = getJavaFacade().findClass("java.util.Collections", GlobalSearchScope.moduleWithLibrariesScope(getModule()));
     assertNotNull(collectionsClass);
@@ -519,5 +596,17 @@ public class GenericsHighlightingTest extends LightDaemonAnalyzerTestCase {
     final String text = collectionsClass.getContainingFile().getText();
     configureFromFileText("Collections.java", StringUtil.convertLineSeparators(StringUtil.replace(text, "package java.util;", "package java.utilx; import java.util.*;")));
     doTestConfiguredFile(false, false, null);
+  }
+
+  public void testReturnTypeSubstitutableForSameOverrideEquivalentMethods() throws Exception {
+    doTest(LanguageLevel.JDK_1_7, JavaSdkVersion.JDK_1_7, false);
+  }
+
+  public void testCaptureConversionWithWildcardBounds() throws Exception {
+    doTest(LanguageLevel.JDK_1_7, JavaSdkVersion.JDK_1_7, false);
+  }
+
+  public void testIntersectTypeParameterBounds() throws Exception {
+    doTest(LanguageLevel.JDK_1_7, JavaSdkVersion.JDK_1_7, false);
   }
 }

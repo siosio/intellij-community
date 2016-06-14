@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 package com.intellij.openapi.externalSystem.action;
 
 import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.Presentation;
 import com.intellij.openapi.actionSystem.ToggleAction;
 import com.intellij.openapi.externalSystem.model.ExternalSystemDataKeys;
@@ -47,7 +46,7 @@ public abstract class ExternalSystemToggleAction extends ToggleAction implements
   }
 
   @Override
-  public final boolean isSelected(AnActionEvent e) {
+  public boolean isSelected(AnActionEvent e) {
     if (!isEnabled(e)) return false;
     return doIsSelected(e);
   }
@@ -55,7 +54,7 @@ public abstract class ExternalSystemToggleAction extends ToggleAction implements
   protected abstract boolean doIsSelected(AnActionEvent e);
 
   protected Project getProject(AnActionEvent e) {
-    return CommonDataKeys.PROJECT.getData(e.getDataContext());
+    return e.getProject();
   }
 
   protected boolean hasProject(AnActionEvent e) {
@@ -64,5 +63,20 @@ public abstract class ExternalSystemToggleAction extends ToggleAction implements
 
   protected ProjectSystemId getSystemId(AnActionEvent e) {
     return ExternalSystemDataKeys.EXTERNAL_SYSTEM_ID.getData(e.getDataContext());
+  }
+
+  protected void setText(String message) {
+    getTemplatePresentation().setText(message);
+  }
+
+  protected void setDescription(String message) {
+    getTemplatePresentation().setDescription(message);
+  }
+
+  protected void setText(AnActionEvent e, String message) {
+    e.getPresentation().setText(message);
+  }
+  protected void setDescription(AnActionEvent e, String message) {
+    e.getPresentation().setDescription(message);
   }
 }

@@ -15,18 +15,41 @@
  */
 package com.jetbrains.python;
 
+import com.google.common.collect.ImmutableList;
 import com.jetbrains.python.documentation.PythonDocumentationProvider;
 import com.jetbrains.python.fixtures.PyTestCase;
 import com.jetbrains.python.psi.LanguageLevel;
 import com.jetbrains.python.psi.PyExpression;
 import com.jetbrains.python.psi.impl.PythonLanguageLevelPusher;
-import com.jetbrains.python.psi.types.*;
+import com.jetbrains.python.psi.types.PyClassType;
+import com.jetbrains.python.psi.types.PyType;
+import com.jetbrains.python.psi.types.TypeEvalContext;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+
+import java.util.List;
 
 /**
  * @author yole
  */
 public class PyTypeTest extends PyTestCase {
+  /**
+   * Call of union returns union of all callable types in this union
+   */
+  public void testCallableInUnion() throws Exception {
+    doTest("str",
+           "import random\n" +
+           "def spam():\n" +
+           "    return \"D\"\n" +
+           "class Eggs:\n" +
+           "    pass\n" +
+           "class Eggs2:\n" +
+           "    pass\n" +
+           "dd = spam if random.randint != 42 else Eggs2()\n" +
+           "var = dd if random.randint != 42 else dd\n" +
+           "expr = var()");
+  }
+
   public void testTupleType() {
     doTest("str",
            "t = ('a', 2)\n" +
@@ -46,7 +69,7 @@ public class PyTypeTest extends PyTestCase {
            "expr = '1' + '2'");
     doTest("Union[str, unicode]",
            "expr = '%s' % ('a')");
-    doTest("list[int]",
+    doTest("List[int]",
            "expr = [1] + [2]");
   }
 
@@ -95,7 +118,7 @@ public class PyTypeTest extends PyTestCase {
   }
 
   public void testSet() {
-    doTest("set[int]",
+    doTest("Set[int]",
            "expr = {1, 2, 3}");
   }
 
@@ -115,6 +138,7 @@ public class PyTypeTest extends PyTestCase {
 
   // TODO: uncomment when we have a mock SDK for Python 3.x
   // PY-1427
+  @SuppressWarnings("unused")
   public void _testBytesLiteral() {  // PY-1427
     PythonLanguageLevelPusher.setForcedLanguageLevel(myFixture.getProject(), LanguageLevel.PYTHON30);
     try {
@@ -147,13 +171,30 @@ public class PyTypeTest extends PyTestCase {
   }
 
   public void testSubscriptType() {
-    doTest("int",
+    doTest("Union[int, List[int]]",
            "l = [1, 2, 3]; expr = l[0]");
   }
 
-  public void testSliceType() {
-    doTest("list[int]",
+  public void testListSliceType() {
+    doTest("List[int]",
            "l = [1, 2, 3]; expr = l[0:1]");
+  }
+
+  public void testTupleSliceType() {
+    doTest("tuple",
+           "l = (1, 2, 3); expr = l[0:1]");
+  }
+
+  // PY-18560
+  public void testCustomSliceType() {
+    doTest(
+      "int",
+      "class RectangleFactory(object):\n" +
+      "    def __getitem__(self, item):\n" +
+      "        return 1\n" +
+      "factory = RectangleFactory()\n" +
+      "expr = factory[:]"
+    );
   }
 
   public void testExceptType() {
@@ -302,81 +343,42 @@ public class PyTypeTest extends PyTestCase {
   }
 
   public void testSOEOnRecursiveCall() {
-    PyExpression expr = parseExpr("def foo(x): return foo(x)\n" +
-                                  "expr = foo(1)");
-    TypeEvalContext context = getTypeEvalContext(expr);
-    PyType actual = context.getType(expr);
-    assertNull(actual);
+    doTest("Any", "def foo(x): return foo(x)\n" +
+                  "expr = foo(1)");
   }
 
   public void testGenericConcrete() {
-    PyExpression expr = parseExpr("def f(x):\n" +
-                                  "    '''\n" +
-                                  "    :type x: T\n" +
-                                  "    :rtype: T\n" +
-                                  "    '''\n" +
-                                  "    return x\n" +
-                                  "\n" +
-                                  "expr = f(1)\n");
-    TypeEvalContext context = getTypeEvalContext(expr);
-    PyType actual = context.getType(expr);
-    assertNotNull(actual);
-    assertEquals("int", actual.getName());
+    doTest("int", "def f(x):\n" +
+                  "    '''\n" +
+                  "    :type x: T\n" +
+                  "    :rtype: T\n" +
+                  "    '''\n" +
+                  "    return x\n" +
+                  "\n" +
+                  "expr = f(1)\n");
   }
 
   public void testGenericConcreteMismatch() {
-    PyExpression expr = parseExpr("def f(x, y):\n" +
-                                  "    '''\n" +
-                                  "    :type x: T\n" +
-                                  "    :rtype: T\n" +
-                                  "    '''\n" +
-                                  "    return x\n" +
-                                  "\n" +
-                                  "expr = f(1)\n");
-    TypeEvalContext context = getTypeEvalContext(expr);
-    PyType actual = context.getType(expr);
-    assertNotNull(actual);
-    assertEquals("int", actual.getName());
+    doTest("int", "def f(x, y):\n" +
+                  "    '''\n" +
+                  "    :type x: T\n" +
+                  "    :rtype: T\n" +
+                  "    '''\n" +
+                  "    return x\n" +
+                  "\n" +
+                  "expr = f(1)\n");
   }
 
   // PY-5831
   public void testYieldType() {
-    PyExpression expr = parseExpr("def f():\n" +
-                                  "    expr = yield 2\n");
-    TypeEvalContext context = getTypeEvalContext(expr);
-    PyType actual = context.getType(expr);
-    assertNull(actual);
+    doTest("Any", "def f():\n" +
+                 "    expr = yield 2\n");
   }
 
   // PY-9590
   public void testYieldParensType() {
-    PyExpression expr = parseExpr("def f():\n" +
-                                  "    expr = (yield 2)\n");
-    TypeEvalContext context = getTypeEvalContext(expr);
-    PyType actual = context.getType(expr);
-    assertNull(actual);
-  }
-
-  // PY-6702
-  public void testYieldFromType() {
-    PythonLanguageLevelPusher.setForcedLanguageLevel(myFixture.getProject(), LanguageLevel.PYTHON33);
-    try {
-      doTest("Union[str, int, float]",
-             "def subgen():\n" +
-             "    for i in [1, 2, 3]:\n" +
-             "        yield i\n" +
-             "\n" +
-             "def gen():\n" +
-             "    yield 'foo'\n" +
-             "    yield from subgen()\n" +
-             "    yield 3.14\n" +
-             "\n" +
-             "for expr in gen():\n" +
-             "    pass\n");
-    }
-    finally {
-      PythonLanguageLevelPusher.setForcedLanguageLevel(myFixture.getProject(), null);
-    }
+    doTest("Any", "def f():\n" +
+                  "    expr = (yield 2)\n");
   }
 
   public void testFunctionAssignment() {
@@ -389,27 +391,19 @@ public class PyTypeTest extends PyTestCase {
   }
 
   public void testPropertyOfUnionType() {
-    PyExpression expr = parseExpr("def f():\n" +
-                                  "    '''\n" +
-                                  "    :rtype: int or slice\n" +
-                                  "    '''\n" +
-                                  "    raise NotImplementedError\n" +
-                                  "\n" +
-                                  "x = f()\n" +
-                                  "expr = x.start\n");
-    TypeEvalContext context = getTypeEvalContext(expr);
-    PyType actual = context.getType(expr);
-    assertNotNull(actual);
-    assertInstanceOf(actual, PyClassType.class);
-    assertEquals("int", actual.getName());
+    doTest("int", "def f():\n" +
+                  "    '''\n" +
+                  "    :rtype: int or slice\n" +
+                  "    '''\n" +
+                  "    raise NotImplementedError\n" +
+                  "\n" +
+                  "x = f()\n" +
+                  "expr = x.start\n");
   }
 
   public void testUndefinedPropertyOfUnionType() {
-    PyExpression expr = parseExpr("x = 42 if True else 'spam'\n" +
-                                  "expr = x.foo\n");
-    TypeEvalContext context = getTypeEvalContext(expr);
-    PyType actual = context.getType(expr);
-    assertNull(actual);
+    doTest("Any", "x = 42 if True else 'spam'\n" +
+                  "expr = x.foo\n");
   }
 
   // PY-7058
@@ -419,31 +413,26 @@ public class PyTypeTest extends PyTestCase {
                                   "\n" +
                                   "x = C()\n" +
                                   "expr = type(x)\n");
-    TypeEvalContext context = getTypeEvalContext(expr);
-    PyType type = context.getType(expr);
-    assertInstanceOf(type, PyClassType.class);
-    assertTrue("Got instance type instead of class type", ((PyClassType)type).isDefinition());
+    assertNotNull(expr);
+    for (TypeEvalContext context : getTypeEvalContexts(expr)) {
+      PyType type = context.getType(expr);
+      assertInstanceOf(type, PyClassType.class);
+      assertTrue("Got instance type instead of class type", ((PyClassType)type).isDefinition());
+    }
   }
 
   // PY-7058
   public void testReturnTypeOfTypeForClass() {
-    PyExpression expr = parseExpr("class C(object):\n" +
-                                  "    pass\n" +
-                                  "\n" +
-                                  "expr = type(C)\n");
-    TypeEvalContext context = getTypeEvalContext(expr);
-    PyType type = context.getType(expr);
-    assertInstanceOf(type, PyClassType.class);
-    assertEquals(type.getName(), "type");
+    doTest("type", "class C(object):\n" +
+                   "    pass\n" +
+                   "\n" +
+                   "expr = type(C)\n");
   }
 
   // PY-7058
   public void testReturnTypeOfTypeForUnknown() {
-    PyExpression expr = parseExpr("def f(x):\n" +
-                                  "    expr = type(x)\n");
-    TypeEvalContext context = getTypeEvalContext(expr);
-    PyType type = context.getType(expr);
-    assertNull(type);
+    doTest("Any", "def f(x):\n" +
+                  "    expr = type(x)\n");
   }
 
   // PY-7040
@@ -459,7 +448,7 @@ public class PyTypeTest extends PyTestCase {
 
   // PY-7215
   public void testFunctionWithNestedGenerator() {
-    doTest("list[int]",
+    doTest("List[int]",
            "def f():\n" +
            "    def g():\n" +
            "        yield 10\n" +
@@ -475,32 +464,31 @@ public class PyTypeTest extends PyTestCase {
            "expr = f().next()\n");
   }
 
+  public void testGeneratorFunctionType() {
+    doTest("__generator[str, Any, int]",
+           "def f():\n" +
+           "    yield 'foo'\n" +
+           "    return 0\n" +
+           "\n" +
+           "expr = f()\n");
+  }
+
   // PY-7020
   public void testListComprehensionType() {
-    final PyExpression expr = parseExpr("expr = [str(x) for x in range(10)]\n");
-    final TypeEvalContext context = getTypeEvalContext(expr);
-    final PyType type = context.getType(expr);
-    assertNotNull(type);
-    assertInstanceOf(type, PyCollectionType.class);
-    assertEquals(type.getName(), "list");
-    final PyCollectionType collectionType = (PyCollectionType)type;
-    final PyType elementType = collectionType.getElementType(context);
-    assertNotNull(elementType);
-    assertEquals(elementType.getName(), "str");
+    doTest("List[str]", "expr = [str(x) for x in range(10)]\n");
   }
 
   // PY-7021
   public void testGeneratorComprehensionType() {
-    final PyExpression expr = parseExpr("expr = (str(x) for x in range(10))\n");
-    final TypeEvalContext context = getTypeEvalContext(expr);
-    final PyType type = context.getType(expr);
-    assertNotNull(type);
-    assertInstanceOf(type, PyCollectionType.class);
-    assertEquals(type.getName(), "__generator");
-    final PyCollectionType collectionType = (PyCollectionType)type;
-    final PyType elementType = collectionType.getElementType(context);
-    assertNotNull(elementType);
-    assertEquals(elementType.getName(), "str");
+    doTest("__generator[str, Any, None]", "expr = (str(x) for x in range(10))\n");
+  }
+
+  // PY-7021
+  public void testIterOverGeneratorComprehension() {
+    doTest("str",
+           "xs = (str(x) for x in range(10))\n" +
+           "for expr in xs:\n" +
+           "    pass\n");
   }
 
   // EA-40207
@@ -581,11 +569,8 @@ public class PyTypeTest extends PyTestCase {
 
   // PY-7063
   public void testDefaultParameterIgnoreNone() {
-    final PyExpression expr = parseExpr("def f(x=None):\n" +
-                                        "    expr = x\n");
-    final TypeEvalContext context = getTypeEvalContext(expr);
-    final PyType type = context.getType(expr);
-    assertNull(type);
+    doTest("Any", "def f(x=None):\n" +
+                  "    expr = x\n");
   }
 
   public void testParameterFromUsages() {
@@ -596,6 +581,7 @@ public class PyTypeTest extends PyTestCase {
                         "    foo(3)\n" +
                         "    foo('bar')\n";
     final PyExpression expr = parseExpr(text);
+    assertNotNull(expr);
     doTest("Union[Union[int, str], Any]", expr, TypeEvalContext.codeCompletion(expr.getProject(), expr.getContainingFile()));
   }
 
@@ -622,7 +608,7 @@ public class PyTypeTest extends PyTestCase {
   }
 
   public void testFunctionTypeAsUnificationArgument() {
-    doTest("Union[list[int], str, unicode]",
+    doTest("Union[List[int], str, unicode]",
            "def map2(f, xs):\n" +
            "    '''\n" +
            "    :type f: (T) -> V | None\n" +
@@ -635,7 +621,7 @@ public class PyTypeTest extends PyTestCase {
   }
 
   public void testFunctionTypeAsUnificationArgumentWithSubscription() {
-    doTest("Union[int, str, unicode]",
+    doTest("Union[int, List[int], str, unicode]",
            "def map2(f, xs):\n" +
            "    '''\n" +
            "    :type f: (T) -> V | None\n" +
@@ -661,24 +647,18 @@ public class PyTypeTest extends PyTestCase {
   }
 
   public void testUnionIteration() {
-    final String text = "def f(c):\n" +
-                        "    if c < 0:\n" +
-                        "        return [1, 2, 3]\n" +
-                        "    elif c == 0:\n" +
-                        "        return 0.0\n" +
-                        "    else:\n" +
-                        "        return 'foo'\n" +
-                        "\n" +
-                        "def g(c):\n" +
-                        "    for expr in f(c):\n" +
-                        "        pass\n";
-    final PyExpression expr = parseExpr(text);
-    final TypeEvalContext context = getTypeEvalContext(expr);
-    final PyType type = context.getType(expr);
-    assertInstanceOf(type, PyUnionType.class);
-    assertTrue(PyTypeChecker.match(PyTypeParser.getTypeByName(expr, "int"), type, context));
-    assertTrue(PyTypeChecker.match(PyTypeParser.getTypeByName(expr, "str"), type, context));
-    assertTrue(PyTypeChecker.isUnknown(type));
+    doTest("Union[Union[int, str], Any]",
+           "def f(c):\n" +
+           "    if c < 0:\n" +
+           "        return [1, 2, 3]\n" +
+           "    elif c == 0:\n" +
+           "        return 0.0\n" +
+           "    else:\n" +
+           "        return 'foo'\n" +
+           "\n" +
+           "def g(c):\n" +
+           "    for expr in f(c):\n" +
+           "        pass\n");
   }
 
   public void testParameterOfFunctionTypeAndReturnValue() {
@@ -731,17 +711,17 @@ public class PyTypeTest extends PyTestCase {
   }
 
   public void testOpenDefault() {
-    doTest("FileIO[str]",
+    doTest("file",
            "expr = open('foo')\n");
   }
 
   public void testOpenText() {
-    doTest("FileIO[str]",
+    doTest("file",
            "expr = open('foo', 'r')\n");
   }
 
   public void testOpenBinary() {
-    doTest("FileIO[str]",
+    doTest("file",
            "expr = open('foo', 'rb')\n");
   }
 
@@ -997,11 +977,101 @@ public class PyTypeTest extends PyTestCase {
            "expr = f\n");
   }
 
-  private static TypeEvalContext getTypeEvalContext(@NotNull PyExpression element) {
-    return TypeEvalContext.userInitiated(element.getProject(), element.getContainingFile()).withTracing();
+  // PY-16267
+  public void testGenericField() {
+    doTest("str",
+           "class D(object):\n" +
+           "    def __init__(self, foo):\n" +
+           "        '''\n" +
+           "        :type foo: T\n" +
+           "        :rtype: D[T]\n" +
+           "        '''\n" +
+           "        self.foo = foo\n" +
+           "\n" +
+           "\n" +
+           "def g():\n" +
+           "    '''\n" +
+           "    :rtype: D[str]\n" +
+           "    '''\n" +
+           "    return D('test')\n" +
+           "\n" +
+           "\n" +
+           "y = g()\n" +
+           "expr = y.foo\n");
   }
 
-  private PyExpression parseExpr(String text) {
+  public void testConditionInnerScope() {
+    doTest("Union[str, int]",
+           "if something:\n" +
+           "    foo = 'foo'\n" +
+           "else:\n" +
+           "    foo = 0\n" +
+           "\n" +
+           "expr = foo\n");
+  }
+
+  public void testConditionOuterScope() {
+    doTest("Union[str, int]",
+           "if something:\n" +
+           "    foo = 'foo'\n" +
+           "else:\n" +
+           "    foo = 0\n" +
+           "\n" +
+           "def f():\n" +
+           "    expr = foo\n");
+  }
+
+  // PY-18217
+  public void testConditionImportOuterScope() {
+    doMultiFileTest("Union[str, int]",
+                    "if something:\n" +
+                    "    from m1 import foo\n" +
+                    "else:\n" +
+                    "    from m2 import foo\n" +
+                    "\n" +
+                    "def f():\n" +
+                    "    expr = foo\n");
+  }
+
+  // PY-18402
+  public void testConditionInImportedModule() {
+    doMultiFileTest("Union[int, str]",
+                    "from m1 import foo\n" +
+                    "\n" +
+                    "def f():\n" +
+                    "    expr = foo\n");
+  }
+
+  // PY-18427
+  public void testConditionalTypeInDocstring() {
+    doTest("Union[str, int]",
+           "if something:\n" +
+           "    Type = int\n" +
+           "else:\n" +
+           "    Type = str\n" +
+           "\n" +
+           "def f(expr):\n" +
+           "    '''\n" +
+           "    :type expr: Type\n" +
+           "    '''\n" +
+           "    pass\n");
+  }
+
+  // PY-18254
+  public void testFunctionTypeCommentInStubs() {
+    doMultiFileTest("MyClass",
+                    "from module import func\n" +
+                    "\n" +
+                    "expr = func()");
+  }
+
+  private static List<TypeEvalContext> getTypeEvalContexts(@NotNull PyExpression element) {
+    return ImmutableList.of(TypeEvalContext.codeAnalysis(element.getProject(), element.getContainingFile()).withTracing(),
+                            TypeEvalContext.userInitiated(element.getProject(), element.getContainingFile()).withTracing());
+  }
+
+  @Nullable
+  private PyExpression parseExpr(@NotNull String text) {
     myFixture.configureByText(PythonFileType.INSTANCE, text);
     return myFixture.findElementByText("expr", PyExpression.class);
   }
@@ -1012,22 +1082,23 @@ public class PyTypeTest extends PyTestCase {
     assertEquals(expectedType, actualType);
   }
 
-  private void doTest(final String expectedType, final String text) {
-    PyExpression expr = parseExpr(text);
-    TypeEvalContext context = getTypeEvalContext(expr);
-    PyType actual = context.getType(expr);
-    final String actualType = PythonDocumentationProvider.getTypeName(actual, context);
-    assertEquals(expectedType, actualType);
+  private void doTest(@NotNull final String expectedType, @NotNull final String text) {
+    checkTypes(expectedType, parseExpr(text));
+  }
+
+  private static void checkTypes(@NotNull String expectedType, @Nullable PyExpression expr) {
+    assertNotNull(expr);
+    for (TypeEvalContext context : getTypeEvalContexts(expr)) {
+      final PyType actual = context.getType(expr);
+      final String actualType = PythonDocumentationProvider.getTypeName(actual, context);
+      assertEquals("Failed in " + context, expectedType, actualType);
+    }
   }
 
   public static final String TEST_DIRECTORY = "/types/";
 
-  private void doMultiFileTest(final String expectedType, final String text) {
+  private void doMultiFileTest(@NotNull  final String expectedType, @NotNull final String text) {
     myFixture.copyDirectoryToProject(TEST_DIRECTORY + getTestName(false), "");
-    PyExpression expr = parseExpr(text);
-    TypeEvalContext context = getTypeEvalContext(expr);
-    PyType actual = context.getType(expr);
-    final String actualType = PythonDocumentationProvider.getTypeName(actual, context);
-    assertEquals(expectedType, actualType);
+    checkTypes(expectedType, parseExpr(text));
   }
 }

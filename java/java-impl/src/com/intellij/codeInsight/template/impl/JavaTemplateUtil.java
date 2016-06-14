@@ -16,7 +16,6 @@
 package com.intellij.codeInsight.template.impl;
 
 import com.intellij.codeInsight.lookup.LookupElement;
-import com.intellij.codeInsight.lookup.LookupItem;
 import com.intellij.codeInsight.lookup.LookupItemUtil;
 import com.intellij.codeInsight.lookup.PsiTypeLookupItem;
 import com.intellij.codeInsight.template.TemplateLookupSelectionHandler;
@@ -141,14 +140,11 @@ public class JavaTemplateUtil {
       }
       if (parent instanceof PsiJavaCodeReferenceElement && !((PsiJavaCodeReferenceElement) parent).isQualified()) {
         final PsiJavaCodeReferenceElement ref = (PsiJavaCodeReferenceElement) parent;
-        ApplicationManager.getApplication().runWriteAction(new Runnable() {
-          @Override
-          public void run() {
-            try {
-              ref.bindToElement(aClass);
-            } catch (IncorrectOperationException e) {
-              LOG.error(e);
-            }
+        ApplicationManager.getApplication().runWriteAction(() -> {
+          try {
+            ref.bindToElement(aClass);
+          } catch (IncorrectOperationException e) {
+            LOG.error(e);
           }
         });
       }
@@ -156,19 +152,16 @@ public class JavaTemplateUtil {
   }
 
   public static LookupElement addElementLookupItem(Set<LookupElement> items, PsiElement element) {
-    final LookupElement item = LookupItemUtil.addLookupItem(items, element);
-    if (item instanceof LookupItem) {
-      ((LookupItem)item).setAttribute(TemplateLookupSelectionHandler.KEY_IN_LOOKUP_ITEM, new JavaTemplateLookupSelectionHandler());
-    }
+    final LookupElement item = LookupItemUtil.objectToLookupItem(element);
+    items.add(item);
+    item.putUserData(TemplateLookupSelectionHandler.KEY_IN_LOOKUP_ITEM, new JavaTemplateLookupSelectionHandler());
     return item;
   }
 
   public static LookupElement addTypeLookupItem(Set<LookupElement> items, PsiType type) {
     final LookupElement item = PsiTypeLookupItem.createLookupItem(type, null);
     items.add(item);
-    if (item instanceof LookupItem) {
-      ((LookupItem)item).setAttribute(TemplateLookupSelectionHandler.KEY_IN_LOOKUP_ITEM, new JavaTemplateLookupSelectionHandler());
-    }
+    item.putUserData(TemplateLookupSelectionHandler.KEY_IN_LOOKUP_ITEM, new JavaTemplateLookupSelectionHandler());
     return item;
   }
 }

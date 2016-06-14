@@ -54,19 +54,15 @@ public abstract class GenerateGetterSetterHandlerBase extends GenerateMembersHan
   private static final Logger LOG = Logger.getInstance("#com.intellij.codeInsight.generation.GenerateGetterSetterHandlerBase");
 
   static {
-    GenerateAccessorProviderRegistrar.registerProvider(new NotNullFunction<PsiClass, Collection<EncapsulatableClassMember>>() {
-      @Override
-      @NotNull
-      public Collection<EncapsulatableClassMember> fun(PsiClass s) {
-        if (s.getLanguage() != StdLanguages.JAVA) return Collections.emptyList();
-        final List<EncapsulatableClassMember> result = new ArrayList<EncapsulatableClassMember>();
-        for (PsiField field : s.getFields()) {
-          if (!(field instanceof PsiEnumConstant)) {
-            result.add(new PsiFieldMember(field));
-          }
+    GenerateAccessorProviderRegistrar.registerProvider(s -> {
+      if (s.getLanguage() != StdLanguages.JAVA) return Collections.emptyList();
+      final List<EncapsulatableClassMember> result = new ArrayList<EncapsulatableClassMember>();
+      for (PsiField field : s.getFields()) {
+        if (!(field instanceof PsiEnumConstant)) {
+          result.add(new PsiFieldMember(field));
         }
-        return result;
       }
+      return result;
     });
   }
 
@@ -126,6 +122,7 @@ public abstract class GenerateGetterSetterHandlerBase extends GenerateMembersHan
                 return StringUtil.capitalizeWords(UIUtil.removeMnemonic(StringUtil.trimEnd(templatesTitle, ":")), true);
               }
             };
+            ui.setHint("Visibility is applied according to File | Settings | Editor | Code Style | Java | Code Generation");
             ui.selectNodeInTree(templatesManager.getDefaultTemplate());
             if (ShowSettingsUtil.getInstance().editConfigurable(panel, ui)) {
               setComboboxModel(templatesManager, comboBox);
@@ -165,19 +162,16 @@ public abstract class GenerateGetterSetterHandlerBase extends GenerateMembersHan
     if (list.isEmpty()) {
       return null;
     }
-    final List<EncapsulatableClassMember> members = ContainerUtil.findAll(list, new Condition<EncapsulatableClassMember>() {
-      @Override
-      public boolean value(EncapsulatableClassMember member) {
-        try {
-          return generateMemberPrototypes(aClass, member).length > 0;
-        }
-        catch (GenerateCodeException e) {
-          return true;
-        }
-        catch (IncorrectOperationException e) {
-          LOG.error(e);
-          return false;
-        }
+    final List<EncapsulatableClassMember> members = ContainerUtil.findAll(list, member -> {
+      try {
+        return generateMemberPrototypes(aClass, member).length > 0;
+      }
+      catch (GenerateCodeException e) {
+        return true;
+      }
+      catch (IncorrectOperationException e) {
+        LOG.error(e);
+        return false;
       }
     });
     return members.toArray(new ClassMember[members.size()]);

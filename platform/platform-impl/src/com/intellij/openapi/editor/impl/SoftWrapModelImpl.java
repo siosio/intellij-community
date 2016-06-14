@@ -19,6 +19,7 @@ import com.intellij.diagnostic.Dumpable;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.diagnostic.Attachment;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.*;
 import com.intellij.openapi.editor.colors.FontPreferences;
@@ -40,6 +41,7 @@ import java.awt.*;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -54,7 +56,7 @@ import java.util.List;
  * @author Denis Zhdanov
  * @since Jun 8, 2010 12:47:32 PM
  */
-public class SoftWrapModelImpl implements SoftWrapModelEx, PrioritizedDocumentListener, FoldingListener,
+public class SoftWrapModelImpl implements SoftWrapModelEx, PrioritizedInternalDocumentListener, FoldingListener,
                                           PropertyChangeListener, Dumpable, Disposable
 {
 
@@ -157,7 +159,7 @@ public class SoftWrapModelImpl implements SoftWrapModelEx, PrioritizedDocumentLi
   }
 
   private boolean areSoftWrapsEnabledInEditor() {
-    return myEditor.getSettings().isUseSoftWraps() && !myEditor.myUseNewRendering 
+    return myEditor.getSettings().isUseSoftWraps() && (!myEditor.myUseNewRendering || !myEditor.isOneLineMode())
            && (!(myEditor.getDocument() instanceof DocumentImpl) || !((DocumentImpl)myEditor.getDocument()).acceptsSlashR());
   }
 
@@ -184,6 +186,9 @@ public class SoftWrapModelImpl implements SoftWrapModelEx, PrioritizedDocumentLi
       myApplianceManager.reset();
       myDeferredFoldRegions.clear();
       myStorage.removeAll();
+      if (myEditor.myUseNewRendering) {
+        myEditor.myView.reinitSettings();
+      }
       myEditor.getScrollingModel().scrollToCaret(ScrollType.CENTER);
     }
   }
@@ -200,7 +205,7 @@ public class SoftWrapModelImpl implements SoftWrapModelEx, PrioritizedDocumentLi
 
   @Override
   public boolean isSoftWrappingEnabled() {
-    if (!myUseSoftWraps || myEditor.isOneLineMode() || myEditor.isPurePaintingMode()) {
+    if (!myUseSoftWraps || (!myEditor.myUseNewRendering && myEditor.isOneLineMode()) || myEditor.isPurePaintingMode()) {
       return false;
     }
     
@@ -218,9 +223,7 @@ public class SoftWrapModelImpl implements SoftWrapModelEx, PrioritizedDocumentLi
       }
     }
 
-    if (application.isUnitTestMode()) return true;
-    Rectangle visibleArea = myEditor.getScrollingModel().getVisibleArea();
-    return visibleArea.width > 0 && visibleArea.height > 0;
+    return !myApplianceManager.getAvailableArea().isEmpty();
   }
 
   @Override
@@ -234,6 +237,9 @@ public class SoftWrapModelImpl implements SoftWrapModelEx, PrioritizedDocumentLi
 
   @Override
   public int getSoftWrapIndex(int offset) {
+    if (myEditor.myUseNewRendering && !isSoftWrappingEnabled()) {
+      return -1;
+    }
     return myStorage.getSoftWrapIndex(offset);
   }
 
@@ -312,7 +318,11 @@ public class SoftWrapModelImpl implements SoftWrapModelEx, PrioritizedDocumentLi
     if (!isSoftWrappingEnabled()) {
       return Collections.emptyList();
     }
-    return myStorage.getSoftWraps();
+    List<SoftWrapImpl> softWraps = myStorage.getSoftWraps();
+    if (!softWraps.isEmpty() && softWraps.get(softWraps.size() - 1).getStart() >= myEditor.getDocument().getTextLength()) {
+      LOG.error("Unexpected soft wrap location", new Attachment("editorState.txt", myEditor.dumpState()));
+    }
+    return softWraps;
   }
 
   @Override
@@ -334,6 +344,17 @@ public class SoftWrapModelImpl implements SoftWrapModelEx, PrioritizedDocumentLi
     if (!isSoftWrappingEnabled()) {
       return 0;
     }
+    if (!myEditor.getSettings().isAllSoftWrapsShown()) {
+      int visualLine = y / lineHeight;
+      LogicalPosition position = myEditor.visualToLogicalPosition(new VisualPosition(visualLine, 0));
+      if (position.line != myEditor.getCaretModel().getLogicalPosition().line) {
+        return myPainter.getDrawingHorizontalOffset(g, drawingType, x, y, lineHeight);
+      }
+    }
+    return doPaint(g, drawingType, x, y, lineHeight);
+  }
+  
+  public int doPaint(@NotNull Graphics g, @NotNull SoftWrapDrawingType drawingType, int x, int y, int lineHeight) {
     return myPainter.paint(g, drawingType, x, y, lineHeight);
   }
 
@@ -431,13 +452,14 @@ public class SoftWrapModelImpl implements SoftWrapModelEx, PrioritizedDocumentLi
    *
    * @return      <code>true</code> if soft wraps-aware processing should be used; <code>false</code> otherwise
    */
-  private boolean prepareToMapping() {
+  public boolean prepareToMapping() {
     if (myUpdateInProgress || myBulkUpdateInProgress ||
         myActive > 0 || !isSoftWrappingEnabled() || myEditor.getDocument().getTextLength() <= 0) {
       return false;
     }
 
     if (myDirty) {
+      myStorage.removeAll();
       myApplianceManager.reset();
       myDeferredFoldRegions.clear();
       myDirty = false;
@@ -497,22 +519,29 @@ public class SoftWrapModelImpl implements SoftWrapModelEx, PrioritizedDocumentLi
       return false;
     }
 
-    VisualPosition visualBeforeSoftWrap = myEditor.offsetToVisualPosition(offset - 1);
-    int x = 0;
-    LogicalPosition logLineStart = myEditor.visualToLogicalPosition(new VisualPosition(visualBeforeSoftWrap.line, 0));
-    if (logLineStart.softWrapLinesOnCurrentLogicalLine > 0) {
-      int offsetLineStart = myEditor.logicalPositionToOffset(logLineStart);
-      softWrap = model.getSoftWrap(offsetLineStart);
-      if (softWrap != null) {
-        x = softWrap.getIndentInPixels();
+    if (myEditor.myUseNewRendering) {
+      VisualPosition beforeSoftWrap = myEditor.offsetToVisualPosition(offset, true, true);
+      return visual.line > beforeSoftWrap.line || 
+             visual.column > beforeSoftWrap.column || visual.column == beforeSoftWrap.column && countBeforeSoftWrap;
+    }
+    else {
+      VisualPosition visualBeforeSoftWrap = myEditor.offsetToVisualPosition(offset - 1);
+      int x = 0;
+      LogicalPosition logLineStart = myEditor.visualToLogicalPosition(new VisualPosition(visualBeforeSoftWrap.line, 0));
+      if (logLineStart.softWrapLinesOnCurrentLogicalLine > 0) {
+        int offsetLineStart = myEditor.logicalPositionToOffset(logLineStart);
+        softWrap = model.getSoftWrap(offsetLineStart);
+        if (softWrap != null) {
+          x = softWrap.getIndentInPixels();
+        }
       }
+      int width = EditorUtil.textWidthInColumns(myEditor, myEditor.getDocument().getCharsSequence(), offset - 1, offset, x);
+      int softWrapStartColumn = visualBeforeSoftWrap.column + width;
+      if (visual.line > visualBeforeSoftWrap.line) {
+        return true;
+      }
+      return countBeforeSoftWrap ? visual.column >= softWrapStartColumn : visual.column > softWrapStartColumn;
     }
-    int width = EditorUtil.textWidthInColumns(myEditor, myEditor.getDocument().getCharsSequence(), offset - 1, offset, x);
-    int softWrapStartColumn = visualBeforeSoftWrap.column  + width;
-    if (visual.line > visualBeforeSoftWrap.line) {
-      return true;
-    }
-    return countBeforeSoftWrap ? visual.column >= softWrapStartColumn : visual.column > softWrapStartColumn;
   }
 
   @Override
@@ -572,6 +601,18 @@ public class SoftWrapModelImpl implements SoftWrapModelEx, PrioritizedDocumentLi
     myApplianceManager.documentChanged(event);
   }
 
+  @Override
+  public void moveTextHappened(int start, int end, int base) {
+    if (myBulkUpdateInProgress) {
+      return;
+    }
+    if (!isSoftWrappingEnabled()) {
+      myDirty = true;
+      return;
+    }
+    myApplianceManager.recalculate(Arrays.asList(new TextRange(start, end), new TextRange(base, base + end - start)));
+  }
+
   void onBulkDocumentUpdateStarted() {
     myBulkUpdateInProgress = true;
   }
@@ -579,6 +620,7 @@ public class SoftWrapModelImpl implements SoftWrapModelEx, PrioritizedDocumentLi
   void onBulkDocumentUpdateFinished() {
     myBulkUpdateInProgress = false;
     if (!isSoftWrappingEnabled()) {
+      myDirty = true;
       return;
     }
     recalculate();
@@ -603,7 +645,12 @@ public class SoftWrapModelImpl implements SoftWrapModelEx, PrioritizedDocumentLi
     if (!isSoftWrappingEnabled()) {
       return;
     }
-    executeSafely(myFoldProcessingEndTask);
+    if (myEditor.myUseNewRendering) {
+      myFoldProcessingEndTask.run(true);
+    }
+    else {
+      executeSafely(myFoldProcessingEndTask);
+    }
   }
 
   @Override
@@ -635,7 +682,6 @@ public class SoftWrapModelImpl implements SoftWrapModelEx, PrioritizedDocumentLi
     myApplianceManager.reset();
     myStorage.removeAll();
     myDeferredFoldRegions.clear();
-    myEditor.getScrollingModel().scrollToCaret(ScrollType.CENTER);
     myApplianceManager.recalculateIfNecessary();
   }
 
@@ -703,8 +749,12 @@ public class SoftWrapModelImpl implements SoftWrapModelEx, PrioritizedDocumentLi
   @NotNull
   @Override
   public String dumpState() {
-    return String.format("appliance manager state: %s; soft wraps mapping info: %s",
-                         myApplianceManager.dumpState(), myDataMapper.dumpState());
+    return String.format("\nuse soft wraps: %b, tab width: %d, additional columns: %b, " +
+                         "update in progress: %b, bulk update in progress: %b, active: %b, dirty: %b, deferred regions: %s" +
+                         "\nappliance manager state: %s\nsoft wraps mapping info: %s\nsoft wraps: %s",
+                         myUseSoftWraps, myTabWidth, myForceAdditionalColumns, myUpdateInProgress, myBulkUpdateInProgress, myActive,
+                         myDirty, myDeferredFoldRegions.toString(),
+                         myApplianceManager.dumpState(), myDataMapper.dumpState(), myStorage.dumpState());
   }
 
   @Override
@@ -712,6 +762,10 @@ public class SoftWrapModelImpl implements SoftWrapModelEx, PrioritizedDocumentLi
     return dumpState();
   }
 
+  public boolean isDirty() {
+    return myUseSoftWraps && myDirty;
+  }
+  
   /**
    * Defines generic interface for the command that may be proceeded in both <code>'soft wraps aware'</code> and
    * <code>'soft wraps unaware'</code> modes.

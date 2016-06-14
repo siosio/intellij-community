@@ -26,11 +26,13 @@ import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.TextRange;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.searches.ReferencesSearch;
+import com.intellij.psi.util.FileTypeUtils;
 import com.intellij.refactoring.MoveDestination;
 import com.intellij.refactoring.PackageWrapper;
 import com.intellij.refactoring.move.moveFilesOrDirectories.MoveFilesOrDirectoriesUtil;
@@ -38,9 +40,9 @@ import com.intellij.refactoring.util.MoveRenameUsageInfo;
 import com.intellij.refactoring.util.RefactoringUtil;
 import com.intellij.refactoring.util.TextOccurrencesUtil;
 import com.intellij.usageView.UsageInfo;
+import com.intellij.util.Function;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.containers.HashMap;
-import com.intellij.psi.util.FileTypeUtils;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
@@ -240,7 +242,10 @@ public class MoveClassesOrPackagesUtil {
         String aClassName = aClass.getName();
         ((PsiClassOwner)file).setPackageName(newPackage.getQualifiedName());
         newClass = findClassByName((PsiClassOwner)file, aClassName);
-        LOG.assertTrue(newClass != null);
+        LOG.assertTrue(newClass != null, "name: " + aClassName +
+                                         ", file: " + file +
+                                         ", classes: " + StringUtil.join(((PsiClassOwner)file).getClasses(),
+                                                                         psiClass -> psiClass.getName(), " "));
       }
     }
     return newClass;
@@ -337,9 +342,9 @@ public class MoveClassesOrPackagesUtil {
                                         LinkedHashSet<PsiDirectory> targetDirectories,
                                         Map<PsiDirectory, String> relativePathsToCreate) {
 
+    final PsiDirectory[] directories = aPackage.getDirectories();
     sourceRoots:
     for (VirtualFile root : contentSourceRoots) {
-      final PsiDirectory[] directories = aPackage.getDirectories();
       for (PsiDirectory directory : directories) {
         if (VfsUtil.isAncestor(root, directory.getVirtualFile(), false)) {
           targetDirectories.add(directory);

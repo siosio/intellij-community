@@ -2,6 +2,7 @@ package com.intellij.refactoring.introduceParameter;
 
 import com.intellij.codeInsight.intention.impl.TypeExpression;
 import com.intellij.codeInsight.lookup.LookupElement;
+import com.intellij.codeInsight.lookup.PsiTypeLookupItem;
 import com.intellij.codeInsight.template.Expression;
 import com.intellij.codeInsight.template.ExpressionContext;
 import com.intellij.codeInsight.template.Result;
@@ -38,8 +39,14 @@ public abstract class AbstractJavaInplaceIntroducer extends AbstractInplaceIntro
                                        PsiVariable localVariable,
                                        PsiExpression[] occurrences,
                                        TypeSelectorManagerImpl typeSelectorManager, String title) {
-    super(project, InjectedLanguageUtil.getTopLevelEditor(editor), expr, localVariable, occurrences, title, StdFileTypes.JAVA);
+    super(project, getEditor(editor, expr), expr, localVariable, occurrences, title, StdFileTypes.JAVA);
     myTypeSelectorManager = typeSelectorManager;
+  }
+
+  private static Editor getEditor(Editor editor, PsiExpression expr) {
+    return expr != null && Comparing.equal(InjectedLanguageUtil.getTopLevelFile(expr), expr.getContainingFile())
+           ? InjectedLanguageUtil.getTopLevelEditor(editor)
+           : editor;
   }
 
   protected abstract PsiVariable createFieldToStartTemplateOn(String[] names, PsiType psiType);
@@ -194,7 +201,23 @@ public abstract class AbstractJavaInplaceIntroducer extends AbstractInplaceIntro
 
        @Override
        public LookupElement[] calculateLookupItems(ExpressionContext context) {
-         return expression.calculateLookupItems(context);
+         final LookupElement[] elements = expression.calculateLookupItems(context);
+         if (elements != null) {
+           LookupElement toBeSelected = null;
+           for (LookupElement element : elements) {
+             if (element instanceof PsiTypeLookupItem && ((PsiTypeLookupItem)element).getType().getPresentableText().equals(defaultType)) {
+               toBeSelected = element;
+               break;
+             }
+           }
+           if (toBeSelected != null) {
+             final int idx = ArrayUtil.find(elements, toBeSelected);
+             if (idx > 0) {
+               return ArrayUtil.prepend(toBeSelected, ArrayUtil.remove(elements, idx));
+             }
+           }
+         }
+         return elements;
        }
 
        @Override

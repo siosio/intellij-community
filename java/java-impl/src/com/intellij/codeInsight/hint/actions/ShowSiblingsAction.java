@@ -28,7 +28,7 @@ import com.intellij.psi.*;
 import com.intellij.psi.impl.FindSuperElementsHelper;
 import com.intellij.psi.presentation.java.SymbolPresentationUtil;
 import com.intellij.psi.util.PsiTreeUtil;
-import com.intellij.util.Consumer;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 
 public class ShowSiblingsAction extends ShowImplementationsAction {
@@ -56,17 +56,14 @@ public class ShowSiblingsAction extends ShowImplementationsAction {
       }
     }
 
-    final NavigatablePsiElement[] superElements = (NavigatablePsiElement[])findSuperElements(element);
+    final PsiElement[] superElements =findSuperElements(element);
     if (superElements.length == 0) return;
 
     final boolean isMethod = superElements[0] instanceof PsiMethod;
-    final JBPopup popup = PsiElementListNavigator.navigateOrCreatePopup(superElements, "Choose super " + (isMethod ? "method" : "class or interface"), "Super " + (isMethod ? "methods" : "classes/interfaces"),
-                                                                       isMethod ? new MethodCellRenderer(false) : new PsiClassListCellRenderer(), null, new Consumer<Object[]>() {
-      @Override
-      public void consume(Object[] objects) {
-        showSiblings(invokedByShortcut, project, editor, file, editor != null, (PsiElement)objects[0]);
-      }
-    });
+    NavigatablePsiElement[] navigatablePsiElements = ContainerUtil.findAllAsArray(superElements, NavigatablePsiElement.class);
+    final JBPopup popup = PsiElementListNavigator.navigateOrCreatePopup(navigatablePsiElements, "Choose super " + (isMethod ? "method" : "class or interface"), "Super " + (isMethod ? "methods" : "classes/interfaces"),
+                                                                       isMethod ? new MethodCellRenderer(false) : PsiClassListCellRenderer.INSTANCE, null,
+                                                                        objects -> showSiblings(invokedByShortcut, project, editor, file, editor != null, (PsiElement)objects[0]));
     if (popup != null) {
       if (editor != null) {
         popup.showInBestPositionFor(editor);

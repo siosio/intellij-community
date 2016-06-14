@@ -122,6 +122,9 @@ public final class InjectedLanguageBlockWrapper implements BlockEx {
   private void collectBlocksIntersectingRange(final List<Block> list, final List<Block> result, @NotNull final TextRange range) {
     for (Block block : list) {
       final TextRange textRange = block.getTextRange();
+      if (block instanceof InjectedLanguageBlockWrapper && block.getTextRange().equals(range)) {
+        continue;
+      }
       if (range.contains(textRange)) {
         result.add(new InjectedLanguageBlockWrapper(block, myOffset, range, null, myLanguage));
       }
@@ -151,12 +154,7 @@ public final class InjectedLanguageBlockWrapper implements BlockEx {
     if (spacing instanceof DependantSpacingImpl && shift != 0) {
       DependantSpacingImpl hostSpacing = (DependantSpacingImpl)spacing;
       final int finalShift = shift;
-      List<TextRange> shiftedRanges = ContainerUtil.map(hostSpacing.getDependentRegionRanges(), new Function<TextRange, TextRange>() {
-        @Override
-        public TextRange fun(TextRange range) {
-          return range.shiftRight(finalShift);
-        }
-      });
+      List<TextRange> shiftedRanges = ContainerUtil.map(hostSpacing.getDependentRegionRanges(), range -> range.shiftRight(finalShift));
       return new DependantSpacingImpl(
         hostSpacing.getMinSpaces(), hostSpacing.getMaxSpaces(), shiftedRanges,
         hostSpacing.shouldKeepLineFeeds(), hostSpacing.getKeepBlankLines(), DependentSpacingRule.DEFAULT

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -102,15 +102,12 @@ public class LightAdvHighlightingPerformanceTest extends LightDaemonAnalyzerTest
     CodeInsightTestFixtureImpl.ensureIndexesUpToDate(getProject());
 
     final List<HighlightInfo> infos = new ArrayList<HighlightInfo>();
-    PlatformTestUtil.startPerformanceTest(getTestName(false), maxMillis, new ThrowableRunnable() {
-      @Override
-      public void run() throws Exception {
-        infos.clear();
-        DaemonCodeAnalyzer.getInstance(getProject()).restart();
-        List<HighlightInfo> h = doHighlighting();
-        infos.addAll(h);
-      }
-    }).cpuBound().usesAllCPUCores().assertTiming();
+    PlatformTestUtil.startPerformanceTest(getTestName(false), maxMillis, () -> {
+      infos.clear();
+      DaemonCodeAnalyzer.getInstance(getProject()).restart();
+      List<HighlightInfo> h = doHighlighting();
+      infos.addAll(h);
+    }).cpuBound().usesAllCPUCores().useLegacyScaling().assertTiming();
 
     return highlightErrors();
   }

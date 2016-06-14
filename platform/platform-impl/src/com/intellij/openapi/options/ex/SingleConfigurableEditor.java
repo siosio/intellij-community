@@ -24,6 +24,8 @@ import com.intellij.openapi.help.HelpManager;
 import com.intellij.openapi.options.BaseConfigurable;
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.options.ConfigurationException;
+import com.intellij.openapi.project.DumbModePermission;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.IndexNotReadyException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
@@ -120,6 +122,11 @@ public class SingleConfigurableEditor extends DialogWrapper {
     this(parent, configurable, ShowSettingsUtilImpl.createDimensionKey(configurable));
   }
 
+  @Override
+  public void show() {
+    DumbService.allowStartingDumbModeInside(DumbModePermission.MAY_START_BACKGROUND, () -> SingleConfigurableEditor.super.show());
+  }
+
   public Configurable getConfigurable() {
     return myConfigurable;
   }
@@ -188,6 +195,7 @@ public class SingleConfigurableEditor extends DialogWrapper {
       }
       return;
     }
+
     super.doOKAction();
   }
 
@@ -216,12 +224,7 @@ public class SingleConfigurableEditor extends DialogWrapper {
       };
 
       // invokeLater necessary to make sure dialog is already shown so we calculate modality state correctly.
-      SwingUtilities.invokeLater(new Runnable() {
-        @Override
-        public void run() {
-          addUpdateRequest(updateRequest);
-        }
-      });
+      SwingUtilities.invokeLater(() -> addUpdateRequest(updateRequest));
     }
 
     private void addUpdateRequest(final Runnable updateRequest) {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2014 Dave Griffith, Bas Leijdekkers
+ * Copyright 2003-2015 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -181,24 +181,16 @@ public class DoubleCheckedLockingInspection extends BaseInspection {
       if (!(thenBranch instanceof PsiSynchronizedStatement)) {
         return;
       }
-      final PsiSynchronizedStatement synchronizedStatement =
-        (PsiSynchronizedStatement)thenBranch;
+      final PsiSynchronizedStatement synchronizedStatement = (PsiSynchronizedStatement)thenBranch;
       final PsiCodeBlock body = synchronizedStatement.getBody();
-      if (body == null) {
-        return;
-      }
-      final PsiStatement[] statements = body.getStatements();
-      if (statements.length != 1) {
-        return;
-      }
-      final PsiStatement firstStatement = statements[0];
+      final PsiStatement firstStatement = ControlFlowUtils.getOnlyStatementInBlock(body);
       if (!(firstStatement instanceof PsiIfStatement)) {
         return;
       }
       final PsiIfStatement innerIf = (PsiIfStatement)firstStatement;
       final PsiExpression innerCondition = innerIf.getCondition();
-      if (!EquivalenceChecker.expressionsAreEquivalent(innerCondition,
-                                                       outerCondition)) {
+      if (!EquivalenceChecker.getCanonicalPsiEquivalence().expressionsAreEquivalent(innerCondition,
+                                                                                    outerCondition)) {
         return;
       }
       final PsiField field;

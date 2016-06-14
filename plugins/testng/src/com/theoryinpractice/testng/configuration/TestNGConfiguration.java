@@ -30,7 +30,6 @@ import com.intellij.execution.configurations.*;
 import com.intellij.execution.junit.RefactoringListeners;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.testframework.TestSearchScope;
-import com.intellij.execution.testframework.sm.runner.SMRunnerConsolePropertiesProvider;
 import com.intellij.execution.testframework.sm.runner.SMTRunnerConsoleProperties;
 import com.intellij.execution.util.JavaParametersUtil;
 import com.intellij.execution.util.ProgramParametersUtil;
@@ -42,6 +41,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.DefaultJDOMExternalizer;
 import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.WriteExternalException;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.refactoring.listeners.RefactoringElementAdapter;
@@ -57,9 +57,9 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
-public class TestNGConfiguration extends ModuleBasedConfiguration<JavaRunConfigurationModule>
-  implements CommonJavaRunConfigurationParameters, RefactoringListenerProvider, SMRunnerConsolePropertiesProvider {
+public class TestNGConfiguration extends JavaTestConfigurationBase {
   @NonNls private static final String PATTERNS_EL_NAME = "patterns";
   @NonNls private static final String PATTERN_EL_NAME = "pattern";
   @NonNls private static final String TEST_CLASS_ATT_NAME = "testClass";
@@ -116,10 +116,15 @@ public class TestNGConfiguration extends ModuleBasedConfiguration<JavaRunConfigu
     this(s, project, new TestData(), factory);
   }
 
-  private TestNGConfiguration(String s, Project project, TestData data, ConfigurationFactory factory) {
+  protected TestNGConfiguration(String s, Project project, TestData data, ConfigurationFactory factory) {
     super(s, new JavaRunConfigurationModule(project, false), factory);
     this.data = data;
     this.project = project;
+  }
+
+  @Nullable
+  public RemoteConnectionCreator getRemoteConnectionCreator() {
+    return null;
   }
 
   public RunProfileState getState(@NotNull final Executor executor, @NotNull final ExecutionEnvironment env) throws ExecutionException {
@@ -128,19 +133,6 @@ public class TestNGConfiguration extends ModuleBasedConfiguration<JavaRunConfigu
 
   public TestData getPersistantData() {
     return data;
-  }
-
-  @Override
-  protected ModuleBasedConfiguration createInstance() {
-    try {
-      return new TestNGConfiguration(getName(), getProject(), (TestData)data.clone(),
-                                     TestNGConfigurationType.getInstance().getConfigurationFactories()[0]);
-    }
-    catch (CloneNotSupportedException e) {
-      //can't happen right?
-      e.printStackTrace();
-    }
-    return null;
   }
 
   @Override
@@ -260,7 +252,7 @@ public class TestNGConfiguration extends ModuleBasedConfiguration<JavaRunConfigu
       patterns.add(JavaExecutionUtil.getRuntimeQualifiedName(pattern) + suffix);
     }
     data.setPatterns(patterns);
-    final Module module = RunConfigurationProducer.getInstance(TestNGPatternConfigurationProducer.class)
+    final Module module = RunConfigurationProducer.getInstance(AbstractTestNGPatternConfigurationProducer.class)
       .findModule(this, getConfigurationModule().getModule(), patterns);
     if (module == null) {
       data.setScope(TestSearchScope.WHOLE_PROJECT);
@@ -275,7 +267,8 @@ public class TestNGConfiguration extends ModuleBasedConfiguration<JavaRunConfigu
   @NotNull
   public SettingsEditor<? extends RunConfiguration> getConfigurationEditor() {
     SettingsEditorGroup<TestNGConfiguration> group = new SettingsEditorGroup<TestNGConfiguration>();
-    group.addEditor(ExecutionBundle.message("run.configuration.configuration.tab.title"), new TestNGConfigurationEditor(getProject()));
+    group.addEditor(ExecutionBundle.message("run.configuration.configuration.tab.title"),
+                    new TestNGConfigurationEditor<TestNGConfiguration>(getProject()));
     JavaRunConfigurationExtensionManager.getInstance().appendEditors(this, group);
     group.addEditor(ExecutionBundle.message("logs.tab.title"), new LogConfigurationPanel<TestNGConfiguration>());
     return group;
@@ -426,5 +419,24 @@ public class TestNGConfiguration extends ModuleBasedConfiguration<JavaRunConfigu
   @Override
   public SMTRunnerConsoleProperties createTestConsoleProperties(Executor executor) {
     return new TestNGConsoleProperties(this, executor);
+  }
+
+  @NotNull
+  @Override
+  public String getFrameworkPrefix() {
+    return "g";
+  }
+
+  @Nullable
+  public Set<String> calculateGroupNames() {
+    if (!TestType.GROUP.getType().equals(data.TEST_OBJECT)) {
+      return null;
+    }
+
+    Set<String> groups = StringUtil.split(data.getGroupName(), ",").stream()
+      .map(String::trim)
+      .filter(StringUtil::isNotEmpty)
+      .collect(Collectors.toSet());
+    return groups.isEmpty() ? null : groups;
   }
 }

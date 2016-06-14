@@ -18,15 +18,16 @@ package com.intellij.openapi.vfs.impl.jar;
 import com.intellij.openapi.util.Couple;
 import com.intellij.openapi.util.io.BufferExposingByteArrayInputStream;
 import com.intellij.openapi.util.io.FileAttributes;
+import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileSystem;
+import com.intellij.util.SmartList;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -37,7 +38,7 @@ public class CoreJarVirtualFile extends VirtualFile {
   private final String myName;
   private final FileAttributes myEntry;
   private final VirtualFile myParent;
-  private final List<VirtualFile> myChildren = new ArrayList<VirtualFile>();
+  private List<VirtualFile> myChildren = null;
 
   public CoreJarVirtualFile(@NotNull CoreJarHandler handler, @NotNull String name, @NotNull FileAttributes entry, @Nullable CoreJarVirtualFile parent) {
     myHandler = handler;
@@ -46,6 +47,9 @@ public class CoreJarVirtualFile extends VirtualFile {
     myParent = parent;
 
     if (parent != null) {
+      if (parent.myChildren == null) {
+        parent.myChildren = new SmartList<VirtualFile>();
+      }
       parent.myChildren.add(this);
     }
   }
@@ -65,7 +69,9 @@ public class CoreJarVirtualFile extends VirtualFile {
   @Override
   @NotNull
   public String getPath() {
-    if (myParent == null) return myHandler.getFile().getPath() + "!/";
+    if (myParent == null) {
+      return FileUtil.toSystemIndependentName(myHandler.getFile().getPath()) + "!/";
+    }
 
     String parentPath = myParent.getPath();
     StringBuilder answer = new StringBuilder(parentPath.length() + 1 + myName.length());
@@ -100,6 +106,9 @@ public class CoreJarVirtualFile extends VirtualFile {
 
   @Override
   public VirtualFile[] getChildren() {
+    if (myChildren == null) {
+      return VirtualFile.EMPTY_ARRAY;
+    }
     return myChildren.toArray(new VirtualFile[myChildren.size()]);
   }
 

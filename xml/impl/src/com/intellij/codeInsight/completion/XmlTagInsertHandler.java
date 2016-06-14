@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,6 +42,7 @@ import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.html.HtmlTag;
+import com.intellij.psi.impl.source.tree.injected.InjectedLanguageUtil;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.xml.XmlTag;
 import com.intellij.psi.xml.XmlTokenType;
@@ -63,13 +64,13 @@ public class XmlTagInsertHandler implements InsertHandler<LookupElement> {
     Project project = context.getProject();
     Editor editor = context.getEditor();
     // Need to insert " " to prevent creating tags like <tagThis is my text
-    editor.getDocument().putUserData(ENFORCING_TAG, Boolean.TRUE);
+    InjectedLanguageUtil.getTopLevelEditor(editor).getDocument().putUserData(ENFORCING_TAG, Boolean.TRUE);
     final int offset = editor.getCaretModel().getOffset();
     editor.getDocument().insertString(offset, " ");
     PsiDocumentManager.getInstance(project).commitDocument(editor.getDocument());
     PsiElement current = context.getFile().findElementAt(context.getStartOffset());
     editor.getDocument().deleteString(offset, offset + 1);
-    editor.getDocument().putUserData(ENFORCING_TAG, null);
+    InjectedLanguageUtil.getTopLevelEditor(editor).getDocument().putUserData(ENFORCING_TAG, null);
 
     final XmlTag tag = PsiTreeUtil.getContextOfType(current, XmlTag.class, true);
 
@@ -137,7 +138,7 @@ public class XmlTagInsertHandler implements InsertHandler<LookupElement> {
 
     // temp code
     PsiFile containingFile = tag.getContainingFile();
-    boolean htmlCode = HtmlUtil.hasHtml(containingFile);
+    boolean htmlCode = HtmlUtil.hasHtml(containingFile) || HtmlUtil.supportsXmlTypedHandlers(containingFile);
     template.setToReformat(!htmlCode);
 
     StringBuilder indirectRequiredAttrs = addRequiredAttributes(descriptor, tag, template, containingFile);
@@ -156,13 +157,13 @@ public class XmlTagInsertHandler implements InsertHandler<LookupElement> {
       public void templateFinished(final Template template, boolean brokenOff) {
         final int offset = editor.getCaretModel().getOffset();
 
-        if (chooseAttributeName && offset >= 3) {
-          char c = editor.getDocument().getCharsSequence().charAt(offset - 3);
+        if (chooseAttributeName && offset > 0) {
+          char c = editor.getDocument().getCharsSequence().charAt(offset - 1);
           if (c == '/' || (c == ' ' && brokenOff)) {
             new WriteCommandAction.Simple(project) {
               @Override
               protected void run() throws Throwable {
-                editor.getDocument().replaceString(offset - 2, offset + 1, ">");
+                editor.getDocument().replaceString(offset, offset + 3, ">");
               }
             }.execute();
           }
@@ -200,7 +201,7 @@ public class XmlTagInsertHandler implements InsertHandler<LookupElement> {
                                                      Template template,
                                                      PsiFile containingFile) {
 
-    boolean htmlCode = HtmlUtil.hasHtml(containingFile);
+    boolean htmlCode = HtmlUtil.hasHtml(containingFile) || HtmlUtil.supportsXmlTypedHandlers(containingFile);
     Set<String> notRequiredAttributes = Collections.emptySet();
 
     if (tag instanceof HtmlTag) {
@@ -225,12 +226,13 @@ public class XmlTagInsertHandler implements InsertHandler<LookupElement> {
       for (XmlAttributeDescriptor attributeDecl : attributes) {
         String attributeName = attributeDecl.getName(tag);
 
-        if (attributeDecl.isRequired() && (tag == null || tag.getAttributeValue(attributeName) == null)) {
+        boolean shouldBeInserted = extension.shouldBeInserted(attributeDecl);
+        if (shouldBeInserted && (tag == null || tag.getAttributeValue(attributeName) == null)) {
           if (!notRequiredAttributes.contains(attributeName)) {
             if (!extension.isIndirectSyntax(attributeDecl)) {
-              template.addTextSegment(" " + attributeName + "=\"");
+              template.addTextSegment(" " + attributeName + "=" + XmlAttributeInsertHandler.getAttributeQuote(htmlCode));
               template.addVariable(new MacroCallNode(new CompleteMacro()), true);
-              template.addTextSegment("\"");
+              template.addTextSegment(XmlAttributeInsertHandler.getAttributeQuote(htmlCode));
             }
             else {
               if (indirectRequiredAttrs == null) indirectRequiredAttrs = new StringBuilder();
@@ -238,8 +240,9 @@ public class XmlTagInsertHandler implements InsertHandler<LookupElement> {
             }
           }
         }
-        else if (attributeDecl.isRequired() && attributeDecl.isFixed() && attributeDecl.getDefaultValue() != null && !htmlCode) {
-          template.addTextSegment(" " + attributeName + "=\"" + attributeDecl.getDefaultValue() + "\"");
+        else if (shouldBeInserted && attributeDecl.isFixed() && attributeDecl.getDefaultValue() != null && !htmlCode) {
+          template.addTextSegment(" " + attributeName + "=" + XmlAttributeInsertHandler.getAttributeQuote(false) +
+                                  attributeDecl.getDefaultValue() + XmlAttributeInsertHandler.getAttributeQuote(false));
         }
       }
     }
@@ -252,6 +255,7 @@ public class XmlTagInsertHandler implements InsertHandler<LookupElement> {
                                    XmlTag tag,
                                    Template template,
                                    StringBuilder indirectRequiredAttrs) {
+    boolean htmlCode = HtmlUtil.hasHtml(tag.getContainingFile()) || HtmlUtil.supportsXmlTypedHandlers(tag.getContainingFile());
 
     if (completionChar == '>' || (completionChar == '/' && indirectRequiredAttrs != null)) {
       template.addTextSegment(">");
@@ -288,7 +292,7 @@ public class XmlTagInsertHandler implements InsertHandler<LookupElement> {
     else if (completionChar == ' ' && template.getSegmentsCount() == 0) {
       if (WebEditorOptions.getInstance().isAutomaticallyStartAttribute() &&
           (descriptor.getAttributesDescriptors(tag).length > 0 || isTagFromHtml(tag) && !HtmlUtil.isTagWithoutAttributes(tag.getName()))) {
-        completeAttribute(template);
+        completeAttribute(template, htmlCode);
         return true;
       }
     }
@@ -299,7 +303,7 @@ public class XmlTagInsertHandler implements InsertHandler<LookupElement> {
       else {
         if (needAlLeastOneAttribute(tag) && WebEditorOptions.getInstance().isAutomaticallyStartAttribute() && tag.getAttributes().length == 0
             && template.getSegmentsCount() == 0) {
-          completeAttribute(template);
+          completeAttribute(template, htmlCode);
           return true;
         }
         else {
@@ -311,12 +315,12 @@ public class XmlTagInsertHandler implements InsertHandler<LookupElement> {
     return false;
   }
 
-  private static void completeAttribute(Template template) {
+  private static void completeAttribute(Template template, boolean htmlCode) {
     template.addTextSegment(" ");
     template.addVariable(new MacroCallNode(new CompleteMacro()), true);
-    template.addTextSegment("=\"");
+    template.addTextSegment("=" + XmlAttributeInsertHandler.getAttributeQuote(htmlCode));
     template.addEndVariable();
-    template.addTextSegment("\"");
+    template.addTextSegment(XmlAttributeInsertHandler.getAttributeQuote(htmlCode));
   }
 
   private static boolean needAlLeastOneAttribute(XmlTag tag) {

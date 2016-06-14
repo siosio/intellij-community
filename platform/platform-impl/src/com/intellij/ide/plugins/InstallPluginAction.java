@@ -15,7 +15,6 @@
  */
 package com.intellij.ide.plugins;
 
-import com.intellij.CommonBundle;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.IdeBundle;
 import com.intellij.openapi.actionSystem.AnAction;
@@ -24,10 +23,7 @@ import com.intellij.openapi.actionSystem.Presentation;
 import com.intellij.openapi.extensions.PluginId;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.ui.Messages;
-import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.util.Function;
 import com.intellij.util.net.IOExceptionDialog;
-import com.intellij.xml.util.XmlStringUtil;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
@@ -91,9 +87,13 @@ public class InstallPluginAction extends AnAction implements DumbAware {
   }
   
   public void install(@Nullable final Runnable onSuccess) {
+    install(onSuccess, null, false);
+  }
+
+  public void install(@Nullable final Runnable onSuccess, @Nullable final Runnable cleanup, boolean confirmed) {
     IdeaPluginDescriptor[] selection = getPluginTable().getSelectedObjects();
 
-    if (userConfirm(selection)) {
+    if (confirmed || userConfirm(selection)) {
       final List<PluginNode> list = new ArrayList<PluginNode>();
       for (IdeaPluginDescriptor descr : selection) {
         PluginNode pluginNode = null;
@@ -116,64 +116,43 @@ public class InstallPluginAction extends AnAction implements DumbAware {
       }
 
       final InstalledPluginsTableModel installedModel = (InstalledPluginsTableModel)myInstalled.getPluginsModel();
-      final Set<IdeaPluginDescriptor> disabled = new HashSet<IdeaPluginDescriptor>();
-      final Set<IdeaPluginDescriptor> disabledDependants = new HashSet<IdeaPluginDescriptor>();
-      for (PluginNode node : list) {
-        final PluginId pluginId = node.getPluginId();
-        if (installedModel.isDisabled(pluginId)) {
-          disabled.add(node);
-        }
-        final List<PluginId> depends = node.getDepends();
-        if (depends != null) {
-          final Set<PluginId> optionalDeps = new HashSet<PluginId>(Arrays.asList(node.getOptionalDependentPluginIds()));
-          for (PluginId dependantId : depends) {
-            if (optionalDeps.contains(dependantId)) continue;
-            final IdeaPluginDescriptor pluginDescriptor = PluginManager.getPlugin(dependantId);
-            if (pluginDescriptor != null && installedModel.isDisabled(dependantId)) {
-              disabledDependants.add(pluginDescriptor);
-            }
-          }
-        }
-      }
+      PluginManagerMain.PluginEnabler.UI pluginEnabler = new PluginManagerMain.PluginEnabler.UI(installedModel);
 
-      if (suggestToEnableInstalledPlugins(installedModel, disabled, disabledDependants, list)) {
+      if (PluginManagerMain.suggestToEnableInstalledDependantPlugins(pluginEnabler, list)) {
         myInstalled.setRequireShutdown(true);
       }
 
       try {
-        Runnable onInstallRunnable = new Runnable() {
-          @Override
-          public void run() {
+        Runnable onInstallRunnable = () -> {
+          for (PluginNode node : list) {
+            installedModel.appendOrUpdateDescriptor(node);
+          }
+          if (!myInstalled.isDisposed()) {
+            getPluginTable().updateUI();
+            myInstalled.setRequireShutdown(true);
+          }
+          else {
+            boolean needToRestart = false;
             for (PluginNode node : list) {
-              installedModel.appendOrUpdateDescriptor(node);
-            }
-            if (!myInstalled.isDisposed()) {
-              getPluginTable().updateUI();
-              myInstalled.setRequireShutdown(true);
-            }
-            else {
-              boolean needToRestart = false;
-              for (PluginNode node : list) {
-                final IdeaPluginDescriptor pluginDescriptor = PluginManager.getPlugin(node.getPluginId());
-                if (pluginDescriptor == null || pluginDescriptor.isEnabled()) {
-                  needToRestart = true;
-                  break;
-                }
+              final IdeaPluginDescriptor pluginDescriptor = PluginManager.getPlugin(node.getPluginId());
+              if (pluginDescriptor == null || pluginDescriptor.isEnabled()) {
+                needToRestart = true;
+                break;
               }
+            }
 
-              if (needToRestart) {
-                PluginManagerMain.notifyPluginsUpdated(null);
-              }
-            }
-            if (onSuccess != null) {
-              onSuccess.run();
+            if (needToRestart) {
+              PluginManagerMain.notifyPluginsUpdated(null);
             }
           }
+          if (onSuccess != null) {
+            onSuccess.run();
+          }
         };
-        Runnable cleanupRunnable = new Runnable() {
-          @Override
-          public void run() {
-            ourInstallingNodes.removeAll(list);
+        Runnable cleanupRunnable = () -> {
+          ourInstallingNodes.removeAll(list);
+          if (cleanup != null) {
+            cleanup.run();
           }
         };
         final List<IdeaPluginDescriptor> plugins = myHost.getPluginsModel().getAllPlugins();
@@ -183,83 +162,9 @@ public class InstallPluginAction extends AnAction implements DumbAware {
         ourInstallingNodes.removeAll(list);
         PluginManagerMain.LOG.error(e1);
         //noinspection SSBasedInspection
-        SwingUtilities.invokeLater(new Runnable() {
-          @Override
-          public void run() {
-            IOExceptionDialog.showErrorDialog(IdeBundle.message("action.download.and.install.plugin"), IdeBundle.message("error.plugin.download.failed"));
-          }
-        });
+        SwingUtilities.invokeLater(() -> IOExceptionDialog.showErrorDialog(IdeBundle.message("action.download.and.install.plugin"), IdeBundle.message("error.plugin.download.failed")));
       }
     }
-  }
-
-  private static boolean suggestToEnableInstalledPlugins(InstalledPluginsTableModel pluginsModel,
-                                                         Set<IdeaPluginDescriptor> disabled,
-                                                         Set<IdeaPluginDescriptor> disabledDependants,
-                                                         List<PluginNode> list) {
-    if (!disabled.isEmpty() || !disabledDependants.isEmpty()) {
-      String message = "";
-      if (disabled.size() == 1) {
-        message += "Updated plugin '" + disabled.iterator().next().getName() + "' is disabled.";
-      }
-      else if (!disabled.isEmpty()) {
-        message += "Updated plugins " + StringUtil.join(disabled, new Function<IdeaPluginDescriptor, String>() {
-          @Override
-          public String fun(IdeaPluginDescriptor pluginDescriptor) {
-            return pluginDescriptor.getName();
-          }
-        }, ", ") + " are disabled.";
-      }
-
-      if (!disabledDependants.isEmpty()) {
-        message += "<br>";
-        message += "Updated plugin" + (list.size() > 1 ? "s depend " : " depends ") + "on disabled";
-        if (disabledDependants.size() == 1) {
-          message += " plugin '" + disabledDependants.iterator().next().getName() + "'.";
-        }
-        else {
-          message += " plugins " + StringUtil.join(disabledDependants, new Function<IdeaPluginDescriptor, String>() {
-            @Override
-            public String fun(IdeaPluginDescriptor pluginDescriptor) {
-              return pluginDescriptor.getName();
-            }
-          }, ", ") + ".";
-        }
-      }
-      message += " Disabled plugins " + (disabled.isEmpty() ? "and plugins which depend on disabled " :"") + "won't be activated after restart.";
-
-      int result;
-      if (!disabled.isEmpty() && !disabledDependants.isEmpty()) {
-        result =
-          Messages.showYesNoCancelDialog(XmlStringUtil.wrapInHtml(message), CommonBundle.getWarningTitle(), "Enable all",
-                                         "Enable updated plugin" + (disabled.size() > 1 ? "s" : ""), CommonBundle.getCancelButtonText(),
-                                         Messages.getQuestionIcon());
-        if (result == Messages.CANCEL) return false;
-      }
-      else {
-        message += "<br>Would you like to enable ";
-        if (!disabled.isEmpty()) {
-          message += "updated plugin" + (disabled.size() > 1 ? "s" : "");
-        }
-        else {
-          //noinspection SpellCheckingInspection
-          message += "plugin dependenc" + (disabledDependants.size() > 1 ? "ies" : "y");
-        }
-        message += "?";
-        result = Messages.showYesNoDialog(XmlStringUtil.wrapInHtml(message), CommonBundle.getWarningTitle(), Messages.getQuestionIcon());
-        if (result == Messages.NO) return false;
-      }
-
-      if (result == Messages.YES) {
-        disabled.addAll(disabledDependants);
-        pluginsModel.enableRows(disabled.toArray(new IdeaPluginDescriptor[disabled.size()]), true);
-      }
-      else if (result == Messages.NO && !disabled.isEmpty()) {
-        pluginsModel.enableRows(disabled.toArray(new IdeaPluginDescriptor[disabled.size()]), true);
-      }
-      return true;
-    }
-    return false;
   }
 
   public PluginTable getPluginTable() {

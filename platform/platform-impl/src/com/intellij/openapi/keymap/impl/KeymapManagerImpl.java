@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,16 +17,15 @@ package com.intellij.openapi.keymap.impl;
 
 import com.intellij.ide.WelcomeWizardUtil;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.actionSystem.IdeActions;
 import com.intellij.openapi.components.*;
 import com.intellij.openapi.keymap.Keymap;
 import com.intellij.openapi.keymap.KeymapManagerListener;
 import com.intellij.openapi.keymap.ex.KeymapManagerEx;
-import com.intellij.openapi.options.BaseSchemeProcessor;
+import com.intellij.openapi.options.Scheme;
+import com.intellij.openapi.options.SchemeProcessor;
 import com.intellij.openapi.options.SchemesManager;
 import com.intellij.openapi.options.SchemesManagerFactory;
 import com.intellij.openapi.util.*;
-import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.containers.ContainerUtil;
 import org.jdom.Element;
@@ -34,16 +33,15 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.awt.event.KeyEvent;
 import java.util.*;
 
 @State(
   name = "KeymapManager",
-  storages = @Storage(file = StoragePathMacros.APP_CONFIG + "/keymap.xml", roamingType = RoamingType.PER_PLATFORM),
+  storages = @Storage(value = "keymap.xml", roamingType = RoamingType.PER_OS),
   additionalExportFile = KeymapManagerImpl.KEYMAPS_DIR_PATH
 )
 public class KeymapManagerImpl extends KeymapManagerEx implements PersistentStateComponent<Element>, ApplicationComponent {
-  static final String KEYMAPS_DIR_PATH = StoragePathMacros.ROOT_CONFIG + "/keymaps";
+  static final String KEYMAPS_DIR_PATH = "keymaps";
 
   private final List<KeymapManagerListener> myListeners = ContainerUtil.createLockFreeCopyOnWriteList();
   private final Map<String, String> myBoundShortcuts = new HashMap<String, String>();
@@ -55,7 +53,7 @@ public class KeymapManagerImpl extends KeymapManagerEx implements PersistentStat
   public static boolean ourKeymapManagerInitialized = false;
 
   KeymapManagerImpl(@NotNull DefaultKeymap defaultKeymap, @NotNull SchemesManagerFactory factory) {
-    BaseSchemeProcessor<KeymapImpl> schemeProcessor = new BaseSchemeProcessor<KeymapImpl>() {
+    SchemeProcessor<KeymapImpl> schemeProcessor = new SchemeProcessor<KeymapImpl>() {
       @NotNull
       @Override
       public KeymapImpl readScheme(@NotNull Element element) throws InvalidDataException {
@@ -74,8 +72,16 @@ public class KeymapManagerImpl extends KeymapManagerEx implements PersistentStat
       public State getState(@NotNull KeymapImpl scheme) {
         return scheme.canModify() ? State.POSSIBLY_CHANGED : State.NON_PERSISTENT;
       }
+
+      @Override
+      public void onCurrentSchemeChanged(@Nullable Scheme oldScheme) {
+        Keymap keymap = mySchemesManager.getCurrentScheme();
+        for (KeymapManagerListener listener : myListeners) {
+          listener.activeKeymapChanged(keymap);
+        }
+      }
     };
-    mySchemesManager = factory.createSchemesManager(KEYMAPS_DIR_PATH, schemeProcessor, RoamingType.PER_USER);
+    mySchemesManager = factory.create(KEYMAPS_DIR_PATH, schemeProcessor);
 
     String systemDefaultKeymap = WelcomeWizardUtil.getWizardMacKeymap() != null
                                  ? WelcomeWizardUtil.getWizardMacKeymap()
@@ -87,16 +93,6 @@ public class KeymapManagerImpl extends KeymapManagerEx implements PersistentStat
       }
     }
     mySchemesManager.loadSchemes();
-
-    if (Registry.is("editor.add.carets.on.double.control.arrows")) {
-      int modifierKeyCode = SystemInfo.isMac ? KeyEvent.VK_ALT : KeyEvent.VK_CONTROL;
-      ModifierKeyDoubleClickHandler.getInstance().registerAction(IdeActions.ACTION_EDITOR_CLONE_CARET_ABOVE, modifierKeyCode, KeyEvent.VK_UP);
-      ModifierKeyDoubleClickHandler.getInstance().registerAction(IdeActions.ACTION_EDITOR_CLONE_CARET_BELOW, modifierKeyCode, KeyEvent.VK_DOWN);
-      ModifierKeyDoubleClickHandler.getInstance().registerAction(IdeActions.ACTION_EDITOR_MOVE_CARET_LEFT_WITH_SELECTION, modifierKeyCode, KeyEvent.VK_LEFT);
-      ModifierKeyDoubleClickHandler.getInstance().registerAction(IdeActions.ACTION_EDITOR_MOVE_CARET_RIGHT_WITH_SELECTION, modifierKeyCode, KeyEvent.VK_RIGHT);
-      ModifierKeyDoubleClickHandler.getInstance().registerAction(IdeActions.ACTION_EDITOR_MOVE_LINE_START_WITH_SELECTION, modifierKeyCode, KeyEvent.VK_HOME);
-      ModifierKeyDoubleClickHandler.getInstance().registerAction(IdeActions.ACTION_EDITOR_MOVE_LINE_END_WITH_SELECTION, modifierKeyCode, KeyEvent.VK_END);
-    }
 
     //noinspection AssignmentToStaticFieldFromInstanceMethod
     ourKeymapManagerInitialized = true;
@@ -137,13 +133,7 @@ public class KeymapManagerImpl extends KeymapManagerEx implements PersistentStat
 
   @Override
   public void setActiveKeymap(@Nullable Keymap keymap) {
-    Keymap previousActive = mySchemesManager.getCurrentScheme();
-    mySchemesManager.setCurrentSchemeName(keymap == null ? null : keymap.getName());
-    if (keymap != previousActive) {
-      for (KeymapManagerListener listener : myListeners) {
-        listener.activeKeymapChanged(keymap);
-      }
-    }
+    mySchemesManager.setCurrent(keymap);
   }
 
   @Override
@@ -177,8 +167,8 @@ public class KeymapManagerImpl extends KeymapManagerEx implements PersistentStat
     return mySchemesManager;
   }
 
-  public void setKeymaps(@NotNull List<Keymap> keymaps, @Nullable Condition<Keymap> removeCondition) {
-    mySchemesManager.setSchemes(keymaps, removeCondition);
+  public void setKeymaps(@NotNull List<Keymap> keymaps, @Nullable Keymap active, @Nullable Condition<Keymap> removeCondition) {
+    mySchemesManager.setSchemes(keymaps, active, removeCondition);
   }
 
   @Override
@@ -200,10 +190,7 @@ public class KeymapManagerImpl extends KeymapManagerEx implements PersistentStat
     Element child = state.getChild(ACTIVE_KEYMAP);
     String activeKeymapName = child == null ? null : child.getAttributeValue(NAME_ATTRIBUTE);
     if (!StringUtil.isEmptyOrSpaces(activeKeymapName)) {
-      Keymap keymap = getKeymap(activeKeymapName);
-      if (keymap != null) {
-        setActiveKeymap(keymap);
-      }
+      mySchemesManager.setCurrentSchemeName(activeKeymapName);
     }
   }
 

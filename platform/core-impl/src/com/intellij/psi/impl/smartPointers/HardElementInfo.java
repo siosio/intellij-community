@@ -15,10 +15,10 @@
  */
 package com.intellij.psi.impl.smartPointers;
 
-import com.intellij.openapi.editor.Document;
-import com.intellij.openapi.editor.RangeMarker;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Comparing;
+import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Segment;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
@@ -29,7 +29,7 @@ import org.jetbrains.annotations.NotNull;
 /**
 * User: cdr
 */
-class HardElementInfo implements SmartPointerElementInfo {
+class HardElementInfo extends SmartPointerElementInfo {
   @NotNull
   private final PsiElement myElement;
   @NotNull
@@ -38,19 +38,6 @@ class HardElementInfo implements SmartPointerElementInfo {
   public HardElementInfo(@NotNull Project project, @NotNull PsiElement element) {
     myElement = element;
     myProject = project;
-  }
-
-  @Override
-  public Document getDocumentToSynchronize() {
-    return null;
-  }
-
-  @Override
-  public void fastenBelt(int offset, RangeMarker[] cachedRangeMarker) {
-  }
-
-  @Override
-  public void unfastenBelt(int offset) {
   }
 
   @Override
@@ -69,8 +56,13 @@ class HardElementInfo implements SmartPointerElementInfo {
   }
 
   @Override
-  public boolean pointsToTheSameElementAs(@NotNull SmartPointerElementInfo other) {
-    return Comparing.equal(myElement, other.restoreElement());
+  public boolean pointsToTheSameElementAs(@NotNull final SmartPointerElementInfo other) {
+    return Comparing.equal(myElement, ApplicationManager.getApplication().runReadAction(new Computable<PsiElement>() {
+      @Override
+      public PsiElement compute() {
+        return other.restoreElement();
+      }
+    }));
   }
 
   @Override
@@ -83,6 +75,11 @@ class HardElementInfo implements SmartPointerElementInfo {
     return myElement.getTextRange();
   }
 
+  @Override
+  public Segment getPsiRange() {
+    return getRange();
+  }
+
   @NotNull
   @Override
   public Project getProject() {
@@ -90,7 +87,7 @@ class HardElementInfo implements SmartPointerElementInfo {
   }
 
   @Override
-  public void cleanup() {
-
+  public String toString() {
+    return "hard{" + myElement + " of " + myElement.getClass() + "}";
   }
 }

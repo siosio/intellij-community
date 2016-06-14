@@ -15,11 +15,13 @@
  */
 package com.intellij.rt.execution.testFrameworks;
 
-import com.intellij.rt.execution.CommandLineWrapper;
-
 import java.io.*;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.jar.Attributes;
+import java.util.jar.JarOutputStream;
+import java.util.jar.Manifest;
+import java.util.zip.ZipOutputStream;
 
 public abstract class ForkedByModuleSplitter {
   protected final ForkedDebuggerHelper myForkedDebuggerHelper = new ForkedDebuggerHelper();
@@ -41,7 +43,8 @@ public abstract class ForkedByModuleSplitter {
 
   public int startSplitting(String[] args,
                             String configName,
-                            String commandLinePath) throws Exception {
+                            String commandLinePath,
+                            String repeatCount) throws Exception {
     args = myForkedDebuggerHelper.excludeDebugPortFromArgs(args);
 
     myVMParameters = new ArrayList();
@@ -58,14 +61,14 @@ public abstract class ForkedByModuleSplitter {
     }
 
     long time = System.currentTimeMillis();
-    int result = startSplitting(args, configName);
+    int result = startSplitting(args, configName, repeatCount);
     myForkedDebuggerHelper.closeDebugSocket();
     sendTime(time);
     return result;
   }
 
   //read output from wrappers
-  protected int startChildFork(List args, File workingDir, String classpath) throws IOException, InterruptedException {
+  protected int startChildFork(List args, File workingDir, String classpath, String repeatCount) throws IOException, InterruptedException {
     List vmParameters = new ArrayList(myVMParameters);
 
     myForkedDebuggerHelper.setupDebugger(vmParameters);
@@ -79,28 +82,7 @@ public abstract class ForkedByModuleSplitter {
     builder.add("-classpath");
     if (myDynamicClasspath.length() > 0) {
       try {
-        final File classpathFile = File.createTempFile("classpath", null);
-        classpathFile.deleteOnExit();
-        final PrintWriter writer = new PrintWriter(new OutputStreamWriter(new FileOutputStream(classpathFile), "UTF-8"));
-        try {
-          int idx = 0;
-          while (idx < classpath.length()) {
-            final int endIdx = classpath.indexOf(File.pathSeparator, idx);
-            if (endIdx < 0) {
-              writer.println(classpath.substring(idx));
-              break;
-            }
-            writer.println(classpath.substring(idx, endIdx));
-            idx = endIdx + File.pathSeparator.length();
-          }
-        }
-        finally {
-          writer.close();
-        }
-
-        builder.add(myDynamicClasspath);
-        builder.add(CommandLineWrapper.class.getName());
-        builder.add(classpathFile.getAbsolutePath());
+        builder.add(createClasspathJarFile(new Manifest(), classpath).getAbsolutePath());
       }
       catch (Throwable e) {
         builder.add(classpath);
@@ -113,6 +95,9 @@ public abstract class ForkedByModuleSplitter {
     builder.add(getStarterName());
     builder.add(testOutputPath);
     builder.add(args);
+    if (repeatCount != null) {
+      builder.add(repeatCount);
+    }
     builder.setWorkingDir(workingDir);
 
     final Process exec = builder.createProcess();
@@ -122,7 +107,7 @@ public abstract class ForkedByModuleSplitter {
   }
 
   //read file with classes grouped by module
-  protected int splitPerModule() throws IOException {
+  protected int splitPerModule(String repeatCount) throws IOException {
     int result = 0;
     final BufferedReader perDirReader = new BufferedReader(new FileReader(myWorkingDirsPath));
     try {
@@ -145,7 +130,7 @@ public abstract class ForkedByModuleSplitter {
             classNames.add(className);
           }
 
-          final int childResult = startPerModuleFork(moduleName, classNames, packageName, workingDir, classpath, result);
+          final int childResult = startPerModuleFork(moduleName, classNames, packageName, workingDir, classpath, repeatCount, result);
           result = Math.min(childResult, result);
         }
         catch (Exception e) {
@@ -159,17 +144,54 @@ public abstract class ForkedByModuleSplitter {
     return result;
   }
 
-  protected abstract int startSplitting(String[] args, String configName) throws Exception;
+  protected abstract int startSplitting(String[] args, String configName, String repeatCount) throws Exception;
 
   protected abstract int startPerModuleFork(String moduleName,
                                             List classNames,
                                             String packageName,
                                             String workingDir,
                                             String classpath,
-                                            int result) throws Exception;
+                                            String repeatCount, int result) throws Exception;
 
   protected abstract String getStarterName();
   
   protected void sendTime(long time) {}
   protected void sendTree(Object rootDescription) {}
+
+  public static File createClasspathJarFile(Manifest manifest, String classpath) throws IOException {
+    final Attributes attributes = manifest.getMainAttributes();
+    attributes.put(Attributes.Name.MANIFEST_VERSION, "1.0");
+
+    String classpathForManifest = "";
+    int idx = 0;
+    int endIdx = 0;
+    while (endIdx >= 0) {
+      endIdx = classpath.indexOf(File.pathSeparator, idx);
+      String path = endIdx < 0 ? classpath.substring(idx) : classpath.substring(idx, endIdx);
+      if (classpathForManifest.length() > 0) {
+        classpathForManifest += " ";
+      }
+      try {
+        //noinspection Since15
+        classpathForManifest += new File(path).toURI().toURL().toString();
+      }
+      catch (NoSuchMethodError e) {
+        classpathForManifest += new File(path).toURL().toString();
+      }
+      idx = endIdx + File.pathSeparator.length();
+    }
+    attributes.put(Attributes.Name.CLASS_PATH, classpathForManifest);
+
+    File jarFile = File.createTempFile("classpath", ".jar");
+    ZipOutputStream jarPlugin = null;
+    try {
+      BufferedOutputStream out = new BufferedOutputStream(new FileOutputStream(jarFile));
+      jarPlugin = new JarOutputStream(out, manifest);
+    }
+    finally {
+      if (jarPlugin != null) jarPlugin.close();
+    }
+    jarFile.deleteOnExit();
+    return jarFile;
+  }
 }

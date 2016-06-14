@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,26 +41,20 @@ public class Py3UnresolvedReferencesInspectionTest extends PyTestCase {
   }
 
   private void doTest() {
-    runWithLanguageLevel(LanguageLevel.PYTHON33, new Runnable() {
-      @Override
-      public void run() {
-        myFixture.configureByFile(TEST_DIRECTORY + getTestName(true) + ".py");
-        myFixture.enableInspections(PyUnresolvedReferencesInspection.class);
-        myFixture.checkHighlighting(true, false, false);
-      }
+    runWithLanguageLevel(LanguageLevel.PYTHON33, () -> {
+      myFixture.configureByFile(TEST_DIRECTORY + getTestName(true) + ".py");
+      myFixture.enableInspections(PyUnresolvedReferencesInspection.class);
+      myFixture.checkHighlighting(true, false, false);
     });
   }
 
   private void doMultiFileTest(@NotNull final String filename) {
-    runWithLanguageLevel(LanguageLevel.PYTHON33, new Runnable() {
-      @Override
-      public void run() {
-        final String testName = getTestName(false);
-        myFixture.copyDirectoryToProject(TEST_DIRECTORY + testName, "");
-        myFixture.configureFromTempProjectFile(filename);
-        myFixture.enableInspections(PyUnresolvedReferencesInspection.class);
-        myFixture.checkHighlighting(true, false, false);
-      }
+    runWithLanguageLevel(LanguageLevel.PYTHON33, () -> {
+      final String testName = getTestName(false);
+      myFixture.copyDirectoryToProject(TEST_DIRECTORY + testName, "");
+      myFixture.configureFromTempProjectFile(filename);
+      myFixture.enableInspections(PyUnresolvedReferencesInspection.class);
+      myFixture.checkHighlighting(true, false, false);
     });
   }
 
@@ -112,8 +106,34 @@ public class Py3UnresolvedReferencesInspectionTest extends PyTestCase {
     doTest();
   }
 
+  // PY-14385
+  public void testNotImportedSubmodulesOfNamespacePackage() {
+    doMultiFileTest("main.py");
+  }
+
   // PY-15017
   public void testClassLevelReferenceInMethodAnnotation() {
+    doTest();
+  }
+
+  // PY-17841
+  public void testTypingParameterizedTypeIndexing() {
+    myFixture.copyDirectoryToProject("typing", "");
+    doTest();
+  }
+
+  // PY-17841
+  public void testMostDerivedMetaClass() {
+    doTest();
+  }
+
+  // PY-17841
+  public void testNoMostDerivedMetaClass() {
+    doTest();
+  }
+
+  // PY-19028
+  public void testDecodeBytesAfterSlicing() {
     doTest();
   }
 }

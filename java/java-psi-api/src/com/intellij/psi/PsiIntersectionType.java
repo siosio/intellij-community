@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,8 +15,10 @@
  */
 package com.intellij.psi;
 
+import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.search.GlobalSearchScope;
+import com.intellij.psi.util.PsiUtil;
 import com.intellij.psi.util.TypeConversionUtil;
 import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
@@ -33,7 +35,7 @@ public class PsiIntersectionType extends PsiType.Stub {
   private final PsiType[] myConjuncts;
 
   private PsiIntersectionType(@NotNull PsiType[] conjuncts) {
-    super(PsiAnnotation.EMPTY_ARRAY);
+    super(TypeAnnotationProvider.EMPTY);
     myConjuncts = conjuncts;
   }
 
@@ -57,17 +59,25 @@ public class PsiIntersectionType extends PsiType.Stub {
     return new PsiIntersectionType(conjuncts);
   }
 
-  private static PsiType[] flattenAndRemoveDuplicates(PsiType[] conjuncts) {
+  private static PsiType[] flattenAndRemoveDuplicates(final PsiType[] conjuncts) {
     try {
-      Set<PsiType> flattened = flatten(conjuncts, ContainerUtil.<PsiType>newLinkedHashSet());
-      return flattened.toArray(createArray(flattened.size()));
+      final Set<PsiType> flattenConjuncts = PsiCapturedWildcardType.guard.doPreventingRecursion(conjuncts, true, new Computable<Set<PsiType>>() {
+        @Override
+        public Set<PsiType> compute() {
+          return flatten(conjuncts, ContainerUtil.<PsiType>newLinkedHashSet());
+        }
+      });
+      if (flattenConjuncts == null) {
+        return conjuncts;
+      }
+      return flattenConjuncts.toArray(createArray(flattenConjuncts.size()));
     }
     catch (NoSuchElementException e) {
       throw new RuntimeException(Arrays.toString(conjuncts), e);
     }
   }
 
-  private static Set<PsiType> flatten(PsiType[] conjuncts, Set<PsiType> types) {
+  public static Set<PsiType> flatten(PsiType[] conjuncts, Set<PsiType> types) {
     for (PsiType conjunct : conjuncts) {
       if (conjunct instanceof PsiIntersectionType) {
         PsiIntersectionType type = (PsiIntersectionType)conjunct;
@@ -85,8 +95,7 @@ public class PsiIntersectionType extends PsiType.Stub {
         for (PsiType existing : array) {
           if (type != existing) {
             final boolean allowUncheckedConversion = type instanceof PsiClassType && ((PsiClassType)type).isRaw();
-            if (TypeConversionUtil.isAssignable(type, existing, allowUncheckedConversion) ||
-                TypeConversionUtil.isAssignable(GenericsUtil.eliminateWildcards(type), GenericsUtil.eliminateWildcards(existing), allowUncheckedConversion)) {
+            if (TypeConversionUtil.isAssignable(type, existing, allowUncheckedConversion)) {
               iterator.remove();
               break;
             }
@@ -162,10 +171,12 @@ public class PsiIntersectionType extends PsiType.Stub {
     return myConjuncts;
   }
 
+  @NotNull
   public PsiType getRepresentative() {
     return myConjuncts[0];
   }
 
+  @Override
   public boolean equals(final Object obj) {
     if (this == obj) return true;
     if (!(obj instanceof PsiIntersectionType)) return false;
@@ -180,6 +191,7 @@ public class PsiIntersectionType extends PsiType.Stub {
     return true;
   }
 
+  @Override
   public int hashCode() {
     return myConjuncts[0].hashCode();
   }
@@ -192,5 +204,23 @@ public class PsiIntersectionType extends PsiType.Stub {
       sb.append(myConjuncts[i].getPresentableText());
     }
     return sb.toString();
+  }
+
+  public String getConflictingConjunctsMessage() {
+    final PsiType[] conjuncts = getConjuncts();
+    for (int i = 0; i < conjuncts.length; i++) {
+      PsiClass conjunct = PsiUtil.resolveClassInClassTypeOnly(conjuncts[i]);
+      if (conjunct != null && !conjunct.isInterface()) {
+        for (int i1 = i + 1; i1 < conjuncts.length; i1++) {
+          PsiClass oppositeConjunct = PsiUtil.resolveClassInClassTypeOnly(conjuncts[i1]);
+          if (oppositeConjunct != null && !oppositeConjunct.isInterface()) {
+            if (!conjunct.isInheritor(oppositeConjunct, true) && !oppositeConjunct.isInheritor(conjunct, true)) {
+              return conjuncts[i].getPresentableText() + " and " + conjuncts[i1].getPresentableText();
+            }
+          }
+        }
+      }
+    }
+    return null;
   }
 }

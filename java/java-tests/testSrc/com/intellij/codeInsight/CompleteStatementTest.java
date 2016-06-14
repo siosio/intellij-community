@@ -33,6 +33,8 @@ public class CompleteStatementTest extends EditorActionTestCase {
   
   public void testAddMissingSemicolonToPackageStatement() { doTest(); }
 
+  public void testAddMissingSemicolonAfterAnonymous() { doTest(); }
+
   public void testAddMissingParen() throws Exception { doTest(); }
 
   public void testCompleteIf() throws Exception { doTest(); }
@@ -40,6 +42,10 @@ public class CompleteStatementTest extends EditorActionTestCase {
   public void testCompleteIfKeyword() throws Exception { doTest(); }
 
   public void testCompleteIfStatementGoesToThen() throws Exception { doTest(); }
+
+  public void testAddBracesToIfAndElse() { doTest(); }
+
+  public void testAddBracesToIfThenOneLiner() { doTest(); }
 
   public void testCompleteIfKeywordStatementGoesToThen() throws Exception { doTest(); }
 
@@ -65,6 +71,8 @@ public class CompleteStatementTest extends EditorActionTestCase {
     }
   }
 
+  public void testNoBlockReformat() { doTest(); }
+
   public void testCompleteCatchWithExpression() throws Exception { doTest(); }
 
   public void testCompleteCatchBody() throws Exception { doTest(); }
@@ -85,6 +93,8 @@ public class CompleteStatementTest extends EditorActionTestCase {
 
   public void testFor() throws Exception { doTest(); }
 
+  public void testEmptyFor() { doTest(); }
+
   public void testForEach() throws Exception { doTest(); }
 
   public void testForBlock() throws Exception { doTest(); }
@@ -98,6 +108,8 @@ public class CompleteStatementTest extends EditorActionTestCase {
   public void testBeforeStatement() throws Exception { doTest(); }
 
   public void testTry1() throws Exception { doTest(); }
+
+  public void testInsideResourceVariable() { doTest(); }
 
   public void testBlock1() throws Exception { doTest(); }
 
@@ -124,6 +136,8 @@ public class CompleteStatementTest extends EditorActionTestCase {
   public void testInnerEnumBeforeMethodWithSpace() { doTest(); }
 
   public void testCompleteElseIf() throws Exception { doTest(); }
+
+  public void testReformatElseIf() { doTest(); }
 
   public void testCompleteStringLiteral() throws Exception {
     doTest();
@@ -210,7 +224,9 @@ public class CompleteStatementTest extends EditorActionTestCase {
   public void testSwitchKeyword() throws Exception { doTest(); }
 
   public void testSwitchKeywordWithCondition() throws Exception { doTest(); }
+  public void testSwitchBraces() { doTest(); }
   public void testCaseColon() { doTest(); }
+  public void testDefaultColon() { doTest(); }
 
   public void testNewInParentheses() throws Exception { doTest(); }
   
@@ -232,7 +248,11 @@ public class CompleteStatementTest extends EditorActionTestCase {
   public void testIDEA25139() throws Exception {
     doTestBracesNextLineStyle();
   }
-  
+
+  public void testClassBracesNextLine() throws Exception {
+    doTestBracesNextLineStyle();
+  }
+
   public void testBeforeIfRBrace() throws Exception {
     CodeStyleSettingsManager.getSettings(getProject()).KEEP_SIMPLE_BLOCKS_IN_ONE_LINE = true;
     doTest();
@@ -275,7 +295,9 @@ public class CompleteStatementTest extends EditorActionTestCase {
   public void testPrivateInterfaceMethodBody() { doTest(); }
 
   public void testArrayInitializerRBracket() throws Exception { doTest(); }
-  
+  public void testArrayInitializerRBrace() { doTest(); }
+  public void testArrayInitializerSeveralLines() { doTest(); }
+
   public void testReturnInLambda() { doTest(); }
   
   private void doTestBracesNextLineStyle() throws Exception {

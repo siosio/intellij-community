@@ -45,7 +45,7 @@ abstract class RefEntityImpl implements RefEntity {
 
   RefEntityImpl(@NotNull String name, @NotNull RefManager manager) {
     myManager = (RefManagerImpl)manager;
-    myName = name;
+    myName = myManager.internName(name);
   }
 
   @NotNull
@@ -106,12 +106,7 @@ abstract class RefEntityImpl implements RefEntity {
 
   @Override
   public void accept(@NotNull final RefVisitor refVisitor) {
-    ApplicationManager.getApplication().runReadAction(new Runnable() {
-      @Override
-      public void run() {
-        refVisitor.visitElement(RefEntityImpl.this);
-      }
-    });
+    ApplicationManager.getApplication().runReadAction(() -> refVisitor.visitElement(RefEntityImpl.this));
   }
 
   @Override

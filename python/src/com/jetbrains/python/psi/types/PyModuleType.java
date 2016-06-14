@@ -86,9 +86,9 @@ public class PyModuleType implements PyType { // Modules don't descend from obje
     if (overridingMember != null) {
       return ResolveResultList.to(overridingMember);
     }
-    final PsiElement attribute = myModule.getElementNamed(name);
-    if (attribute != null) {
-      return ResolveResultList.to(attribute);
+    final List<RatedResolveResult> attributes = myModule.multiResolveName(name);
+    if (!attributes.isEmpty()) {
+      return attributes;
     }
     if (PyUtil.isPackage(myModule)) {
       final List<PyImportElement> importElements = new ArrayList<PyImportElement>();
@@ -162,8 +162,7 @@ public class PyModuleType implements PyType { // Modules don't descend from obje
               final PsiElement subModule = ResolveImportUtil.resolveChild(myModule, name, myModule, false, true);
               if (subModule != null) {
                 final ResolveResultList results = new ResolveResultList();
-                results.add(new ImportedResolveResult(subModule, RatedResolveResult.RATE_NORMAL,
-                                                      Collections.<PsiElement>singletonList(importElement)));
+                results.add(new ImportedResolveResult(subModule, RatedResolveResult.RATE_NORMAL, importElement));
                 return results;
               }
             }
@@ -369,13 +368,9 @@ public class PyModuleType implements PyType { // Modules don't descend from obje
   private static CompletionVariantsProcessor createCompletionVariantsProcessor(PsiElement location,
                                                                                boolean suppressParentheses,
                                                                                PointInImport point) {
-    final CompletionVariantsProcessor processor = new CompletionVariantsProcessor(location, new Condition<PsiElement>() {
-      @Override
-      public boolean value(PsiElement psiElement) {
-        return !(psiElement instanceof PyImportElement) ||
-               PsiTreeUtil.getParentOfType(psiElement, PyImportStatementBase.class) instanceof PyFromImportStatement;
-      }
-    }, null);
+    final CompletionVariantsProcessor processor = new CompletionVariantsProcessor(location,
+                                                                                  psiElement -> !(psiElement instanceof PyImportElement) ||
+                                                                                                                                                                          PsiTreeUtil.getParentOfType(psiElement, PyImportStatementBase.class) instanceof PyFromImportStatement, null);
     if (suppressParentheses) {
       processor.suppressParentheses();
     }
@@ -388,22 +383,20 @@ public class PyModuleType implements PyType { // Modules don't descend from obje
                                                                               @NotNull PsiElement location,
                                                                               @Nullable final Set<String> existingNames) {
 
-    return ContainerUtil.mapNotNull(collectImportedSubmodules(pyPackage, location),
-                                    new Function<PsiElement, LookupElement>() {
-                                      @Override
-                                      public LookupElement fun(PsiElement element) {
-                                        if (element instanceof PsiFileSystemItem) {
-                                          return buildFileLookupElement((PsiFileSystemItem)element, existingNames);
-                                        }
-                                        else if (element instanceof PsiNamedElement) {
-                                          return LookupElementBuilder.createWithIcon((PsiNamedElement)element);
-                                        }
-                                        return null;
-                                      }
-                                    });
+    final List<PsiElement> elements = collectImportedSubmodules(pyPackage, location);
+    return elements != null ? ContainerUtil.mapNotNull(elements,
+                                                       (Function<PsiElement, LookupElement>)element -> {
+                                                         if (element instanceof PsiFileSystemItem) {
+                                                           return buildFileLookupElement((PsiFileSystemItem)element, existingNames);
+                                                         }
+                                                         else if (element instanceof PsiNamedElement) {
+                                                           return LookupElementBuilder.createWithIcon((PsiNamedElement)element);
+                                                         }
+                                                         return null;
+                                                       }) : Collections.<LookupElement>emptyList();
   }
 
-  @NotNull
+  @Nullable
   public static List<PsiElement> collectImportedSubmodules(@NotNull PsiFileSystemItem pyPackage, @NotNull PsiElement location) {
     final PsiElement parentAnchor;
     if (pyPackage instanceof PyFile && PyUtil.isPackage(((PyFile)pyPackage))) {
@@ -413,7 +406,7 @@ public class PyModuleType implements PyType { // Modules don't descend from obje
       parentAnchor = pyPackage;
     }
     else {
-      throw new IllegalArgumentException("Package argument should be either standard Python package or namespace package");
+      return null;
     }
 
     final ScopeOwner scopeOwner = ScopeUtil.getScopeOwner(location);

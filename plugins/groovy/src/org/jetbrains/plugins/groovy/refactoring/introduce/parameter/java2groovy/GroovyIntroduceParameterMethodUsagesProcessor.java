@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,10 +22,10 @@ import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.codeStyle.JavaCodeStyleManager;
+import com.intellij.psi.impl.ExpressionConverter;
 import com.intellij.psi.javadoc.PsiDocTag;
 import com.intellij.psi.util.InheritanceUtil;
 import com.intellij.psi.util.PsiTreeUtil;
-import com.intellij.psi.impl.ExpressionConverter;
 import com.intellij.refactoring.introduceParameter.IntroduceParameterData;
 import com.intellij.refactoring.introduceParameter.IntroduceParameterMethodUsagesProcessor;
 import com.intellij.refactoring.introduceParameter.IntroduceParameterUtil;
@@ -148,7 +148,6 @@ public class GroovyIntroduceParameterMethodUsagesProcessor implements IntroduceP
 
     if (argList.getAllArguments().length == 0 && PsiImplUtil.hasClosureArguments(callExpression)) {
       final GrArgumentList emptyArgList = ((GrMethodCallExpression)factory.createExpressionFromText("foo{}")).getArgumentList();
-      LOG.assertTrue(emptyArgList != null);
       argList.replace(emptyArgList);
     }
     return false;
@@ -278,7 +277,7 @@ public class GroovyIntroduceParameterMethodUsagesProcessor implements IntroduceP
     GroovyPsiElementFactory factory = GroovyPsiElementFactory.getInstance(project);
 
     final String typeText =
-      forcedType.equalsToText(CommonClassNames.JAVA_LANG_OBJECT) || forcedType == PsiType.NULL || forcedType == PsiType.VOID
+      forcedType.equalsToText(CommonClassNames.JAVA_LANG_OBJECT) || forcedType == PsiType.NULL || PsiType.VOID.equals(forcedType)
       ? null
       : forcedType.getCanonicalText();
 

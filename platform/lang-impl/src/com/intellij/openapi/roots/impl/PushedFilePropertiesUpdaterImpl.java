@@ -21,17 +21,19 @@ package com.intellij.openapi.roots.impl;
 
 import com.intellij.ProjectTopics;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ModalityState;
+import com.intellij.openapi.application.TransactionGuard;
+import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.ExtensionException;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
+import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
-import com.intellij.openapi.project.DumbModeTask;
-import com.intellij.openapi.project.DumbService;
-import com.intellij.openapi.project.Project;
-import com.intellij.openapi.project.ProjectManager;
+import com.intellij.openapi.progress.util.ProgressWrapper;
+import com.intellij.openapi.project.*;
 import com.intellij.openapi.roots.*;
 import com.intellij.openapi.startup.StartupManager;
 import com.intellij.openapi.util.Computable;
@@ -39,19 +41,16 @@ import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.EmptyRunnable;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.openapi.vfs.VirtualFileManager;
-import com.intellij.openapi.vfs.newvfs.BulkFileListener;
 import com.intellij.openapi.vfs.newvfs.events.VFileCreateEvent;
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent;
 import com.intellij.openapi.vfs.newvfs.events.VFileMoveEvent;
 import com.intellij.psi.PsiManager;
 import com.intellij.psi.impl.PsiManagerEx;
 import com.intellij.psi.impl.file.impl.FileManagerImpl;
+import com.intellij.ui.GuiUtils;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.indexing.FileBasedIndex;
 import com.intellij.util.indexing.FileBasedIndexProjectHandler;
-import com.intellij.util.messages.MessageBusConnection;
-import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -70,67 +69,58 @@ public class PushedFilePropertiesUpdaterImpl extends PushedFilePropertiesUpdater
   private final FilePropertyPusher[] myPushers;
   private final FilePropertyPusher[] myFilePushers;
   private final Queue<Runnable> myTasks = new ConcurrentLinkedQueue<Runnable>();
-  private final MessageBusConnection myConnection;
 
   public PushedFilePropertiesUpdaterImpl(final Project project) {
     myProject = project;
     myPushers = Extensions.getExtensions(FilePropertyPusher.EP_NAME);
-    myFilePushers = ContainerUtil.findAllAsArray(myPushers, new Condition<FilePropertyPusher>() {
-      @Override
-      public boolean value(FilePropertyPusher pusher) {
-        return !pusher.pushDirectoriesOnly();
-      }
-    });
+    myFilePushers = ContainerUtil.findAllAsArray(myPushers, pusher -> !pusher.pushDirectoriesOnly());
 
-    myConnection = project.getMessageBus().connect();
-
-    StartupManager.getInstance(project).registerPreStartupActivity(new Runnable() {
-      @Override
-      public void run() {
-        myConnection.subscribe(ProjectTopics.PROJECT_ROOTS, new ModuleRootAdapter() {
-          @Override
-          public void rootsChanged(final ModuleRootEvent event) {
-            for (FilePropertyPusher pusher : myPushers) {
-              pusher.afterRootsChanged(project);
-            }
+    StartupManager.getInstance(project).registerPreStartupActivity(
+      () -> project.getMessageBus().connect().subscribe(ProjectTopics.PROJECT_ROOTS, new ModuleRootAdapter() {
+        @Override
+        public void rootsChanged(final ModuleRootEvent event) {
+          for (FilePropertyPusher pusher : myPushers) {
+            pusher.afterRootsChanged(project);
           }
-        });
+        }
+      }));
+  }
 
-        myConnection.subscribe(VirtualFileManager.VFS_CHANGES, new BulkFileListener.Adapter() {
-          @Override
-          public void after(@NotNull List<? extends VFileEvent> events) {
-            List<Runnable> delayedTasks = ContainerUtil.newArrayList();
-            for (VFileEvent event : events) {
-              final VirtualFile file = event.getFile();
-              if (file == null) continue;
+  public void processAfterVfsChanges(@NotNull List<? extends VFileEvent> events) {
+    boolean pushedSomething = false;
+    List<Runnable> delayedTasks = ContainerUtil.newArrayList();
+    for (VFileEvent event : events) {
+      final VirtualFile file = event.getFile();
+      if (file == null) continue;
 
-              final FilePropertyPusher[] pushers = file.isDirectory() ? myPushers : myFilePushers;
-              if (pushers.length == 0) continue;
+      final FilePropertyPusher[] pushers = file.isDirectory() ? myPushers : myFilePushers;
+      if (pushers.length == 0) continue;
 
-              if (event instanceof VFileCreateEvent) {
-                if (!event.isFromRefresh() || !file.isDirectory()) {
-                  // push synchronously to avoid entering dumb mode in the middle of a meaningful write action
-                  // avoid dumb mode for just one file
-                  doPushRecursively(file, pushers, ProjectRootManager.getInstance(myProject).getFileIndex());
-                }
-                else {
-                  ContainerUtil.addIfNotNull(delayedTasks, createRecursivePushTask(file, pushers));
-                }
-              } else if (event instanceof VFileMoveEvent) {
-                for (FilePropertyPusher pusher : pushers) {
-                  file.putUserData(pusher.getFileDataKey(), null);
-                }
-                // push synchronously to avoid entering dumb mode in the middle of a meaningful write action
-                doPushRecursively(file, pushers, ProjectRootManager.getInstance(myProject).getFileIndex());
-              }
-            }
-            if (!delayedTasks.isEmpty()) {
-              queueTasks(delayedTasks);
-            }
-          }
-        });
+      if (event instanceof VFileCreateEvent) {
+        if (!event.isFromRefresh() || !file.isDirectory()) {
+          // push synchronously to avoid entering dumb mode in the middle of a meaningful write action
+          // avoid dumb mode for just one file
+          doPushRecursively(file, pushers, ProjectRootManager.getInstance(myProject).getFileIndex());
+          pushedSomething = true;
+        }
+        else if (!ProjectCoreUtil.isProjectOrWorkspaceFile(file)) {
+          ContainerUtil.addIfNotNull(delayedTasks, createRecursivePushTask(file, pushers));
+        }
+      } else if (event instanceof VFileMoveEvent) {
+        for (FilePropertyPusher pusher : pushers) {
+          file.putUserData(pusher.getFileDataKey(), null);
+        }
+        // push synchronously to avoid entering dumb mode in the middle of a meaningful write action
+        doPushRecursively(file, pushers, ProjectRootManager.getInstance(myProject).getFileIndex());
+        pushedSomething = true;
       }
-    });
+    }
+    if (!delayedTasks.isEmpty()) {
+      queueTasks(delayedTasks);
+    }
+    if (pushedSomething) {
+      GuiUtils.invokeLaterIfNeeded(() -> scheduleDumbModeReindexingIfNeeded(), ModalityState.defaultModalityState());
+    }
   }
 
   @Override
@@ -161,12 +151,7 @@ public class PushedFilePropertiesUpdaterImpl extends PushedFilePropertiesUpdater
     if (pushers.length == 0) return null;
     final ProjectFileIndex fileIndex = ProjectRootManager.getInstance(myProject).getFileIndex();
     if (!fileIndex.isInContent(dir)) return null;
-    return new Runnable() {
-      @Override
-      public void run() {
-        doPushRecursively(dir, pushers, fileIndex);
-      }
-    };
+    return () -> doPushRecursively(dir, pushers, fileIndex);
   }
 
   private void doPushRecursively(VirtualFile dir, final FilePropertyPusher[] pushers, ProjectFileIndex fileIndex) {
@@ -205,15 +190,27 @@ public class PushedFilePropertiesUpdaterImpl extends PushedFilePropertiesUpdater
       if (task == null) {
         break;
       }
-      hadTasks = true;
-      task.run();
+      try {
+        task.run();
+        hadTasks = true;
+      }
+      catch (ProcessCanceledException e) {
+        queueTasks(Collections.singletonList(task)); // reschedule dumb mode and ensure the canceled task is enqueued again
+        throw e;
+      }
     }
 
-    if (hadTasks && !myProject.isDisposed()) {
-      DumbModeTask task = FileBasedIndexProjectHandler.createChangedFilesIndexingTask(myProject);
-      if (task != null) {
-        DumbService.getInstance(myProject).queueTask(task);
-      }
+    if (hadTasks) {
+      scheduleDumbModeReindexingIfNeeded();
+    }
+  }
+
+  private void scheduleDumbModeReindexingIfNeeded() {
+    if (myProject.isDisposed()) return;
+
+    DumbModeTask task = FileBasedIndexProjectHandler.createChangedFilesIndexingTask(myProject);
+    if (task != null) {
+      DumbService.getInstance(myProject).queueTask(task);
     }
   }
 
@@ -240,12 +237,7 @@ public class PushedFilePropertiesUpdaterImpl extends PushedFilePropertiesUpdater
 
   @Override
   public void pushAll(final FilePropertyPusher... pushers) {
-    queueTasks(Collections.singletonList(new Runnable() {
-      @Override
-      public void run() {
-        doPushAll(pushers);
-      }
-    }));
+    queueTasks(Collections.singletonList(() -> doPushAll(pushers)));
   }
 
   private void doPushAll(final FilePropertyPusher[] pushers) {
@@ -271,72 +263,61 @@ public class PushedFilePropertiesUpdaterImpl extends PushedFilePropertiesUpdater
           }
 
           final ModuleFileIndex fileIndex = ModuleRootManager.getInstance(module).getFileIndex();
-          return new Runnable() {
+          return () -> fileIndex.iterateContent(new ContentIterator() {
             @Override
-            public void run() {
-              fileIndex.iterateContent(new ContentIterator() {
-                @Override
-                public boolean processFile(final VirtualFile fileOrDir) {
-                  applyPushersToFile(fileOrDir, pushers, moduleValues);
-                  return true;
-                }
-              });
+            public boolean processFile(final VirtualFile fileOrDir) {
+              applyPushersToFile(fileOrDir, pushers, moduleValues);
+              return true;
             }
-          };
+          });
         }
       });
       tasks.add(iteration);
     }
 
-    invoke2xConcurrentlyIfPossible(tasks);
+    invokeConcurrentlyIfPossible(tasks);
   }
 
-  public static void invoke2xConcurrentlyIfPossible(final List<Runnable> tasks) {
+  public static void invokeConcurrentlyIfPossible(final List<Runnable> tasks) {
     if (tasks.size() == 1 ||
         ApplicationManager.getApplication().isWriteAccessAllowed() ||
         !Registry.is("idea.concurrent.scanning.files.to.index")) {
       for(Runnable r:tasks) r.run();
       return;
     }
+
+    final ProgressIndicator progress = ProgressManager.getInstance().getProgressIndicator();
+    
     final ConcurrentLinkedQueue<Runnable> tasksQueue = new ConcurrentLinkedQueue<Runnable>(tasks);
-    Future<?> result = null;
+    List<Future<?>> results = ContainerUtil.newArrayList();
     if (tasks.size() > 1) {
-      result = ApplicationManager.getApplication().executeOnPooledThread(new Runnable() {
-        @Override
-        public void run() {
+      int numThreads = Math.max(Math.min(CacheUpdateRunner.indexingThreadCount() - 1, tasks.size() - 1), 1);
+
+      for (int i = 0; i < numThreads; ++i) {
+        results.add(ApplicationManager.getApplication().executeOnPooledThread(() -> ProgressManager.getInstance().runProcess(() -> {
           Runnable runnable;
           while ((runnable = tasksQueue.poll()) != null) runnable.run();
-        }
-      });
+        }, ProgressWrapper.wrap(progress))));
+      }
     }
 
     Runnable runnable;
     while ((runnable = tasksQueue.poll()) != null) runnable.run();
 
-    if (result != null) {
+    for (Future<?> result : results) {
       try {
         result.get();
       } catch (Exception ex) {
         LOG.error(ex);
       }
     }
-    //JobLauncher.getInstance().invokeConcurrently(tasks, null, false, false, new Processor<Runnable>() {
-    //  @Override
-    //  public boolean process(Runnable runnable) {
-    //    runnable.run();
-    //    return true;
-    //  }
-    //});
   }
 
   private void applyPushersToFile(final VirtualFile fileOrDir, final FilePropertyPusher[] pushers, final Object[] moduleValues) {
-    ApplicationManager.getApplication().runReadAction(new Runnable() {
-      @Override
-      public void run() {
-        ProgressManager.checkCanceled();
-        if (!fileOrDir.isValid()) return;
-        doApplyPushersToFile(fileOrDir, pushers, moduleValues);
-      }
+    ApplicationManager.getApplication().runReadAction(() -> {
+      ProgressManager.checkCanceled();
+      if (!fileOrDir.isValid()) return;
+      doApplyPushersToFile(fileOrDir, pushers, moduleValues);
     });
   }
   private void doApplyPushersToFile(VirtualFile fileOrDir, FilePropertyPusher[] pushers, Object[] moduleValues) {
@@ -389,25 +370,12 @@ public class PushedFilePropertiesUpdaterImpl extends PushedFilePropertiesUpdater
   private static void reloadPsi(final VirtualFile file, final Project project) {
     final FileManagerImpl fileManager = (FileManagerImpl)((PsiManagerEx)PsiManager.getInstance(project)).getFileManager();
     if (fileManager.findCachedViewProvider(file) != null) {
-      UIUtil.invokeLaterIfNeeded(new Runnable() {
-        @Override
-        public void run() {
-          if (project.isDisposed()) {
-            return;
-          }
-          ApplicationManager.getApplication().runWriteAction(new Runnable() {
-            @Override
-            public void run() {
-              fileManager.forceReload(file);
-            }
-          });
-        }
-      });
+      Runnable runnable = () -> WriteAction.run(() -> fileManager.forceReload(file));
+      if (ApplicationManager.getApplication().isDispatchThread()) {
+        runnable.run();
+      } else {
+        TransactionGuard.submitTransaction(project, runnable);
+      }
     }
-  }
-
-  @Override
-  public void processPendingEvents() {
-    myConnection.deliverImmediately();
   }
 }

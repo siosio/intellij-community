@@ -17,7 +17,10 @@
 package com.intellij.execution.junit;
 
 import com.intellij.execution.*;
-import com.intellij.execution.configurations.*;
+import com.intellij.execution.configurations.JavaParameters;
+import com.intellij.execution.configurations.ParametersList;
+import com.intellij.execution.configurations.RunnerSettings;
+import com.intellij.execution.configurations.RuntimeConfigurationException;
 import com.intellij.execution.junit2.TestProxy;
 import com.intellij.execution.junit2.segments.DeferredActionsQueue;
 import com.intellij.execution.junit2.segments.DeferredActionsQueueImpl;
@@ -37,10 +40,12 @@ import com.intellij.execution.testframework.*;
 import com.intellij.execution.ui.ConsoleViewContentType;
 import com.intellij.execution.util.JavaParametersUtil;
 import com.intellij.execution.util.ProgramParametersUtil;
+import com.intellij.junit5.JUnit5IdeaTestRunner;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Getter;
 import com.intellij.openapi.util.Key;
@@ -48,16 +53,22 @@ import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.psi.*;
+import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.refactoring.listeners.RefactoringElementListener;
-import com.intellij.rt.execution.junit.*;
+import com.intellij.rt.execution.junit.IDEAJUnitListener;
+import com.intellij.rt.execution.junit.JUnitStarter;
+import com.intellij.rt.execution.junit.RepeatCount;
 import com.intellij.rt.execution.testFrameworks.ForkedDebuggerHelper;
 import com.intellij.util.Function;
 import com.intellij.util.PathUtil;
+import com.intellij.util.PathsList;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.junit.gen5.launcher.TestExecutionListener;
 
-import java.io.*;
+import java.io.File;
+import java.io.IOException;
 import java.util.*;
 
 public abstract class TestObject extends JavaTestFrameworkRunnableState<JUnitConfiguration> {
@@ -68,7 +79,6 @@ public abstract class TestObject extends JavaTestFrameworkRunnableState<JUnitCon
 
   private final JUnitConfiguration myConfiguration;
   protected File myListenersFile;
-
   public static TestObject fromString(final String id,
                                       final JUnitConfiguration configuration,
                                       @NotNull ExecutionEnvironment environment) {
@@ -90,7 +100,7 @@ public abstract class TestObject extends JavaTestFrameworkRunnableState<JUnitCon
     if (JUnitConfiguration.TEST_PATTERN.equals(id)) {
       return new TestsPattern(configuration, environment);
     }
-    assert false : MESSAGE + id;
+    LOG.error(MESSAGE + id);
     return null;
   }
 
@@ -149,6 +159,27 @@ public abstract class TestObject extends JavaTestFrameworkRunnableState<JUnitCon
         LOG.error(e);
       }
     }
+
+    final Project project = getConfiguration().getProject();
+    if (JUnitUtil.isJUnit5(GlobalSearchScope.allScope(project), project)) {
+      javaParameters.getProgramParametersList().add(JUnitStarter.JUNIT5_PARAMETER);
+      javaParameters.getClassPath().add(PathUtil.getJarPathForClass(JUnit5IdeaTestRunner.class));
+
+      final PathsList classPath = javaParameters.getClassPath();
+      final List<String> paths = classPath.getPathList();
+      final String pathForClass = PathUtil.getJarPathForClass(TestExecutionListener.class);
+      final File libDirectory = new File(pathForClass).getParentFile();
+      final File[] libJars = libDirectory.listFiles();
+      if (libJars != null) {
+        for (File jarFile : libJars) {
+          final String filePath = jarFile.getAbsolutePath();
+          if (!paths.contains(filePath)) {
+            classPath.add(filePath);
+          }
+        }
+      }
+    }
+    
     return javaParameters;
   }
 
@@ -210,14 +241,11 @@ public abstract class TestObject extends JavaTestFrameworkRunnableState<JUnitCon
       public void processTerminated(ProcessEvent event) {
         handler.removeProcessListener(this);
         deleteTempFiles();
-        final Runnable runnable = new Runnable() {
-          @Override
-          public void run() {
-            unboundOutputRoot.flush();
-            packetsReceiver.checkTerminated();
-            final JUnitRunningModel model = packetsReceiver.getModel();
-            notifyByBalloon(model, myStarted, consoleProperties);
-          }
+        final Runnable runnable = () -> {
+          unboundOutputRoot.flush();
+          packetsReceiver.checkTerminated();
+          final JUnitRunningModel model = packetsReceiver.getModel();
+          notifyByBalloon(model, myStarted, consoleProperties);
         };
         handler.getOut().addRequest(runnable, queue);
       }
@@ -245,12 +273,7 @@ public abstract class TestObject extends JavaTestFrameworkRunnableState<JUnitCon
     });
 
     final RerunFailedTestsAction rerunFailedTestsAction = new RerunFailedTestsAction(consoleView, consoleProperties);
-    rerunFailedTestsAction.setModelProvider(new Getter<TestFrameworkRunningModel>() {
-      @Override
-      public TestFrameworkRunningModel get() {
-        return packetsReceiver.getModel();
-      }
-    });
+    rerunFailedTestsAction.setModelProvider(() -> packetsReceiver.getModel());
 
     final DefaultExecutionResult result = new DefaultExecutionResult(consoleView, handler);
     result.setRestartActions(rerunFailedTestsAction);
@@ -317,12 +340,7 @@ public abstract class TestObject extends JavaTestFrameworkRunnableState<JUnitCon
         createTempFiles(javaParameters);
       }
 
-      final Map<Module, List<String>> perModule = forkPerModule() ? new TreeMap<Module, List<String>>(new Comparator<Module>() {
-        @Override
-        public int compare(Module o1, Module o2) {
-          return StringUtil.compare(o1.getName(), o2.getName(), true);
-        }
-      }) : null;
+      final Map<Module, List<String>> perModule = forkPerModule() ? new TreeMap<Module, List<String>>((o1, o2) -> StringUtil.compare(o1.getName(), o2.getName(), true)) : null;
 
       final List<String> testNames = new ArrayList<String>();
 
@@ -332,8 +350,9 @@ public abstract class TestObject extends JavaTestFrameworkRunnableState<JUnitCon
           continue;
         }
 
-        if (perModule != null && element instanceof PsiElement) {
-          final Module module = ModuleUtilCore.findModuleForPsiElement((PsiElement)element);
+        final PsiElement psiElement = retrievePsiElement(element);
+        if (perModule != null && psiElement != null) {
+          final Module module = ModuleUtilCore.findModuleForPsiElement(psiElement);
           if (module != null) {
             List<String> list = perModule.get(module);
             if (list == null) {
@@ -366,6 +385,10 @@ public abstract class TestObject extends JavaTestFrameworkRunnableState<JUnitCon
     catch (IOException e) {
       LOG.error(e);
     }
+  }
+
+  protected PsiElement retrievePsiElement(Object element) {
+    return element instanceof PsiElement ? (PsiElement)element : null;
   }
 
   @Override

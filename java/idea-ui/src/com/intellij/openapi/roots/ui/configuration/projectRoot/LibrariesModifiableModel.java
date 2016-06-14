@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,8 +28,6 @@ import com.intellij.openapi.roots.ui.configuration.libraryEditor.LibraryEditor;
 import com.intellij.openapi.roots.ui.configuration.libraryEditor.LibraryEditorListener;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.util.containers.ContainerUtil;
-import gnu.trove.THashMap;
-import gnu.trove.TObjectHashingStrategy;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -40,7 +38,7 @@ import java.util.*;
  * Date: 04-Jun-2006
  */
 
-public class LibrariesModifiableModel implements LibraryTableBase.ModifiableModelEx {
+public class LibrariesModifiableModel implements LibraryTableBase.ModifiableModel {
   //todo[nik] remove LibraryImpl#equals method instead of using identity maps
   private final Map<Library, ExistingLibraryEditor> myLibrary2EditorMap =
     ContainerUtil.<Library, ExistingLibraryEditor>newIdentityTroveMap();
@@ -64,7 +62,7 @@ public class LibrariesModifiableModel implements LibraryTableBase.ModifiableMode
 
   @Override
   public Library createLibrary(String name, @Nullable PersistentLibraryKind type) {
-    final Library library = ((LibraryTableBase.ModifiableModelEx)getLibrariesModifiableModel()).createLibrary(name, type);
+    final Library library = getLibrariesModifiableModel().createLibrary(name, type);
     //createLibraryEditor(library);                     \
     final BaseLibrariesConfigurable configurable = ProjectStructureConfigurable.getInstance(myProject).getConfigurableFor(library);
     configurable.createLibraryNode(library);
@@ -175,7 +173,16 @@ public class LibrariesModifiableModel implements LibraryTableBase.ModifiableMode
     return myLibrariesModifiableModel;
   }
 
-  public void disposeUncommittedLibraries() {
+  @Override
+  public void dispose() {
+    if (myLibrariesModifiableModel != null) {
+      Disposer.dispose(myLibrariesModifiableModel);
+      myLibrariesModifiableModel = null;
+    }
+    disposeUncommittedLibraries();
+  }
+
+  private void disposeUncommittedLibraries() {
     for (final Library library : new ArrayList<Library>(myLibrary2EditorMap.keySet())) {
       final Library existingLibrary = myTable.getLibraryByName(library.getName());
       if (existingLibrary != library) {

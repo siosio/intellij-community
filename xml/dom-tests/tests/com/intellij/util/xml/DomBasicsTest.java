@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -401,7 +401,7 @@ public class DomBasicsTest extends DomTestCase {
 
     new WriteCommandAction(getProject()) {
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         element2.copyFrom(element);
       }
     }.execute();
@@ -433,7 +433,7 @@ public class DomBasicsTest extends DomTestCase {
     element1.getChild().getChild().getGenericValue().setStringValue("abc");
     new WriteCommandAction(getProject()) {
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         element2.copyFrom(element1);
       }
     }.execute();
@@ -442,15 +442,12 @@ public class DomBasicsTest extends DomTestCase {
 
   public void testStableValues() throws Throwable {
     final MyElement[] element = new MyElement[]{null};
-    final MyElement stable = getDomManager().createStableValue(new Factory<MyElement>() {
-      @Override
-      public MyElement create() {
-        try {
-          return element[0] = createElement("<root/>").addChildElement();
-        }
-        catch (IncorrectOperationException e) {
-          throw new RuntimeException(e);
-        }
+    final MyElement stable = getDomManager().createStableValue(() -> {
+      try {
+        return element[0] = createElement("<root/>").addChildElement();
+      }
+      catch (IncorrectOperationException e) {
+        throw new RuntimeException(e);
       }
     });
     assertNotNull(element[0]);
@@ -472,7 +469,7 @@ public class DomBasicsTest extends DomTestCase {
     final MyElement oldElement1 = oldElement;
     new WriteCommandAction(getProject()) {
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         oldElement1.undefine();
       }
     }.execute();
@@ -499,12 +496,7 @@ public class DomBasicsTest extends DomTestCase {
 
   public void testStable_Revalidate() throws Throwable {
     final MyElement[] element = new MyElement[]{createElement("")};
-    final MyElement stable = getDomManager().createStableValue(new Factory<MyElement>() {
-      @Override
-      public MyElement create() {
-        return element[0];
-      }
-    });
+    final MyElement stable = getDomManager().createStableValue(() -> element[0]);
     MyElement oldElement = element[0];
     ((StableElement) stable).revalidate();
     assertSame(oldElement, ((StableElement) stable).getWrappedElement());
@@ -520,12 +512,7 @@ public class DomBasicsTest extends DomTestCase {
   public void testStable_Invalidate() throws Throwable {
     final MyElement oldElement = createElement("");
     final MyElement[] element = new MyElement[]{oldElement};
-    final MyElement stable = getDomManager().createStableValue(new Factory<MyElement>() {
-      @Override
-      public MyElement create() {
-        return element[0];
-      }
-    });
+    final MyElement stable = getDomManager().createStableValue(() -> element[0]);
     element[0] = null;
     ((StableElement) stable).invalidate();
     assertTrue(stable.equals(stable));
@@ -539,7 +526,7 @@ public class DomBasicsTest extends DomTestCase {
     final MyElement copy = (MyElement) child.createStableCopy();
     new WriteCommandAction(getProject()) {
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         parent.undefine();
         element.addChildElement().getChild().ensureXmlElementExists();
       }

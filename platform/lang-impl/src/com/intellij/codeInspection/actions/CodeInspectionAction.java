@@ -24,16 +24,16 @@ import com.intellij.codeInspection.InspectionProfile;
 import com.intellij.codeInspection.InspectionsBundle;
 import com.intellij.codeInspection.ex.GlobalInspectionContextImpl;
 import com.intellij.codeInspection.ex.InspectionManagerEx;
-import com.intellij.icons.AllIcons;
+import com.intellij.codeInspection.ex.InspectionProfileImpl;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.options.ex.SingleConfigurableEditor;
 import com.intellij.openapi.project.Project;
 import com.intellij.profile.Profile;
-import com.intellij.profile.ProfileManager;
 import com.intellij.profile.codeInspection.InspectionProfileManager;
 import com.intellij.profile.codeInspection.InspectionProjectProfileManager;
 import com.intellij.profile.codeInspection.ui.ErrorsConfigurable;
-import com.intellij.profile.codeInspection.ui.IDEInspectionToolsConfigurable;
+import com.intellij.profile.codeInspection.ui.header.InspectionToolsConfigurable;
+import com.intellij.profile.codeInspection.ui.header.ProfilesComboBox;
 import com.intellij.ui.ComboboxWithBrowseButton;
 import com.intellij.ui.ListCellRendererWrapper;
 import org.jetbrains.annotations.NonNls;
@@ -42,8 +42,8 @@ import org.jetbrains.annotations.NotNull;
 import javax.swing.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
-import java.util.Collection;
-import java.util.TreeSet;
+import java.util.ArrayList;
+import java.util.List;
 
 public class CodeInspectionAction extends BaseAnalysisAction {
   private GlobalInspectionContextImpl myGlobalInspectionContext;
@@ -101,26 +101,15 @@ public class CodeInspectionAction extends BaseAnalysisAction {
   protected JComponent getAdditionalActionSettings(@NotNull final Project project, final BaseAnalysisActionDialog dialog) {
     final AdditionalPanel panel = new AdditionalPanel();
     final InspectionManagerEx manager = (InspectionManagerEx)InspectionManager.getInstance(project);
-    final JComboBox profiles = panel.myBrowseProfilesCombo.getComboBox();
-    profiles.setRenderer(new ListCellRendererWrapper() {
-      @Override
-      public void customize(JList list, Object value, int index, boolean selected, boolean hasFocus) {
-        if (value instanceof Profile) {
-          Profile profile = (Profile)value;
-          setText(profile.getName());
-          setIcon(profile.isProjectLevel() ? AllIcons.General.ProjectSettings : AllIcons.General.Settings);
-        }
-      }
-    });
+    final ProfilesComboBox profiles = (ProfilesComboBox)panel.myBrowseProfilesCombo.getComboBox();
     final InspectionProfileManager profileManager = InspectionProfileManager.getInstance();
     final InspectionProjectProfileManager projectProfileManager = InspectionProjectProfileManager.getInstance(project);
     reloadProfiles(profiles, profileManager, projectProfileManager, manager);
     panel.myBrowseProfilesCombo.addActionListener(new ActionListener() {
       @Override
       public void actionPerformed(ActionEvent e) {
-        final IDEInspectionToolsConfigurable errorConfigurable = createConfigurable(projectProfileManager, profileManager);
+        final InspectionToolsConfigurable errorConfigurable = createConfigurable(projectProfileManager, profileManager, profiles);
         final MySingleConfigurableEditor editor = new MySingleConfigurableEditor(project, errorConfigurable, manager);
-        errorConfigurable.selectProfile(((Profile)profiles.getSelectedItem()));
         if (editor.showAndGet()) {
           reloadProfiles(profiles, profileManager, projectProfileManager, manager);
         }
@@ -148,34 +137,82 @@ public class CodeInspectionAction extends BaseAnalysisAction {
     return panel.myAdditionalPanel;
   }
 
-  protected IDEInspectionToolsConfigurable createConfigurable(InspectionProjectProfileManager projectProfileManager,
-                                                              InspectionProfileManager profileManager) {
-    return new IDEInspectionToolsConfigurable(projectProfileManager, profileManager);
+  protected InspectionToolsConfigurable createConfigurable(InspectionProjectProfileManager projectProfileManager,
+                                                           InspectionProfileManager profileManager,
+                                                           final ProfilesComboBox profilesCombo) {
+    return new ExternalProfilesComboboxAwareInspectionToolsConfigurable(projectProfileManager, profileManager, profilesCombo);
   }
 
-  private void reloadProfiles(JComboBox profiles,
+  protected static class ExternalProfilesComboboxAwareInspectionToolsConfigurable extends InspectionToolsConfigurable {
+    private final ProfilesComboBox myProfilesCombo;
+
+    public ExternalProfilesComboboxAwareInspectionToolsConfigurable(@NotNull InspectionProjectProfileManager projectProfileManager,
+                                                                    InspectionProfileManager profileManager,
+                                                                    ProfilesComboBox profilesCombo) {
+      super(projectProfileManager, profileManager);
+      myProfilesCombo = profilesCombo;
+    }
+
+    @Override
+    protected InspectionProfileImpl getCurrentProfile() {
+      return (InspectionProfileImpl)myProfilesCombo.getSelectedItem();
+    }
+
+    @Override
+    protected void addProfile(InspectionProfileImpl model, InspectionProfileImpl profile) {
+      super.addProfile(model, profile);
+      myProfilesCombo.addProfile(profile);
+    }
+
+    @Override
+    protected void applyRootProfile(@NotNull String name, boolean isProjectLevel) {
+      for (int i = 0; i < myProfilesCombo.getItemCount(); i++) {
+        final InspectionProfileImpl profile = myProfilesCombo.getItemAt(i);
+        if (name.equals(profile.getName())) {
+          myProfilesCombo.setSelectedIndex(i);
+          break;
+        }
+      }
+    }
+  }
+
+
+  private void reloadProfiles(ProfilesComboBox profilesCombo,
                               InspectionProfileManager inspectionProfileManager,
                               InspectionProjectProfileManager inspectionProjectProfileManager,
                               InspectionManagerEx inspectionManager) {
     final InspectionProfile selectedProfile = getGlobalInspectionContext(inspectionManager.getProject()).getCurrentProfile();
-    final DefaultComboBoxModel model = (DefaultComboBoxModel)profiles.getModel();
-    model.removeAllElements();
-    fillModel(inspectionProfileManager, model);
-    fillModel(inspectionProjectProfileManager, model);
-    profiles.setSelectedItem(selectedProfile);
-  }
-
-  private static void fillModel(final ProfileManager inspectionProfileManager, final DefaultComboBoxModel model) {
-    Collection<Profile> profiles = new TreeSet<Profile>(inspectionProfileManager.getProfiles());
-    for (Profile profile : profiles) {
-      model.addElement(profile);
-    }
+    List<Profile> profiles = new ArrayList<>();
+    profiles.addAll(inspectionProfileManager.getProfiles());
+    profiles.addAll(inspectionProjectProfileManager.getProfiles());
+    profilesCombo.reset(profiles);
+    profilesCombo.selectProfile((InspectionProfileImpl)selectedProfile);
   }
 
 
   private static class AdditionalPanel {
     public ComboboxWithBrowseButton myBrowseProfilesCombo;
     public JPanel myAdditionalPanel;
+
+    private void createUIComponents() {
+      myBrowseProfilesCombo = new ComboboxWithBrowseButton(new ProfilesComboBox() {
+        @Override
+        protected boolean isProjectLevel(InspectionProfileImpl p) {
+          return p.isProjectLevel();
+        }
+
+        @NotNull
+        @Override
+        protected String getProfileName(InspectionProfileImpl p) {
+          return p.getDisplayName();
+        }
+
+        @Override
+        protected void onProfileChosen(InspectionProfileImpl inspectionProfile) {
+          //do nothing here
+        }
+      });
+    }
   }
 
   private static class MySingleConfigurableEditor extends SingleConfigurableEditor {

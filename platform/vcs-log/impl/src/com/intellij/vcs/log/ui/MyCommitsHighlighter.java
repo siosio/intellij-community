@@ -15,58 +15,70 @@
  */
 package com.intellij.vcs.log.ui;
 
-import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.vcs.log.VcsCommitStyleFactory;
-import com.intellij.vcs.log.VcsLogHighlighter;
-import com.intellij.vcs.log.VcsShortCommitDetails;
-import com.intellij.vcs.log.VcsUser;
-import com.intellij.vcs.log.data.LoadingDetails;
-import com.intellij.vcs.log.data.VcsLogDataHolder;
-import com.intellij.vcs.log.data.VcsLogUiProperties;
-import com.intellij.vcs.log.impl.VcsUserImpl;
+import com.intellij.util.NotNullFunction;
+import com.intellij.util.containers.ContainerUtil;
+import com.intellij.vcs.log.*;
+import com.intellij.vcs.log.data.VcsLogData;
+import com.intellij.vcs.log.ui.filter.VcsLogUserFilterImpl;
+import com.intellij.vcs.log.util.VcsUserUtil;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.Map;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Set;
 
 public class MyCommitsHighlighter implements VcsLogHighlighter {
-  @NotNull private final VcsLogUiProperties myUiProperties;
-  @NotNull private final VcsLogDataHolder myDataHolder;
+  @NotNull private final VcsLogData myLogData;
+  @NotNull private final VcsLogUi myLogUi;
+  private boolean myShouldHighlightUser = false;
 
-  public MyCommitsHighlighter(@NotNull VcsLogDataHolder logDataHolder, @NotNull VcsLogUiProperties uiProperties) {
-    myDataHolder = logDataHolder;
-    myUiProperties = uiProperties;
-    // migration to map storage
-    if (!myUiProperties.isHighlightMyCommits()) {
-      // by default, my commits highlighter was enabled
-      // if it was disabled we need to migrate that
-      myUiProperties.enableHighlighter(Factory.ID, false);
-      myUiProperties.setHighlightMyCommits(true);
-    }
+  public MyCommitsHighlighter(@NotNull VcsLogData logData, @NotNull VcsLogUi logUi) {
+    myLogData = logData;
+    myLogUi = logUi;
   }
 
   @NotNull
   @Override
-  public VcsCommitStyle getStyle(int commitIndex, boolean isSelected) {
-    if (!myUiProperties.isHighlighterEnabled(Factory.ID)) return VcsCommitStyle.DEFAULT;
-    Map<VirtualFile, VcsUser> users = myDataHolder.getCurrentUser();
-    VcsShortCommitDetails details = myDataHolder.getMiniDetailsGetter().getCommitDataIfAvailable(commitIndex);
-    if (details != null && !(details instanceof LoadingDetails)) {
-      VcsUser currentUser = users.get(details.getRoot());
-      if (currentUser != null && VcsUserImpl.isSamePerson(currentUser, details.getAuthor())) {
+  public VcsCommitStyle getStyle(@NotNull VcsShortCommitDetails details, boolean isSelected) {
+    if (!myLogUi.isHighlighterEnabled(Factory.ID)) return VcsCommitStyle.DEFAULT;
+    if (myShouldHighlightUser) {
+      VcsUser currentUser = myLogData.getCurrentUser().get(details.getRoot());
+      if (currentUser != null && VcsUserUtil.isSamePerson(currentUser, details.getAuthor())) {
         return VcsCommitStyleFactory.bold();
       }
     }
     return VcsCommitStyle.DEFAULT;
   }
 
+  @Override
+  public void update(@NotNull VcsLogDataPack dataPack, boolean refreshHappened) {
+    myShouldHighlightUser = !isSingleUser() && !isFilteredByCurrentUser(dataPack.getFilters());
+  }
+
+  // returns true if only one user commits to this repository
+  private boolean isSingleUser() {
+    NotNullFunction<VcsUser, String> nameToString = user -> VcsUserUtil.getNameInStandardForm(VcsUserUtil.getShortPresentation(user));
+    Set<String> allUserNames = ContainerUtil.newHashSet(ContainerUtil.map(myLogData.getAllUsers(), nameToString));
+    Set<String> currentUserNames = ContainerUtil.newHashSet(ContainerUtil.map(myLogData.getCurrentUser().values(), nameToString));
+    return allUserNames.size() == currentUserNames.size() && currentUserNames.containsAll(allUserNames);
+  }
+
+  // returns true if filtered by "me"
+  private static boolean isFilteredByCurrentUser(@NotNull VcsLogFilterCollection filters) {
+    VcsLogUserFilter userFilter = filters.getUserFilter();
+    if (userFilter == null) return false;
+    Collection<String> filterByName = ((VcsLogUserFilterImpl)userFilter).getUserNamesForPresentation();
+    if (Collections.singleton(VcsLogUserFilterImpl.ME).containsAll(filterByName)) return true;
+    return false;
+  }
+
   public static class Factory implements VcsLogHighlighterFactory {
-    @NotNull
-    private static final String ID = "MY_COMMITS";
+    @NotNull private static final String ID = "MY_COMMITS";
 
     @NotNull
     @Override
-    public VcsLogHighlighter createHighlighter(@NotNull VcsLogDataHolder logDataHolder, @NotNull VcsLogUiProperties uiProperties) {
-      return new MyCommitsHighlighter(logDataHolder, uiProperties);
+    public VcsLogHighlighter createHighlighter(@NotNull VcsLogData logData, @NotNull VcsLogUi logUi) {
+      return new MyCommitsHighlighter(logData, logUi);
     }
 
     @NotNull
@@ -79,6 +91,11 @@ public class MyCommitsHighlighter implements VcsLogHighlighter {
     @Override
     public String getTitle() {
       return "My Commits";
+    }
+
+    @Override
+    public boolean showMenuItem() {
+      return true;
     }
   }
 }

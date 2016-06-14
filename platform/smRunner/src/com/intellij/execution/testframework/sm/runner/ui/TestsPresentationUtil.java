@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -219,23 +219,35 @@ public class TestsPresentationUtil {
     final SMTestProxy parent = testProxy.getParent();
     final String name = testProxy.getName();
 
+    if (name == null) {
+      return NO_NAME_TEST;
+    }
+
     String presentationCandidate = name;
     if (parent != null) {
       String parentName = parent.getName();
-      boolean parentStartsWith = name.startsWith(parentName);
-      if (!parentStartsWith && parent instanceof SMTestProxy.SMRootTestProxy) {
-        final String presentation = ((SMTestProxy.SMRootTestProxy)parent).getPresentation();
-        if (presentation != null) {
-          parentName = presentation;
-          parentStartsWith = name.startsWith(parentName);
-        }
-      }
-      if (parentStartsWith) {
-        presentationCandidate = name.substring(parentName.length());
+      if (parentName != null) {
+        boolean parentStartsWith = name.startsWith(parentName);
+        if (!parentStartsWith && parent instanceof SMTestProxy.SMRootTestProxy) {
+          final String presentation = ((SMTestProxy.SMRootTestProxy)parent).getPresentation();
+          if (presentation != null) {
+            parentName = presentation;
+            parentStartsWith = name.startsWith(parentName);
 
-        // remove "." separator
-        if (presentationCandidate.startsWith(".")) {
-          presentationCandidate = presentationCandidate.substring(1);
+            if (!parentStartsWith) {
+              String comment = ((SMTestProxy.SMRootTestProxy)parent).getComment();
+              if (comment != null) {
+                parentName = StringUtil.getQualifiedName(comment, presentation);
+                parentStartsWith = name.startsWith(parentName);
+              }
+            }
+          }
+        }
+        if (parentStartsWith) {
+          presentationCandidate = name.substring(parentName.length());
+
+          // remove "." separator
+          presentationCandidate = StringUtil.trimStart(presentationCandidate, ".");
         }
       }
     }
@@ -459,19 +471,5 @@ public class TestsPresentationUtil {
         renderer.append(title, TERMINATED_ATTRIBUTES);
         break;
     }
-  }
-
-  public static void printWithAnsiColoring(@NotNull final Printer printer, @NotNull String text, @NotNull final Key processOutputType) {
-    AnsiEscapeDecoder decoder = new AnsiEscapeDecoder();
-    decoder.escapeText(text, ProcessOutputTypes.STDOUT, new AnsiEscapeDecoder.ColoredTextAcceptor() {
-      @Override
-      public void coloredTextAvailable(String text, Key attributes) {
-        ConsoleViewContentType contentType = ConsoleViewContentType.getConsoleViewType(attributes);
-        if (contentType == null || contentType == ConsoleViewContentType.NORMAL_OUTPUT) {
-          contentType = ConsoleViewContentType.getConsoleViewType(processOutputType);
-        }
-        printer.print(text, contentType);
-      }
-    });
   }
 }

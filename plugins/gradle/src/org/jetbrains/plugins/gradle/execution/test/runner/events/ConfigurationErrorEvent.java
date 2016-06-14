@@ -26,10 +26,10 @@ import com.intellij.openapi.options.ShowSettingsUtil;
 import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.plugins.gradle.GradleManager;
-import org.jetbrains.plugins.gradle.util.XmlXpathHelper;
-import org.jetbrains.plugins.gradle.execution.test.runner.GradleTestsExecutionConsoleManager;
+import org.jetbrains.plugins.gradle.execution.test.runner.GradleTestsExecutionConsole;
 import org.jetbrains.plugins.gradle.service.project.GradleNotification;
 import org.jetbrains.plugins.gradle.util.GradleConstants;
+import org.jetbrains.plugins.gradle.util.XmlXpathHelper;
 
 import javax.swing.event.HyperlinkEvent;
 
@@ -39,8 +39,8 @@ import javax.swing.event.HyperlinkEvent;
  */
 public class ConfigurationErrorEvent extends AbstractTestEvent {
 
-  public ConfigurationErrorEvent(GradleTestsExecutionConsoleManager consoleManager) {
-    super(consoleManager);
+  public ConfigurationErrorEvent(GradleTestsExecutionConsole executionConsole) {
+    super(executionConsole);
   }
 
   @Override

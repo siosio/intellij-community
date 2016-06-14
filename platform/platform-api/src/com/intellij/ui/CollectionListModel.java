@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,15 +28,20 @@ import java.util.*;
 /**
  * @author yole
  */
-public class CollectionListModel<T> extends AbstractListModel implements EditableModel {
+public class CollectionListModel<T> extends AbstractListModel<T> implements EditableModel {
   private final List<T> myItems;
 
   public CollectionListModel(@NotNull final Collection<? extends T> items) {
     myItems = new ArrayList<T>(items);
   }
 
+  @SuppressWarnings("UnusedParameters")
+  public CollectionListModel(@NotNull List<T> items, boolean useListAsIs) {
+    myItems = items;
+  }
+
   public CollectionListModel(@NotNull final List<? extends T> items) {
-    this((Collection<? extends T>)items);
+    myItems = new ArrayList<T>(items);
   }
 
   public CollectionListModel(final T... items) {

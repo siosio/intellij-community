@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -64,6 +64,10 @@ public class TemplateBuilderImpl implements TemplateBuilder {
     myContainerElement = wrapElement(element);
   }
 
+  public int getElementsCount() {
+    return myElements.size();
+  }
+
   public void replaceElement(PsiElement element, Expression expression, boolean alwaysStopAt) {
     final RangeMarker key = wrapElement(element);
     myAlwaysStopAtMap.put(key, alwaysStopAt ? Boolean.TRUE : Boolean.FALSE);
@@ -88,6 +92,14 @@ public class TemplateBuilderImpl implements TemplateBuilder {
 
   public void replaceElement(PsiReference ref, String varName, Expression expression, boolean alwaysStopAt) {
     final RangeMarker key = wrapReference(ref);
+    myAlwaysStopAtMap.put(key, alwaysStopAt ? Boolean.TRUE : Boolean.FALSE);
+    myVariableNamesMap.put(key, varName);
+    replaceElement(key, expression);
+  }
+
+  public void replaceElement(@NotNull PsiElement element, @NotNull TextRange textRange, String varName, Expression expression, boolean alwaysStopAt) {
+    final TextRange elementTextRange = InjectedLanguageManager.getInstance(element.getProject()).injectedToHost(element, element.getTextRange());
+    final RangeMarker key = myDocument.createRangeMarker(textRange.shiftRight(elementTextRange.getStartOffset()));
     myAlwaysStopAtMap.put(key, alwaysStopAt ? Boolean.TRUE : Boolean.FALSE);
     myVariableNamesMap.put(key, varName);
     replaceElement(key, expression);
@@ -177,11 +189,13 @@ public class TemplateBuilderImpl implements TemplateBuilder {
     ApplicationManager.getApplication().assertWriteAccessAllowed();
 
     //this is kinda hacky way of doing things, but have not got a better idea
-    for (RangeMarker element : myElements) {
-      if (element != myEndElement) {
-        myDocument.deleteString(element.getStartOffset(), element.getEndOffset());
+    //DocumentUtil.executeInBulk(myDocument, true, () -> {
+      for (RangeMarker element : myElements) {
+        if (element != myEndElement) {
+          myDocument.deleteString(element.getStartOffset(), element.getEndOffset());
+        }
       }
-    }
+    //});
 
     return template;
   }
@@ -198,14 +212,11 @@ public class TemplateBuilderImpl implements TemplateBuilder {
       if (start > offset) {
         LOG.error("file: " + myFile +
                   " container: " + myContainerElement +
-                  " markers: " + StringUtil.join(myElements, new Function<RangeMarker, String>() {
-                                    @Override
-                                    public String fun(RangeMarker rangeMarker) {
-                                      final String docString =
-                                        myDocument.getText(new TextRange(rangeMarker.getStartOffset(), rangeMarker.getEndOffset()));
-                                      return "[[" + docString + "]" + rangeMarker.getStartOffset() + ", " + rangeMarker.getEndOffset() + "]";
-                                    }
-                                  }, ", "));
+                  " markers: " + StringUtil.join(myElements, rangeMarker -> {
+                    final String docString =
+                      myDocument.getText(new TextRange(rangeMarker.getStartOffset(), rangeMarker.getEndOffset()));
+                    return "[[" + docString + "]" + rangeMarker.getStartOffset() + ", " + rangeMarker.getEndOffset() + "]";
+                  }, ", "));
       }
       template.addTextSegment(text.substring(start, offset));
 
@@ -307,5 +318,20 @@ public class TemplateBuilderImpl implements TemplateBuilder {
     myVariableNamesMap.put(key, varName);
     mySkipOnStartMap.put(key, Boolean.valueOf(skipOnStart));
     replaceElement(key, expression);
+  }
+
+  public void replaceRange(TextRange rangeWithinElement, String varName, Expression expression, boolean alwaysStopAt) {
+    final RangeMarker key = myDocument.createRangeMarker(rangeWithinElement.shiftRight(myContainerElement.getStartOffset()));
+    myAlwaysStopAtMap.put(key, alwaysStopAt ? Boolean.TRUE : Boolean.FALSE);
+    myVariableNamesMap.put(key, varName);
+    replaceElement(key, expression);
+  }
+
+  public void replaceElement(TextRange rangeWithinElement, String varName, String dependantVariableName, boolean alwaysStopAt) {
+    final RangeMarker key = myDocument.createRangeMarker(rangeWithinElement.shiftRight(myContainerElement.getStartOffset()));
+    myAlwaysStopAtMap.put(key, alwaysStopAt ? Boolean.TRUE : Boolean.FALSE);
+    myVariableNamesMap.put(key, varName);
+    myVariableExpressions.put(key, dependantVariableName);
+    myElements.add(key);
   }
 }

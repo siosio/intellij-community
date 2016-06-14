@@ -19,14 +19,12 @@
   <depends optional="true" config-file="github-tracker.xml">com.intellij.tasks</depends>
 
   <extensions defaultExtensionNs="com.intellij">
-    <errorHandler implementation="com.intellij.diagnostic.ITNReporter"/>
     <checkoutProvider implementation="org.jetbrains.plugins.github.extensions.GithubCheckoutProvider"/>
     <applicationService serviceInterface="org.jetbrains.plugins.github.util.GithubSettings"
                         serviceImplementation="org.jetbrains.plugins.github.util.GithubSettings"/>
     <projectService serviceInterface="org.jetbrains.plugins.github.util.GithubProjectSettings"
                         serviceImplementation="org.jetbrains.plugins.github.util.GithubProjectSettings"/>
     <vcsAnnotationGutterActionProvider implementation="org.jetbrains.plugins.github.extensions.GithubAnnotationGutterActionProvider" />
-    <checkoutCompletedListener implementation="org.jetbrains.plugins.github.extensions.GithubCheckoutListener" order="after PlatformProjectCheckoutListener"/>
     <vcsConfigurableProvider implementation="org.jetbrains.plugins.github.ui.GithubSettingsConfigurable"/>
   </extensions>
 
@@ -52,6 +50,9 @@
     <action id="Github.Open.Commit.In.Browser" class="org.jetbrains.plugins.github.GithubShowCommitInBrowserFromLogAction">
       <add-to-group group-id="Git.LogContextMenu" />
       <add-to-group group-id="Vcs.Log.ContextMenu" />
+    </action>
+    <action id="Github.Open.History.Commit.In.Browser" class="org.jetbrains.plugins.github.GithubShowCommitInBrowserFromHistoryAction">
+      <add-to-group group-id="VcsHistoryActionsGroup"/>
     </action>
     <action id="Github.Create.Gist" class="org.jetbrains.plugins.github.GithubCreateGistAction">
       <add-to-group group-id="EditorPopupMenu"/>

@@ -32,6 +32,7 @@ public class PyRemoteSdkFlavor extends CPythonSdkFlavor {
   }
 
   private final static String[] NAMES = new String[]{"python", "jython", "pypy", "python.exe", "jython.bat", "pypy.exe"};
+  private final static String[] REMOTE_SDK_HOME_PREFIXES = new String[]{"ssh:", "vagrant:", "docker:", "docker-compose:"};
 
   public static PyRemoteSdkFlavor INSTANCE = new PyRemoteSdkFlavor();
 
@@ -42,7 +43,7 @@ public class PyRemoteSdkFlavor extends CPythonSdkFlavor {
 
   @Override
   public boolean isValidSdkHome(String path) {
-    return StringUtil.isNotEmpty(path) && checkName(NAMES, getExecutableName(path)) && (path.startsWith("ssh:") || path.startsWith("vagrant:"));
+    return StringUtil.isNotEmpty(path) && checkName(NAMES, getExecutableName(path)) && checkName(REMOTE_SDK_HOME_PREFIXES, path);
   }
 
   private static boolean checkName(String[] names, @Nullable String name) {

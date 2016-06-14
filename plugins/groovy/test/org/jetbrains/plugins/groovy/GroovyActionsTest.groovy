@@ -39,6 +39,12 @@ public class GroovyActionsTest extends LightCodeInsightFixtureTestCase {
   public void testSWInArgLabel2() {doTestForSelectWord(2)}
   public void testSWInArgLabel3() {doTestForSelectWord(2)}
 
+  public void testSWEscapesInString() {
+    doTestForSelectWord 1,
+      "String s = \"abc\\nd<caret>ef\"",
+      "String s = \"abc\\n<selection>d<caret>ef</selection>\""
+  }
+
   public void testSWListLiteralArgument() {
     doTestForSelectWord 2,
 "foo([a<caret>], b)",
@@ -125,6 +131,23 @@ class A {
     assert myFixture.editor.document.text.contains('** longName\n')
     performEditorAction(IdeActions.ACTION_HIPPIE_COMPLETION)
     assert myFixture.editor.document.text.contains('** longName\n')
+  }
+
+  public void "test hippie completion with hyphenated match"() {
+    myFixture.configureByText 'a.groovy', '''
+foo = [ helloWorld: 1, "hello-world": {
+    hw<caret>
+    f
+  }
+]'''
+    performEditorAction(IdeActions.ACTION_HIPPIE_COMPLETION)
+    assert myFixture.editor.document.text.contains(' hello-world\n')
+    performEditorAction(IdeActions.ACTION_HIPPIE_COMPLETION)
+    assert myFixture.editor.document.text.contains(' helloWorld\n')
+
+    myFixture.editor.caretModel.moveToOffset(myFixture.editor.document.text.indexOf(' f') + 2)
+    performEditorAction(IdeActions.ACTION_HIPPIE_COMPLETION)
+    assert myFixture.editor.document.text.contains(' foo\n')
   }
 
   void testSWforMemberWithDoc() {

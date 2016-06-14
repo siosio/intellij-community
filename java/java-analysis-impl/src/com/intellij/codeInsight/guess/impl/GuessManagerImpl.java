@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,10 +17,10 @@ package com.intellij.codeInsight.guess.impl;
 
 import com.intellij.codeInsight.guess.GuessManager;
 import com.intellij.codeInspection.dataFlow.*;
-import com.intellij.codeInspection.dataFlow.instructions.PushInstruction;
-import com.intellij.codeInspection.dataFlow.instructions.TypeCastInstruction;
 import com.intellij.codeInspection.dataFlow.instructions.InstanceofInstruction;
 import com.intellij.codeInspection.dataFlow.instructions.MethodCallInstruction;
+import com.intellij.codeInspection.dataFlow.instructions.PushInstruction;
+import com.intellij.codeInspection.dataFlow.instructions.TypeCastInstruction;
 import com.intellij.codeInspection.dataFlow.value.DfaInstanceofValue;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.TextRange;
@@ -31,8 +31,9 @@ import com.intellij.psi.search.PsiElementProcessorAdapter;
 import com.intellij.psi.search.SearchScope;
 import com.intellij.psi.search.searches.ClassInheritorsSearch;
 import com.intellij.psi.search.searches.ReferencesSearch;
-import com.intellij.psi.util.PsiUtil;
 import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.util.PsiUtil;
+import com.intellij.util.BitUtil;
 import com.intellij.util.containers.ContainerUtil;
 import gnu.trove.THashMap;
 import org.jetbrains.annotations.NotNull;
@@ -151,6 +152,7 @@ public class GuessManagerImpl extends GuessManager {
     }
 
     DataFlowRunner runner = new DataFlowRunner() {
+      @NotNull
       @Override
       protected DfaMemoryState createMemoryState() {
         return new ExpressionTypeMemoryState(getFactory());
@@ -228,7 +230,7 @@ public class GuessManagerImpl extends GuessManager {
 
     PsiManager manager = PsiManager.getInstance(myProject);
     PsiElementProcessor.CollectElementsWithLimit<PsiClass> processor = new PsiElementProcessor.CollectElementsWithLimit<PsiClass>(5);
-    ClassInheritorsSearch.search(refClass, true).forEach(new PsiElementProcessorAdapter<PsiClass>(processor));
+    ClassInheritorsSearch.search(refClass).forEach(new PsiElementProcessorAdapter<PsiClass>(processor));
     if (processor.isOverflow()) return;
 
     for (PsiClass derivedClass : processor.getCollection()) {
@@ -273,18 +275,18 @@ public class GuessManagerImpl extends GuessManager {
     //System.out.println("analyzing usages of " + var + " in file " + scopeFile);
     SearchScope searchScope = new LocalSearchScope(scopeFile);
 
-    if ((flags & (CHECK_USAGE | CHECK_DOWN)) != 0){
+    if (BitUtil.isSet(flags, CHECK_USAGE) || BitUtil.isSet(flags, CHECK_DOWN)) {
       for (PsiReference varRef : ReferencesSearch.search(var, searchScope, false)) {
         PsiElement ref = varRef.getElement();
 
-        if ((flags & CHECK_USAGE) != 0) {
+        if (BitUtil.isSet(flags, CHECK_USAGE)) {
           PsiType type = guessElementTypeFromReference(myMethodPatternMap, ref, rangeToIgnore);
           if (type != null && !(type instanceof PsiPrimitiveType)) {
             typesSet.add(type);
           }
         }
 
-        if ((flags & CHECK_DOWN) != 0) {
+        if (BitUtil.isSet(flags, CHECK_DOWN)) {
           if (ref.getParent() instanceof PsiExpressionList && ref.getParent().getParent() instanceof PsiMethodCallExpression) { //TODO : new
             PsiExpressionList list = (PsiExpressionList)ref.getParent();
             PsiExpression[] args = list.getExpressions();
@@ -311,7 +313,7 @@ public class GuessManagerImpl extends GuessManager {
       }
     }
 
-    if ((flags & CHECK_UP) != 0){
+    if (BitUtil.isSet(flags, CHECK_UP)){
       if (var instanceof PsiParameter && var.getParent() instanceof PsiParameterList && var.getParent().getParent() instanceof PsiMethod){
         PsiParameterList list = (PsiParameterList)var.getParent();
         PsiParameter[] parameters = list.getParameters();

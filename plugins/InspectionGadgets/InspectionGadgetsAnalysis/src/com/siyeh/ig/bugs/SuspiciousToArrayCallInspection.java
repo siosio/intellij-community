@@ -1,5 +1,5 @@
 /*
- * Copyright 2005-2013 Bas Leijdekkers
+ * Copyright 2005-2015 Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import com.intellij.psi.util.InheritanceUtil;
 import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.BaseInspection;
 import com.siyeh.ig.BaseInspectionVisitor;
+import com.siyeh.ig.psiutils.TypeUtils;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
@@ -51,18 +52,14 @@ public class SuspiciousToArrayCallInspection extends BaseInspection {
   private static class SuspiciousToArrayCallVisitor extends BaseInspectionVisitor {
 
     @Override
-    public void visitMethodCallExpression(
-      @NotNull PsiMethodCallExpression expression) {
+    public void visitMethodCallExpression(@NotNull PsiMethodCallExpression expression) {
       super.visitMethodCallExpression(expression);
-      final PsiReferenceExpression methodExpression =
-        expression.getMethodExpression();
-      @NonNls final String methodName =
-        methodExpression.getReferenceName();
+      final PsiReferenceExpression methodExpression = expression.getMethodExpression();
+      @NonNls final String methodName = methodExpression.getReferenceName();
       if (!"toArray".equals(methodName)) {
         return;
       }
-      final PsiExpression qualifierExpression =
-        methodExpression.getQualifierExpression();
+      final PsiExpression qualifierExpression = methodExpression.getQualifierExpression();
       if (qualifierExpression == null) {
         return;
       }
@@ -72,9 +69,7 @@ public class SuspiciousToArrayCallInspection extends BaseInspection {
       }
       final PsiClassType classType = (PsiClassType)type;
       final PsiClass aClass = classType.resolve();
-      if (aClass == null ||
-          !InheritanceUtil.isInheritor(aClass,
-                                       CommonClassNames.JAVA_UTIL_COLLECTION)) {
+      if (aClass == null || !InheritanceUtil.isInheritor(aClass, CommonClassNames.JAVA_UTIL_COLLECTION)) {
         return;
       }
       final PsiExpressionList argumentList = expression.getArgumentList();
@@ -86,10 +81,9 @@ public class SuspiciousToArrayCallInspection extends BaseInspection {
       checkCollectionAndArrayTypes(classType, argument, expression);
     }
 
-    private void checkCollectionAndArrayTypes(
-      @NotNull PsiClassType collectionType,
-      @NotNull PsiExpression argument,
-      @NotNull PsiMethodCallExpression expression) {
+    private void checkCollectionAndArrayTypes(@NotNull PsiClassType collectionType,
+                                              @NotNull PsiExpression argument,
+                                              @NotNull PsiMethodCallExpression expression) {
       final PsiType argumentType = argument.getType();
       if (!(argumentType instanceof PsiArrayType)) {
         return;
@@ -98,10 +92,8 @@ public class SuspiciousToArrayCallInspection extends BaseInspection {
       final PsiType componentType = arrayType.getComponentType();
       final PsiElement parent = expression.getParent();
       if (parent instanceof PsiTypeCastExpression) {
-        final PsiTypeCastExpression castExpression =
-          (PsiTypeCastExpression)parent;
-        final PsiTypeElement castTypeElement =
-          castExpression.getCastType();
+        final PsiTypeCastExpression castExpression = (PsiTypeCastExpression)parent;
+        final PsiTypeElement castTypeElement = castExpression.getCastType();
         if (castTypeElement == null) {
           return;
         }
@@ -123,6 +115,22 @@ public class SuspiciousToArrayCallInspection extends BaseInspection {
         final PsiType parameter = parameters[0];
         if (componentType.isAssignableFrom(parameter)) {
           return;
+        }
+        if (parameter instanceof PsiClassType) {
+          final PsiClassType classType = (PsiClassType)parameter;
+          final PsiClass aClass = classType.resolve();
+          if (aClass instanceof PsiTypeParameter) {
+            final PsiTypeParameter typeParameter = (PsiTypeParameter)aClass;
+            final PsiReferenceList extendsList = typeParameter.getExtendsList();
+            final PsiClassType[] types = extendsList.getReferencedTypes();
+            if (types.length == 0) {
+              registerError(argument, TypeUtils.getObjectType(argument));
+            }
+            else if (types.length == 1) {
+              registerError(argument, types[0]);
+            }
+            return;
+          }
         }
         registerError(argument, parameter);
       }

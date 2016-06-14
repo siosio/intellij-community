@@ -44,8 +44,8 @@ import org.jetbrains.plugins.groovy.lang.psi.impl.utils.DuplicatesUtil;
 import org.jetbrains.plugins.groovy.refactoring.GroovyRefactoringBundle;
 import org.jetbrains.plugins.groovy.refactoring.GroovyRefactoringUtil;
 import org.jetbrains.plugins.groovy.refactoring.extract.ExtractUtil;
+import org.jetbrains.plugins.groovy.refactoring.extract.GrParameterTablePanel;
 import org.jetbrains.plugins.groovy.refactoring.extract.InitialInfo;
-import org.jetbrains.plugins.groovy.refactoring.extract.ParameterTablePanel;
 import org.jetbrains.plugins.groovy.refactoring.ui.GrMethodSignatureComponent;
 import org.jetbrains.plugins.groovy.refactoring.ui.GroovyComboboxVisibilityPanel;
 import org.jetbrains.plugins.groovy.settings.GroovyApplicationSettings;
@@ -76,7 +76,7 @@ public class GroovyExtractMethodDialog extends DialogWrapper {
   private ComboBoxVisibilityPanel<String> myVisibilityPanel;
   private Splitter mySplitter;
   private JCheckBox myForceReturnCheckBox;
-  private ParameterTablePanel myParameterTablePanel;
+  private GrParameterTablePanel myParameterTablePanel;
   private final Project myProject;
 
   public GroovyExtractMethodDialog(InitialInfo info, PsiClass owner) {
@@ -144,7 +144,7 @@ public class GroovyExtractMethodDialog extends DialogWrapper {
     myNameLabel.setLabelFor(myNameField);
 
     final PsiType type = myHelper.getOutputType();
-    if (type != PsiType.VOID) {
+    if (!PsiType.VOID.equals(type)) {
       myForceReturnCheckBox.setSelected(GroovyApplicationSettings.getInstance().FORCE_RETURN);
     }
     else {
@@ -247,7 +247,7 @@ public class GroovyExtractMethodDialog extends DialogWrapper {
       }
     });
 
-    myParameterTablePanel = new ParameterTablePanel() {
+    myParameterTablePanel = new GrParameterTablePanel() {
       @Override
       protected void updateSignature(){
         GroovyExtractMethodDialog.this.updateSignature();

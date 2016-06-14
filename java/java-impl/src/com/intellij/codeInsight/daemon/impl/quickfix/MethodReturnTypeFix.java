@@ -40,7 +40,6 @@ import com.intellij.psi.util.TypeConversionUtil;
 import com.intellij.refactoring.changeSignature.ChangeSignatureProcessor;
 import com.intellij.refactoring.changeSignature.OverriderUsageInfo;
 import com.intellij.refactoring.changeSignature.ParameterInfoImpl;
-import com.intellij.refactoring.typeMigration.TypeMigrationLabeler;
 import com.intellij.refactoring.typeMigration.TypeMigrationProcessor;
 import com.intellij.refactoring.typeMigration.TypeMigrationRules;
 import com.intellij.usageView.UsageInfo;
@@ -89,14 +88,16 @@ public class MethodReturnTypeFix extends LocalQuickFixAndIntentionActionOnPsiEle
                              @NotNull PsiElement endElement) {
     final PsiMethod myMethod = (PsiMethod)startElement;
 
-    PsiType myReturnType = myReturnTypePointer.getType();
-    return myMethod.isValid()
-        && myMethod.getManager().isInProject(myMethod)
-        && myReturnType != null
-        && myReturnType.isValid()
-        && !TypeConversionUtil.isNullType(myReturnType)
-        && myMethod.getReturnType() != null
-        && !Comparing.equal(myReturnType, myMethod.getReturnType());
+    final PsiType myReturnType = myReturnTypePointer.getType();
+    if (myMethod.isValid() &&
+        myMethod.getManager().isInProject(myMethod) &&
+        myReturnType != null &&
+        myReturnType.isValid() &&
+        !TypeConversionUtil.isNullType(myReturnType)) {
+      final PsiType returnType = myMethod.getReturnType();
+      if (returnType != null && returnType.isValid() && !Comparing.equal(myReturnType, returnType)) return true;
+    }
+    return false;
   }
 
   @Override
@@ -145,15 +146,15 @@ public class MethodReturnTypeFix extends LocalQuickFixAndIntentionActionOnPsiEle
 
   // to clearly separate data
   private static class ReturnStatementAdder {
-    private final PsiElementFactory factory;
-    private final PsiType myTargetType;
+    @NotNull private final PsiElementFactory factory;
+    @NotNull private final PsiType myTargetType;
 
     private ReturnStatementAdder(@NotNull final PsiElementFactory factory, @NotNull final PsiType targetType) {
       this.factory = factory;
       myTargetType = targetType;
     }
 
-    public PsiReturnStatement addReturnForMethod(final PsiFile file, final PsiMethod method) {
+    private PsiReturnStatement addReturnForMethod(final PsiFile file, final PsiMethod method) {
       final PsiModifierList modifiers = method.getModifierList();
       if (modifiers.hasModifierProperty(PsiModifier.ABSTRACT) || method.getBody() == null) {
         return null;
@@ -170,7 +171,7 @@ public class MethodReturnTypeFix extends LocalQuickFixAndIntentionActionOnPsiEle
           return null; //must be an error
         }
         PsiReturnStatement returnStatement;
-        if (controlFlow != null && ControlFlowUtil.processReturns(controlFlow, visitor)) {
+        if (ControlFlowUtil.processReturns(controlFlow, visitor)) {
           // extra return statement not needed
           // get latest modified return statement and select...
           returnStatement = visitor.getLatestReturn();
@@ -349,12 +350,12 @@ public class MethodReturnTypeFix extends LocalQuickFixAndIntentionActionOnPsiEle
                                                                            new PsiType[]{returnType},
                                                                            PsiUtil.getLanguageLevel(superClass));
 
-    final TypeMigrationRules rules = new TypeMigrationRules(TypeMigrationLabeler.getElementType(derivedClass));
+    final TypeMigrationRules rules = new TypeMigrationRules();
     final PsiSubstitutor compoundSubstitutor =
       TypeConversionUtil.getSuperClassSubstitutor(superClass, derivedClass, PsiSubstitutor.EMPTY).putAll(psiSubstitutor);
-    rules.setMigrationRootType(JavaPsiFacade.getElementFactory(project).createType(baseClass, compoundSubstitutor));
     rules.setBoundScope(new LocalSearchScope(derivedClass));
-    TypeMigrationProcessor.runHighlightingTypeMigration(project, editor, rules, referenceParameterList);
+    TypeMigrationProcessor.runHighlightingTypeMigration(project, editor, rules, referenceParameterList,
+                                                        JavaPsiFacade.getElementFactory(project).createType(baseClass, compoundSubstitutor));
 
     return false;
   }

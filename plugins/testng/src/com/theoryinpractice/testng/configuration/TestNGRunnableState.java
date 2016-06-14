@@ -39,6 +39,7 @@ import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.JavaPsiFacade;
 import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiMethod;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.rt.execution.testFrameworks.ForkedDebuggerHelper;
 import com.intellij.util.PathUtil;
@@ -73,6 +74,7 @@ public class TestNGRunnableState extends JavaTestFrameworkRunnableState<TestNGCo
     //TODO need to narrow this down a bit
     //setModulesToCompile(ModuleManager.getInstance(config.getProject()).getModules());
     client = new IDEARemoteTestRunnerClient();
+    setRemoteConnectionCreator(config.getRemoteConnectionCreator());
   }
 
   @NotNull
@@ -156,12 +158,7 @@ public class TestNGRunnableState extends JavaTestFrameworkRunnableState<TestNGCo
     console.attachToProcess(processHandler);
 
     RerunFailedTestsAction rerunFailedTestsAction = new RerunFailedTestsAction(console, console.getProperties());
-    rerunFailedTestsAction.setModelProvider(new Getter<TestFrameworkRunningModel>() {
-      @Override
-      public TestFrameworkRunningModel get() {
-        return console.getResultsView();
-      }
-    });
+    rerunFailedTestsAction.setModelProvider(() -> console.getResultsView());
 
     final DefaultExecutionResult result = new DefaultExecutionResult(console, processHandler);
     result.setRestartActions(rerunFailedTestsAction);
@@ -188,7 +185,6 @@ public class TestNGRunnableState extends JavaTestFrameworkRunnableState<TestNGCo
   @Override
   protected JavaParameters createJavaParameters() throws ExecutionException {
     final JavaParameters javaParameters = super.createJavaParameters();
-    javaParameters.setupEnvs(getConfiguration().getPersistantData().getEnvs(), getConfiguration().getPersistantData().PASS_PARENT_ENVS);
     javaParameters.setMainClass("org.testng.RemoteTestNGStarter");
 
     try {
@@ -220,6 +216,17 @@ public class TestNGRunnableState extends JavaTestFrameworkRunnableState<TestNGCo
     return javaParameters;
   }
 
+  @Override
+  protected List<String> getNamedParams(String parameters) {
+    try {
+      Integer.parseInt(parameters);
+      return super.getNamedParams(parameters);
+    }
+    catch (NumberFormatException e) {
+      return Arrays.asList(parameters.split(" "));
+    }
+  }
+
   @NotNull
   @Override
   protected String getForkMode() {
@@ -231,36 +238,34 @@ public class TestNGRunnableState extends JavaTestFrameworkRunnableState<TestNGCo
       @Override
       protected void onFound() {
         super.onFound();
-
-        if (forkPerModule()) {
-          final Map<Module, List<String>> perModule = new TreeMap<Module, List<String>>(new Comparator<Module>() {
-            @Override
-            public int compare(Module o1, Module o2) {
-              return StringUtil.compare(o1.getName(), o2.getName(), true);
-            }
-          });
-
-          for (final PsiClass psiClass : myClasses.keySet()) {
-            final Module module = ModuleUtilCore.findModuleForPsiElement(psiClass);
-            if (module != null) {
-              List<String> list = perModule.get(module);
-              if (list == null) {
-                list = new ArrayList<String>();
-                perModule.put(module, list);
-              }
-              list.add(psiClass.getQualifiedName());
-            }
-          }
-
-          try {
-            writeClassesPerModule(getConfiguration().getPackage(), getJavaParameters(), perModule);
-          }
-          catch (Exception e) {
-            LOG.error(e);
-          }
-        }
+        writeClassesPerModule(myClasses);
       }
     };
+  }
+
+  protected void writeClassesPerModule(Map<PsiClass, Map<PsiMethod, List<String>>> classes) {
+    if (forkPerModule()) {
+      final Map<Module, List<String>> perModule = new TreeMap<Module, List<String>>((o1, o2) -> StringUtil.compare(o1.getName(), o2.getName(), true));
+
+      for (final PsiClass psiClass : classes.keySet()) {
+        final Module module = ModuleUtilCore.findModuleForPsiElement(psiClass);
+        if (module != null) {
+          List<String> list = perModule.get(module);
+          if (list == null) {
+            list = new ArrayList<String>();
+            perModule.put(module, list);
+          }
+          list.add(psiClass.getQualifiedName());
+        }
+      }
+
+      try {
+        writeClassesPerModule(getConfiguration().getPackage(), getJavaParameters(), perModule);
+      }
+      catch (Exception e) {
+        LOG.error(e);
+      }
+    }
   }
 
   public static boolean supportSerializationProtocol(TestNGConfiguration config) {

@@ -25,6 +25,8 @@ import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.editor.ex.FoldingModelEx;
 import com.intellij.openapi.editor.ex.util.EditorUIUtil;
+import com.intellij.openapi.editor.ex.util.EditorUtil;
+import com.intellij.openapi.editor.impl.EditorImpl;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.HintHint;
@@ -32,6 +34,7 @@ import com.intellij.ui.LightweightHint;
 import com.intellij.ui.ScreenUtil;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
@@ -57,9 +60,12 @@ public class EditorFragmentComponent extends JPanel {
   private void doInit(EditorEx editor, int startLine, int endLine, boolean showFolding, boolean showGutter) {
     Document doc = editor.getDocument();
     final int endOffset = endLine < doc.getLineCount() ? doc.getLineEndOffset(endLine) : doc.getTextLength();
-    final int textImageWidth = Math.min(editor.getMaxWidthInRange(doc.getLineStartOffset(startLine), endOffset), ScreenUtil
-      .getScreenRectangle(1, 1).width);
-    LOG.assertTrue(textImageWidth > 0, "TextWidth: "+textImageWidth+"; startLine:" + startLine + "; endLine:" + endLine + ";");
+    boolean newRendering = editor instanceof EditorImpl && ((EditorImpl)editor).myUseNewRendering;
+    int widthAdjustment = newRendering ? EditorUtil.getSpaceWidth(Font.PLAIN, editor) : 0;
+    final int textImageWidth = Math.min(
+      editor.getMaxWidthInRange(doc.getLineStartOffset(startLine), endOffset) + widthAdjustment,
+      getWidthLimit(editor)
+    );
 
     FoldingModelEx foldingModel = editor.getFoldingModel();
     boolean isFoldingEnabled = foldingModel.isFoldingEnabled();
@@ -74,7 +80,7 @@ public class EditorFragmentComponent extends JPanel {
     final int textImageHeight = y2 - y1 == 0 ? editor.getLineHeight() : y2 - y1;
     LOG.assertTrue(textImageHeight > 0, "Height: " + textImageHeight + "; startLine:" + startLine + "; endLine:" + endLine + "; p1:" + p1 + "; p2:" + p2);
 
-    int savedScrollOffset = editor.getScrollingModel().getHorizontalScrollOffset();
+    int savedScrollOffset = newRendering ? 0 : editor.getScrollingModel().getHorizontalScrollOffset();
     if (savedScrollOffset > 0) {
       editor.getScrollingModel().scrollHorizontally(0);
     }
@@ -149,6 +155,14 @@ public class EditorFragmentComponent extends JPanel {
     Border outsideBorder = JBUI.Borders.customLine(borderColor, LINE_BORDER_THICKNESS);
     Border insideBorder = JBUI.Borders.empty(EMPTY_BORDER_THICKNESS, EMPTY_BORDER_THICKNESS);
     setBorder(BorderFactory.createCompoundBorder(outsideBorder, insideBorder));
+  }
+
+  private static int getWidthLimit(@NotNull Editor editor) {
+    Component component = editor.getComponent();
+    int screenWidth = ScreenUtil.getScreenRectangle(component).width;
+    if (screenWidth > 0) return screenWidth;
+    Window window = SwingUtilities.getWindowAncestor(component);
+    return window == null ? Integer.MAX_VALUE : window.getWidth();
   }
 
   /**
@@ -273,12 +287,7 @@ public class EditorFragmentComponent extends JPanel {
       // needed for Alt-Q multiple times
       // Q: not good?
       SwingUtilities.invokeLater(
-        new Runnable() {
-          @Override
-          public void run() {
-            MyComponentHint.super.hide();
-          }
-        }
+        () -> MyComponentHint.super.hide()
       );
     }
   }

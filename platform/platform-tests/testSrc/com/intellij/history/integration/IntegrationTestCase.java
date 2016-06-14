@@ -114,7 +114,7 @@ public abstract class IntegrationTestCase extends PlatformTestCase {
   }
 
   protected void setContent(VirtualFile f, String content, long timestamp) throws IOException {
-    f.setBinaryContent(content.getBytes(CharsetToolkit.UTF8_CHARSET), -1, timestamp);
+    setBinaryContent(f, content.getBytes(CharsetToolkit.UTF8_CHARSET), -1, timestamp,this);
   }
 
   protected String createFileExternally(String name) throws IOException {
@@ -144,7 +144,7 @@ public abstract class IntegrationTestCase extends PlatformTestCase {
   protected void setDocumentTextFor(VirtualFile f, String text) {
     Document document = FileDocumentManager.getInstance().getDocument(f);
     assertNotNull(f.getPath(), document);
-    document.setText(text);
+    ApplicationManager.getApplication().runWriteAction(() -> document.setText(text));
   }
 
   protected LocalHistoryFacade getVcs() {
@@ -172,24 +172,18 @@ public abstract class IntegrationTestCase extends PlatformTestCase {
   }
 
   protected static void addContentRoot(final Module module, final String path) {
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      public void run() {
-        ModuleRootModificationUtil.addContentRoot(module, FileUtil.toSystemIndependentName(path));
-      }
-    });
+    ApplicationManager.getApplication().runWriteAction(() -> ModuleRootModificationUtil.addContentRoot(module, FileUtil.toSystemIndependentName(path)));
   }
 
   protected void addExcludedDir(final String path) {
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      public void run() {
-        ModuleRootManager rm = ModuleRootManager.getInstance(myModule);
-        ModifiableRootModel m = rm.getModifiableModel();
-        for (ContentEntry e : m.getContentEntries()) {
-          if (!Comparing.equal(e.getFile(), myRoot)) continue;
-          e.addExcludeFolder(VfsUtilCore.pathToUrl(FileUtil.toSystemIndependentName(path)));
-        }
-        m.commit();
+    ApplicationManager.getApplication().runWriteAction(() -> {
+      ModuleRootManager rm = ModuleRootManager.getInstance(myModule);
+      ModifiableRootModel m = rm.getModifiableModel();
+      for (ContentEntry e : m.getContentEntries()) {
+        if (!Comparing.equal(e.getFile(), myRoot)) continue;
+        e.addExcludeFolder(VfsUtilCore.pathToUrl(FileUtil.toSystemIndependentName(path)));
       }
+      m.commit();
     });
   }
 

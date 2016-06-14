@@ -1,6 +1,7 @@
 package org.jetbrains.plugins.ipnb.editor.panels.code;
 
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.components.JBLabel;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.plugins.ipnb.editor.IpnbEditorUtil;
@@ -11,13 +12,12 @@ import javax.imageio.ImageIO;
 import javax.swing.*;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
-import java.io.IOException;
 
 public class IpnbImagePanel extends IpnbCodeOutputPanel<IpnbImageOutputCell> {
   private static final Logger LOG = Logger.getInstance(IpnbImagePanel.class);
 
   public IpnbImagePanel(@NotNull final IpnbImageOutputCell cell) {
-    super(cell);
+    super(cell, null);
   }
 
   @Override
@@ -25,13 +25,15 @@ public class IpnbImagePanel extends IpnbCodeOutputPanel<IpnbImageOutputCell> {
     final String png = myCell.getBase64String();
 
     final JBLabel label = new JBLabel();
-    try {
-      byte[] btDataFile = new BASE64Decoder().decodeBuffer(png);
-      BufferedImage image = ImageIO.read(new ByteArrayInputStream(btDataFile));
-      label.setIcon(new ImageIcon(image));
-    }
-    catch (IOException e) {
-      LOG.error("Couldn't parse image. " + e.getMessage());
+    if (!StringUtil.isEmptyOrSpaces(png)) {
+      try {
+        byte[] btDataFile = new BASE64Decoder().decodeBuffer(png);
+        BufferedImage image = ImageIO.read(new ByteArrayInputStream(btDataFile));
+        label.setIcon(new ImageIcon(image));
+      }
+      catch (Exception e) {
+        LOG.error("Couldn't parse image. " + e.getMessage());
+      }
     }
 
     label.setBackground(IpnbEditorUtil.getBackground());

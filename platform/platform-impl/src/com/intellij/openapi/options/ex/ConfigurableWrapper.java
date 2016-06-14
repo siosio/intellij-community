@@ -46,9 +46,17 @@ public class ConfigurableWrapper implements SearchableConfigurable, Weighted {
              ? (T)new ConfigurableWrapper(ep)
              : (T)new CompositeWrapper(ep);
     }
+    return createConfigurable(ep, LOG.isDebugEnabled());
+  }
+
+  private static <T extends UnnamedConfigurable> T createConfigurable(@NotNull ConfigurableEP<T> ep, boolean log) {
+    long time = System.currentTimeMillis();
     T configurable = ep.createConfigurable();
-    if (configurable instanceof Configurable && LOG.isDebugEnabled()) {
-      LOG.debug("cannot create configurable wrapper for " + configurable.getClass());
+    if (configurable instanceof Configurable) {
+      ConfigurableCardPanel.warn((Configurable)configurable, "init", time);
+      if (log) {
+        LOG.debug("cannot create configurable wrapper for " + configurable.getClass());
+      }
     }
     return configurable;
   }
@@ -99,16 +107,18 @@ public class ConfigurableWrapper implements SearchableConfigurable, Weighted {
   }
 
   private final ConfigurableEP myEp;
+  int myWeight; // see ConfigurableExtensionPointUtil.getConfigurableToReplace
 
   private ConfigurableWrapper(@NotNull ConfigurableEP ep) {
     myEp = ep;
+    myWeight = ep.groupWeight;
   }
 
   private UnnamedConfigurable myConfigurable;
 
   public UnnamedConfigurable getConfigurable() {
     if (myConfigurable == null) {
-      myConfigurable = myEp.createConfigurable();
+      myConfigurable = createConfigurable(myEp, false);
       if (myConfigurable == null) {
         LOG.error("Can't instantiate configurable for " + myEp);
       }
@@ -121,7 +131,7 @@ public class ConfigurableWrapper implements SearchableConfigurable, Weighted {
 
   @Override
   public int getWeight() {
-    return myEp.groupWeight;
+    return myWeight;
   }
 
   @Nls

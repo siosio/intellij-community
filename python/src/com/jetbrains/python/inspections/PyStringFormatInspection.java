@@ -78,6 +78,7 @@ public class PyStringFormatInspection extends PyInspection {
         .put('c', "str")
         .put('r', "str")
         .put('s', "str")
+        .put('b', "bytes")
         .build();
 
       private final Map<String, Boolean> myUsedMappingKeys = new HashMap<String, Boolean>();
@@ -262,7 +263,7 @@ public class PyStringFormatInspection extends PyInspection {
         final PyKeyValueExpression[] expressions = ((PyDictLiteralExpression)pyElement).getElements();
         if (myUsedMappingKeys.isEmpty()) {
           if (myExpectedArguments > 0) {
-            if (myExpectedArguments == (expressions.length + additionalExpressions.size())) {
+            if (myExpectedArguments > 1 && myExpectedArguments == (expressions.length + additionalExpressions.size())) {
               // probably "%s %s" % {'a':1, 'b':2}, with names forgotten in template
               registerProblem(rightExpression, PyBundle.message("INSP.format.requires.no.mapping"));
             }
@@ -276,39 +277,49 @@ public class PyStringFormatInspection extends PyInspection {
             return 0;
           }
         }
+        int referenceKeyNumber = 0;
         for (PyKeyValueExpression expression : expressions) {
           final PyExpression key = expression.getKey();
+          final PyExpression value = expression.getValue();
           if (key instanceof PyStringLiteralExpression) {
-            final String name = ((PyStringLiteralExpression)key).getStringValue();
-            if (myUsedMappingKeys.get(name) != null) {
-              myUsedMappingKeys.put(name, true);
-              final PyExpression value = expression.getValue();
-              if (value != null) {
-                checkExpressionType(value, myFormatSpec.get(name), problemTarget);
-              }
-            }
+            resolveMappingKey(problemTarget, (PyStringLiteralExpression)key, value);
+          }
+          else if (key instanceof PyReferenceExpression) {
+            referenceKeyNumber ++;
           }
         }
         for (Map.Entry<PyExpression, PyExpression> expression : additionalExpressions.entrySet()) {
           final PyExpression key = expression.getKey();
+          final PyExpression value = expression.getValue();
           if (key instanceof PyStringLiteralExpression) {
-            final String name = ((PyStringLiteralExpression)key).getStringValue();
-            if (myUsedMappingKeys.get(name) != null) {
-              myUsedMappingKeys.put(name, true);
-              final PyExpression value = expression.getValue();
-              if (value != null) {
-                checkExpressionType(value, myFormatSpec.get(name), problemTarget);
-              }
+            resolveMappingKey(problemTarget, (PyStringLiteralExpression)key, value);
+          }
+          else if (key instanceof PyReferenceExpression) {
+            referenceKeyNumber ++;
+          }
+        }
+        
+        int unresolved = 0;
+        for (String key : myUsedMappingKeys.keySet()) {
+          if (!myUsedMappingKeys.get(key).booleanValue()) {
+            unresolved++;
+            if (unresolved > referenceKeyNumber) {
+              registerProblem(problemTarget, PyBundle.message("INSP.key.$0.has.no.arg", key));
+              break;
             }
           }
         }
-        for (String key : myUsedMappingKeys.keySet()) {
-          if (!myUsedMappingKeys.get(key).booleanValue()) {
-            registerProblem(problemTarget, PyBundle.message("INSP.key.$0.has.no.arg", key));
-            break;
+        return (expressions.length + additionalExpressions.size());
+      }
+
+      private void resolveMappingKey(PsiElement problemTarget, PyStringLiteralExpression key, PyExpression value) {
+        final String name = key.getStringValue();
+        if (myUsedMappingKeys.get(name) != null) {
+          myUsedMappingKeys.put(name, true);
+          if (value != null) {
+            checkExpressionType(value, myFormatSpec.get(name), problemTarget);
           }
         }
-        return (expressions.length + additionalExpressions.size());
       }
 
       private void registerProblem(@NotNull PsiElement problemTarget, @NotNull final String message, @NotNull LocalQuickFix quickFix) {
@@ -372,13 +383,28 @@ public class PyStringFormatInspection extends PyInspection {
           inspectWidth(formatExpression, chunk.getPrecision());
 
           // 7. Format specifier
-          if (FORMAT_CONVERSIONS.containsKey(chunk.getConversionType())) {
-            myFormatSpec.put(mappingKey, FORMAT_CONVERSIONS.get(chunk.getConversionType()));
+          final char conversionType = chunk.getConversionType();
+          if (conversionType == 'b') {
+            final LanguageLevel languageLevel = LanguageLevel.forElement(formatExpression);
+            if (languageLevel.isOlderThan(LanguageLevel.PYTHON35) || !isBytesLiteral(formatExpression, myTypeEvalContext)) {
+              registerProblem(formatExpression, "Unsupported format character 'b'");
+              return;
+            }
+          }
+          if (FORMAT_CONVERSIONS.containsKey(conversionType)) {
+            myFormatSpec.put(mappingKey, FORMAT_CONVERSIONS.get(conversionType));
             continue;
           }
           registerProblem(formatExpression, PyBundle.message("INSP.no.format.specifier.char"), new PyAddSpecifierToFormatQuickFix());
           return;
         }
+      }
+
+      private static boolean isBytesLiteral(@NotNull PyStringLiteralExpression expr, @NotNull TypeEvalContext context) {
+        final PyBuiltinCache builtinCache = PyBuiltinCache.getInstance(expr);
+        final PyClassType bytesType = builtinCache.getBytesType(LanguageLevel.forElement(expr));
+        final PyType actualType = context.getType(expr);
+        return bytesType != null && actualType != null && PyTypeChecker.match(bytesType, actualType, context);
       }
 
       private void inspectWidth(@NotNull final PyStringLiteralExpression formatExpression, String width) {
@@ -404,7 +430,7 @@ public class PyStringFormatInspection extends PyInspection {
         else {
           final PyClassType type = as(myTypeEvalContext.getType(rightExpression), PyClassType.class);
           if (type != null) {
-            if (myUsedMappingKeys.size() > 0 && !PyABCUtil.isSubclass(type.getPyClass(), PyNames.MAPPING)) {
+            if (myUsedMappingKeys.size() > 0 && !PyABCUtil.isSubclass(type.getPyClass(), PyNames.MAPPING, null)) {
               registerProblem(rightExpression, PyBundle.message("INSP.format.requires.mapping"));
               return;
             }

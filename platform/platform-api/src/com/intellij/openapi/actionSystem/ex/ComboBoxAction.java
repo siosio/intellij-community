@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.keymap.KeymapUtil;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.JBPopup;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.ui.popup.ListPopup;
@@ -34,8 +35,8 @@ import com.intellij.ui.ColorUtil;
 import com.intellij.ui.Gray;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.UserActivityProviderComponent;
-import com.intellij.util.ui.JBSwingUtilities;
 import com.intellij.util.ui.JBUI;
+import com.intellij.util.ui.MouseEventAdapter;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -58,23 +59,30 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
 
   @Override
   public void actionPerformed(AnActionEvent e) {
-    ComboBoxButton button = (ComboBoxButton)e.getPresentation().getClientProperty(CUSTOM_COMPONENT_PROPERTY);
+    JComponent button = (JComponent)e.getPresentation().getClientProperty(CUSTOM_COMPONENT_PROPERTY);
     if (button == null) {
       Component contextComponent = e.getData(PlatformDataKeys.CONTEXT_COMPONENT);
       JRootPane rootPane = UIUtil.getParentOfType(JRootPane.class, contextComponent);
       if (rootPane != null) {
         button = (ComboBoxButton)
-          JBSwingUtilities.uiTraverser().breadthFirstTraversal(rootPane).filter(new Condition<Component>() {
-            @Override
-            public boolean value(Component component) {
-              return component instanceof ComboBoxButton && ((ComboBoxButton)component).getMyAction() == ComboBoxAction.this;
-            }
-          }).first();
+          UIUtil.uiTraverser(rootPane).bfsTraversal().filter(
+            component -> component instanceof ComboBoxButton && ((ComboBoxButton)component).getMyAction() == ComboBoxAction.this).first();
       }
       if (button == null) return;
     }
     if (!button.isShowing()) return;
-    button.showPopup();
+    if (button instanceof ComboBoxButton) {
+      ((ComboBoxButton)button).showPopup();
+    } else {
+      DataContext context = e.getDataContext();
+      Project project = e.getProject();
+      if (project == null) return;
+      DefaultActionGroup group = createPopupActionGroup(button);
+      ListPopup popup = JBPopupFactory.getInstance().createActionGroupPopup(
+        myPopupTitle, group, context, false, shouldShowDisabledActions(), false, null, getMaxRows(), getPreselectCondition());
+      popup.setMinimumSize(new Dimension(getMinWidth(), getMinHeight()));
+      popup.showCenteredInCurrentWindow(project);
+    }
   }
 
   @Override
@@ -110,7 +118,6 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
     return false;
   }
 
-
   @NotNull
   protected abstract DefaultActionGroup createPopupActionGroup(JComponent button);
 
@@ -136,14 +143,18 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
 
     public ComboBoxButton(Presentation presentation) {
       myPresentation = presentation;
-      setEnabled(myPresentation.isEnabled());
       setModel(new MyButtonModel());
+      getModel().setEnabled(myPresentation.isEnabled());
+      setVisible(presentation.isVisible());
       setHorizontalAlignment(LEFT);
       setFocusable(false);
+      if (isSmallVariant()) {
+        putClientProperty("styleCombo", Boolean.TRUE);
+      }
       Insets margins = getMargin();
       setMargin(JBUI.insets(margins.top, 2, margins.bottom, 2));
       if (isSmallVariant()) {
-        setBorder(JBUI.Borders.empty(0, 2, 0, 2));
+        setBorder(JBUI.Borders.empty(0, 2));
         if (!UIUtil.isUnderGTKLookAndFeel()) {
           setFont(JBUI.Fonts.label(11));
         }
@@ -153,12 +164,7 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
           @Override
           public void actionPerformed(ActionEvent e) {
             if (!myForcePressed) {
-              IdeFocusManager.getGlobalInstance().doWhenFocusSettlesDown(new Runnable() {
-                @Override
-                public void run() {
-                  showPopup();
-                }
-              });
+              IdeFocusManager.getGlobalInstance().doWhenFocusSettlesDown(() -> showPopup());
             }
           }
         }
@@ -194,15 +200,12 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
       addMouseMotionListener(new MouseMotionListener() {
         @Override
         public void mouseDragged(MouseEvent e) {
-          mouseMoved(new MouseEvent(e.getComponent(),
-                                    MouseEvent.MOUSE_MOVED,
-                                    e.getWhen(),
-                                    e.getModifiers(),
-                                    e.getX(),
-                                    e.getY(),
-                                    e.getClickCount(),
-                                    e.isPopupTrigger(),
-                                    e.getButton()));
+          mouseMoved(MouseEventAdapter.convert(e, e.getComponent(),
+                                               MouseEvent.MOUSE_MOVED,
+                                               e.getWhen(),
+                                               e.getModifiers() | e.getModifiersEx(),
+                                               e.getX(),
+                                               e.getY()));
         }
 
         @Override
@@ -239,20 +242,14 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
       myForcePressed = true;
       repaint();
 
-      return new Runnable() {
-        @Override
-        public void run() {
-          // give the button a chance to handle action listener
-          ApplicationManager.getApplication().invokeLater(new Runnable() {
-            @Override
-            public void run() {
-              myForcePressed = false;
-              myPopup = null;
-            }
-          }, ModalityState.any());
-          repaint();
-          fireStateChanged();
-        }
+      return () -> {
+        // give the button a chance to handle action listener
+        ApplicationManager.getApplication().invokeLater(() -> {
+          myForcePressed = false;
+          myPopup = null;
+        }, ModalityState.any());
+        repaint();
+        fireStateChanged();
       };
     }
 
@@ -380,7 +377,7 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
     public Dimension getPreferredSize() {
       final boolean isEmpty = getIcon() == null && StringUtil.isEmpty(getText());
       int width = isEmpty ? JBUI.scale(10) + ARROW_ICON.getIconWidth() : super.getPreferredSize().width;
-      if (isSmallVariant()) width += JBUI.scale(4);
+      if (isSmallVariant() && !(SystemInfo.isMac && UIUtil.isUnderIntelliJLaF())) width += JBUI.scale(4);
       return new Dimension(width, isSmallVariant() ? JBUI.scale(19) : super.getPreferredSize().height);
     }
 
@@ -396,75 +393,87 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
 
     @Override
     public void paint(Graphics g) {
-      UISettings.setupAntialiasing(g);
-      final Dimension size = getSize();
       final boolean isEmpty = getIcon() == null && StringUtil.isEmpty(getText());
+      final Dimension size = getSize();
 
-      final Color textColor = isEnabled()
-                      ? UIManager.getColor("Panel.foreground")
-                      : UIUtil.getInactiveTextColor();
-      if (myForceTransparent) {
-        final Icon icon = getIcon();
-        int x = 7;
-        if (icon != null) {
-          icon.paintIcon(this, g, x, (size.height - icon.getIconHeight()) / 2);
-          x += icon.getIconWidth() + 3;
-        }
-        if (!StringUtil.isEmpty(getText())) {
-          final Font font = getFont();
-          g.setFont(font);
-          g.setColor(textColor);
-          g.drawString(getText(), x, (size.height + font.getSize()) / 2 - 1);
-        }
+      if (SystemInfo.isMac && UIUtil.isUnderIntelliJLaF()) {
+        super.paint(g);
       } else {
+        UISettings.setupAntialiasing(g);
 
-      if (isSmallVariant()) {
-        final Graphics2D g2 = (Graphics2D)g;
-        g2.setColor(UIUtil.getControlColor());
-        final int w = getWidth();
-        final int h = getHeight();
-        if (getModel().isArmed() && getModel().isPressed()) {
-          g2.setPaint(UIUtil.getGradientPaint(0, 0, UIUtil.getControlColor(), 0, h, ColorUtil.shift(UIUtil.getControlColor(), 0.8)));
-        }
-        else {
-          if (UIUtil.isUnderDarcula()) {
-            g2.setPaint(UIUtil.getGradientPaint(0, 0, ColorUtil.shift(UIUtil.getControlColor(), 1.1), 0, h, ColorUtil.shift(UIUtil.getControlColor(), 0.9)));
-          } else {
-            g2.setPaint(UIUtil.getGradientPaint(0, 0, new JBColor(SystemInfo.isMac? Gray._226 : Gray._245, Gray._131), 0, h, new JBColor(SystemInfo.isMac? Gray._198 : Gray._208, Gray._128)));
+        final Color textColor = isEnabled()
+                                ? UIManager.getColor("Panel.foreground")
+                                : UIUtil.getInactiveTextColor();
+        if (myForceTransparent) {
+          final Icon icon = getIcon();
+          int x = 7;
+          if (icon != null) {
+            icon.paintIcon(this, g, x, (size.height - icon.getIconHeight()) / 2);
+            x += icon.getIconWidth() + 3;
+          }
+          if (!StringUtil.isEmpty(getText())) {
+            final Font font = getFont();
+            g.setFont(font);
+            g.setColor(textColor);
+            g.drawString(getText(), x, (size.height + font.getSize()) / 2 - 1);
           }
         }
-        g2.fillRoundRect(2, 0, w - 2, h, 5, 5);
+        else {
 
-        Color borderColor = myMouseInside ? new JBColor(Gray._111, Gray._118) : new JBColor(Gray._151, Gray._95);
-        g2.setPaint(borderColor);
-        g2.drawRoundRect(2, 0, w - 3, h - 1, 5, 5);
+          if (isSmallVariant()) {
+            final Graphics2D g2 = (Graphics2D)g;
+            g2.setColor(UIUtil.getControlColor());
+            final int w = getWidth();
+            final int h = getHeight();
+            if (getModel().isArmed() && getModel().isPressed()) {
+              g2.setPaint(UIUtil.getGradientPaint(0, 0, UIUtil.getControlColor(), 0, h, ColorUtil.shift(UIUtil.getControlColor(), 0.8)));
+            }
+            else {
+              if (UIUtil.isUnderDarcula()) {
+                g2.setPaint(UIUtil.getGradientPaint(0, 0, ColorUtil.shift(UIUtil.getControlColor(), 1.1), 0, h,
+                                                    ColorUtil.shift(UIUtil.getControlColor(), 0.9)));
+              }
+              else {
+                g2.setPaint(UIUtil.getGradientPaint(0, 0, new JBColor(SystemInfo.isMac ? Gray._226 : Gray._245, Gray._131), 0, h,
+                                                    new JBColor(SystemInfo.isMac ? Gray._198 : Gray._208, Gray._128)));
+              }
+            }
+            g2.fillRoundRect(2, 0, w - 2, h, 5, 5);
 
-        final Icon icon = getIcon();
-        int x = 7;
-        if (icon != null) {
-          icon.paintIcon(this, g, x, (size.height - icon.getIconHeight()) / 2);
-          x += icon.getIconWidth() + 3;
-        }
-        if (!StringUtil.isEmpty(getText())) {
-          final Font font = getFont();
-          g2.setFont(font);
-          g2.setColor(textColor);
-          g2.drawString(getText(), x, (size.height + font.getSize()) / 2 - 1);
+            Color borderColor = myMouseInside ? new JBColor(Gray._111, Gray._118) : new JBColor(Gray._151, Gray._95);
+            g2.setPaint(borderColor);
+            g2.drawRoundRect(2, 0, w - 3, h - 1, 5, 5);
+
+            final Icon icon = getIcon();
+            int x = 7;
+            if (icon != null) {
+              icon.paintIcon(this, g, x, (size.height - icon.getIconHeight()) / 2);
+              x += icon.getIconWidth() + 3;
+            }
+            if (!StringUtil.isEmpty(getText())) {
+              final Font font = getFont();
+              g2.setFont(font);
+              g2.setColor(textColor);
+              g2.drawString(getText(), x, (size.height + font.getSize()) / 2 - 1);
+            }
+          }
+          else {
+            super.paint(g);
+          }
         }
       }
-      else {
-        super.paint(g);
-      }
-    }
       final Insets insets = super.getInsets();
       final Icon icon = isEnabled() ? ARROW_ICON : DISABLED_ARROW_ICON;
-      final int x;
+      int x;
       if (isEmpty) {
         x = (size.width - icon.getIconWidth()) / 2;
       }
       else {
         if (isSmallVariant()) {
           x = size.width - icon.getIconWidth() - insets.right + 1;
+          if (SystemInfo.isMac && UIUtil.isUnderIntelliJLaF()) {
+            x-=3;
+          }
         }
         else {
           x = size.width - icon.getIconWidth() - insets.right + (UIUtil.isUnderNimbusLookAndFeel() ? -3 : 2);
@@ -479,6 +488,7 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
       invalidate();
       repaint();
       setSize(getPreferredSize());
+      repaint();
     }
   }
 

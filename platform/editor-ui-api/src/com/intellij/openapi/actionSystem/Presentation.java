@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -262,7 +262,7 @@ public final class Presentation implements Cloneable {
   public void setVisible(boolean visible) {
     boolean oldVisible = myVisible;
     myVisible = visible;
-    firePropertyChange(PROP_VISIBLE, oldVisible ? Boolean.TRUE : Boolean.FALSE, myVisible ? Boolean.TRUE : Boolean.FALSE);
+    firePropertyChange(PROP_VISIBLE, oldVisible, myVisible);
   }
 
   /**
@@ -284,7 +284,7 @@ public final class Presentation implements Cloneable {
   public void setEnabled(boolean enabled) {
     boolean oldEnabled = myEnabled;
     myEnabled = enabled;
-    firePropertyChange(PROP_ENABLED, oldEnabled ? Boolean.TRUE : Boolean.FALSE, myEnabled ? Boolean.TRUE : Boolean.FALSE);
+    firePropertyChange(PROP_ENABLED, oldEnabled, myEnabled);
   }
 
   public final void setEnabledAndVisible(boolean enabled) {
@@ -292,8 +292,10 @@ public final class Presentation implements Cloneable {
     setVisible(enabled);
   }
 
-  void firePropertyChange(String propertyName, Object oldValue, Object newValue) {
-    myChangeSupport.firePropertyChange(propertyName, oldValue, newValue);
+  private void firePropertyChange(String propertyName, boolean oldValue, boolean newValue) {
+    if (oldValue != newValue) {
+      myChangeSupport.firePropertyChange(propertyName, oldValue, newValue);
+    }
   }
 
   @Override
@@ -308,6 +310,7 @@ public final class Presentation implements Cloneable {
     setDescription(presentation.getDescription());
     setIcon(presentation.getIcon());
     setDisabledIcon(presentation.getDisabledIcon());
+    setHoveredIcon(presentation.getHoveredIcon());
     setVisible(presentation.isVisible());
     setEnabled(presentation.isEnabled());
   }

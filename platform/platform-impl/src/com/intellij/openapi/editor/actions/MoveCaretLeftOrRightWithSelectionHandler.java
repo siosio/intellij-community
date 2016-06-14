@@ -20,6 +20,9 @@ import com.intellij.openapi.editor.Caret;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.VisualPosition;
 import com.intellij.openapi.editor.actionSystem.EditorActionHandler;
+import com.intellij.openapi.editor.ex.EditorSettingsExternalizable;
+import com.intellij.openapi.keymap.impl.ModifierKeyDoubleClickHandler;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 class MoveCaretLeftOrRightWithSelectionHandler extends EditorActionHandler {
@@ -31,10 +34,16 @@ class MoveCaretLeftOrRightWithSelectionHandler extends EditorActionHandler {
   }
 
   @Override
+  protected boolean isEnabledForCaret(@NotNull Editor editor, @NotNull Caret caret, DataContext dataContext) {
+    return !ModifierKeyDoubleClickHandler.getInstance().isRunningAction() ||
+           EditorSettingsExternalizable.getInstance().addCaretsOnDoubleCtrl();
+  }
+
+  @Override
   protected void doExecute(Editor editor, @Nullable Caret caret, DataContext dataContext) {
     assert caret != null;
     VisualPosition currentPosition = caret.getVisualPosition();
-    if (caret.isAtDirectionBoundary() && (myMoveRight ^ currentPosition.leansRight)) {
+    if (caret.isAtBidiRunBoundary() && (myMoveRight ^ currentPosition.leansRight)) {
       int selectionStartToUse = caret.getLeadSelectionOffset();
       VisualPosition selectionStartPositionToUse = caret.getLeadSelectionPosition();
       caret.moveToVisualPosition(currentPosition.leanRight(!currentPosition.leansRight));

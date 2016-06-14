@@ -32,11 +32,6 @@ public abstract class XmlSyncTagTest extends LightPlatformCodeInsightFixtureTest
     myFixture.setCaresAboutInjection(false);
   }
 
-  @Override
-  protected void tearDown() throws Exception {
-    super.tearDown();
-  }
-
   protected void doTest(final String text, final String toType, final String result) {
     doTest(XmlFileType.INSTANCE, text, toType, result);
   }
@@ -50,39 +45,23 @@ public abstract class XmlSyncTagTest extends LightPlatformCodeInsightFixtureTest
   protected void type(String toType) {
     for (int i = 0; i < toType.length(); i++) {
       final char c = toType.charAt(i);
-      CommandProcessor.getInstance().executeCommand(getProject(), new Runnable() {
-        @Override
-        public void run() {
-          ApplicationManager.getApplication().runWriteAction(new Runnable() {
-            @Override
-            public void run() {
-              myFixture.type(c);
-            }
-          });
-        }
-      }, "Typing", DocCommandGroupId.noneGroupId(myFixture.getEditor().getDocument()), myFixture.getEditor().getDocument());
+      CommandProcessor.getInstance().executeCommand(getProject(), () -> ApplicationManager.getApplication().runWriteAction(() -> myFixture.type(c)), "Typing", DocCommandGroupId.noneGroupId(myFixture.getEditor().getDocument()), myFixture.getEditor().getDocument());
     }
   }
 
   protected void doTestCompletion(final String text, final String toType, final String result) {
-    myFixture.configureByText(XmlFileType.INSTANCE, text);
-    CommandProcessor.getInstance().executeCommand(getProject(), new Runnable() {
-      @Override
-      public void run() {
-        ApplicationManager.getApplication().runWriteAction(new Runnable() {
-          @Override
-          public void run() {
-            myFixture.completeBasic();
-            if (toType != null) myFixture.type(toType);
-          }
-        });
-      }
-    }, "Typing", DocCommandGroupId.noneGroupId(myFixture.getEditor().getDocument()), myFixture.getEditor().getDocument());
-    myFixture.checkResult(result);
+    doTestCompletion(XmlFileType.INSTANCE, text, toType, result);
   }
 
-  @Override
-  protected boolean isWriteActionRequired() {
-    return false;
+  protected void doTestCompletion(final FileType fileType,
+                                  final String text,
+                                  final String toType,
+                                  final String result) {
+    myFixture.configureByText(fileType, text);
+    CommandProcessor.getInstance().executeCommand(getProject(), () -> ApplicationManager.getApplication().runWriteAction(() -> {
+      myFixture.completeBasic();
+      if (toType != null) myFixture.type(toType);
+    }), "Typing", DocCommandGroupId.noneGroupId(myFixture.getEditor().getDocument()), myFixture.getEditor().getDocument());
+    myFixture.checkResult(result);
   }
 }

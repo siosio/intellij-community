@@ -29,11 +29,11 @@ import org.jetbrains.annotations.Nullable;
  * @author Danila Ponomarenko
  */
 public abstract class BaseElementAtCaretIntentionAction extends BaseIntentionAction {
-  private volatile boolean useElementToTheLeft = false;
+  private volatile boolean useElementToTheLeft;
 
   @Override
   public final boolean isAvailable(@NotNull Project project, Editor editor, PsiFile file) {
-    if (!file.getManager().isInProject(file)) return false;
+    if (!checkFile(file)) return false;
 
     useElementToTheLeft = false;
     final PsiElement elementToTheRight = getElementToTheRight(editor, file);
@@ -48,6 +48,10 @@ public abstract class BaseElementAtCaretIntentionAction extends BaseIntentionAct
     }
 
     return false;
+  }
+
+  protected boolean checkFile(@NotNull PsiFile file) {
+    return file.getManager().isInProject(file);
   }
 
   /**

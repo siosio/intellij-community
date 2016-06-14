@@ -18,7 +18,6 @@ package com.intellij.psi.impl.source.resolve.graphInference;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.source.resolve.graphInference.constraints.TypeEqualityConstraint;
-import com.intellij.psi.util.TypeConversionUtil;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.Nullable;
 
@@ -35,9 +34,14 @@ public class FunctionalInterfaceParameterizationUtil {
       }
     }
     if (classType instanceof PsiClassType) {
-      for (PsiType type : ((PsiClassType)classType).getParameters()) {
-        if (type instanceof PsiWildcardType) {
-          return true;
+      final PsiClassType.ClassResolveResult result = ((PsiClassType)classType).resolveGenerics();
+      final PsiClass aClass = result.getElement();
+      if (aClass != null) {
+        final PsiSubstitutor substitutor = result.getSubstitutor();
+        for (PsiTypeParameter parameter : aClass.getTypeParameters()) {
+          if (substitutor.substitute(parameter) instanceof PsiWildcardType) {
+            return true;
+          }
         }
       }
       return false;
@@ -106,11 +110,11 @@ public class FunctionalInterfaceParameterizationUtil {
                                                          session.substituteWithInferenceVariables(targetMethodParams[i].getType())));
       }
 
-      if (!session.repeatInferencePhases(false)) {
+      if (!session.repeatInferencePhases()) {
         return null;
       }
 
-      final PsiSubstitutor substitutor = session.retrieveNonPrimitiveEqualsBounds(session.getInferenceVariables());
+      final PsiSubstitutor substitutor = session.getInstantiations(session.getInferenceVariables());
       final PsiType[] newTypeParameters = new PsiType[parameters.length];
       for (int i = 0; i < typeParameters.length; i++) {
         PsiTypeParameter typeParameter = typeParameters[i];
@@ -130,7 +134,7 @@ public class FunctionalInterfaceParameterizationUtil {
       }
 
       //Otherwise, the inferred parameterization is either F<A'1, ..., A'm>, if all the type arguments are types,
-      if (!TypeConversionUtil.containsWildcards(parameterization)) {
+      if (!isWildcardParameterized(parameterization)) {
         return parameterization;
       }
 
@@ -165,28 +169,32 @@ public class FunctionalInterfaceParameterizationUtil {
    */
   @Nullable
   public static PsiType getNonWildcardParameterization(PsiClassType psiClassType) {
-    final PsiClass psiClass = psiClassType.resolve();
+    final PsiClassType.ClassResolveResult result = psiClassType.resolveGenerics();
+    final PsiClass psiClass = result.getElement();
     if (psiClass != null) {
       final PsiTypeParameter[] typeParameters = psiClass.getTypeParameters();
-      final PsiType[] parameters = psiClassType.getParameters();
-      final PsiType[] newParameters = new PsiType[parameters.length];
+      final PsiType[] newParameters = new PsiType[typeParameters.length];
 
-      if (parameters.length != typeParameters.length) return null;
-
+      final PsiSubstitutor substitutor = result.getSubstitutor();
       final HashSet<PsiTypeParameter> typeParametersSet = ContainerUtil.newHashSet(typeParameters);
-      for (int i = 0; i < parameters.length; i++) {
-        PsiType paramType = parameters[i];
+      next: for (int i = 0; i < typeParameters.length; i++) {
+        PsiType paramType = substitutor.substitute(typeParameters[i]);
         if (paramType instanceof PsiWildcardType) {
-          final PsiType bound = GenericsUtil.eliminateWildcards(((PsiWildcardType)paramType).getBound(), false);
+          final PsiType bound = ((PsiWildcardType)paramType).getBound();
+          for (PsiClassType paramBound : typeParameters[i].getExtendsListTypes()) {
+            if (PsiPolyExpressionUtil.mentionsTypeParameters(paramBound, typeParametersSet)) {
+              newParameters[i] = bound;
+              continue next;
+            }
+          }
+
           if (((PsiWildcardType)paramType).isSuper()) {
             newParameters[i] = bound;
           }
           else {
             newParameters[i] = bound != null ? bound : PsiType.getJavaLangObject(psiClass.getManager(), psiClassType.getResolveScope());
             for (PsiClassType paramBound : typeParameters[i].getExtendsListTypes()) {
-              if (!PsiPolyExpressionUtil.mentionsTypeParameters(paramBound, typeParametersSet)) {
-                newParameters[i] = GenericsUtil.getGreatestLowerBound(paramBound, newParameters[i]);
-              }
+              newParameters[i] = GenericsUtil.getGreatestLowerBound(newParameters[i], paramBound);
             }
           }
         } else {

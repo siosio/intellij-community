@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,17 +17,18 @@ package com.intellij.ide.actions;
 
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.actionSystem.CommonDataKeys;
-import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.actionSystem.Presentation;
-import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.DumbAware;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.wm.ToolWindow;
+import com.intellij.openapi.wm.ToolWindowType;
 import com.intellij.openapi.wm.ex.ToolWindowManagerEx;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 public class HideToolWindowAction extends AnAction implements DumbAware {
   public void actionPerformed(AnActionEvent e) {
-    Project project = CommonDataKeys.PROJECT.getData(e.getDataContext());
+    Project project = e.getProject();
     if (project == null) {
       return;
     }
@@ -37,12 +38,20 @@ public class HideToolWindowAction extends AnAction implements DumbAware {
     if (id == null) {
       id = toolWindowManager.getLastActiveToolWindowId();
     }
-    toolWindowManager.getToolWindow(id).hide(null);
+    if (shouldBeHiddenByShortCut(toolWindowManager, id)) {
+      toolWindowManager.getToolWindow(id).hide(null);
+    }
+  }
+
+  static boolean shouldBeHiddenByShortCut(@NotNull ToolWindowManagerEx manager, @Nullable String id) {
+    if (id == null) return false;
+    ToolWindow window = manager.getToolWindow(id);
+    return window.isVisible() && window.getType() != ToolWindowType.WINDOWED;
   }
 
   public void update(AnActionEvent event) {
     Presentation presentation = event.getPresentation();
-    Project project = CommonDataKeys.PROJECT.getData(event.getDataContext());
+    Project project = event.getProject();
     if (project == null) {
       presentation.setEnabled(false);
       return;
@@ -50,18 +59,9 @@ public class HideToolWindowAction extends AnAction implements DumbAware {
 
     ToolWindowManagerEx toolWindowManager = ToolWindowManagerEx.getInstanceEx(project);
     String id = toolWindowManager.getActiveToolWindowId();
-    if (id != null) {
-      presentation.setEnabled(true);
-      return;
-    }
-
-    id = toolWindowManager.getLastActiveToolWindowId();
     if (id == null) {
-      presentation.setEnabled(false);
-      return;
+      id = toolWindowManager.getLastActiveToolWindowId();
     }
-
-    ToolWindow toolWindow = toolWindowManager.getToolWindow(id);
-    presentation.setEnabled(toolWindow.isVisible());
+    presentation.setEnabled(shouldBeHiddenByShortCut(toolWindowManager, id));
   }
 }

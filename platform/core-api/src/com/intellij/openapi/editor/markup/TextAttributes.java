@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,8 +33,9 @@ public class TextAttributes implements Cloneable {
 
   public static final TextAttributes ERASE_MARKER = new TextAttributes();
 
-  private boolean myEnforcedDefaults;
+  private boolean myEnforceEmpty;
 
+  @SuppressWarnings("NullableProblems")
   @NotNull
   private AttributesFlyweight myAttrs;
 
@@ -72,7 +73,7 @@ public class TextAttributes implements Cloneable {
 
   private TextAttributes(@NotNull AttributesFlyweight attributesFlyweight, boolean enforced) {
     myAttrs = attributesFlyweight;
-    myEnforcedDefaults = enforced;
+    myEnforceEmpty = enforced;
   }
 
   public TextAttributes(@NotNull Element element) {
@@ -97,7 +98,11 @@ public class TextAttributes implements Cloneable {
   }
 
   public boolean isFallbackEnabled() {
-    return isEmpty() && !myEnforcedDefaults;
+    return isEmpty() && !myEnforceEmpty;
+  }
+
+  public boolean containsValue() {
+    return !isEmpty() || myEnforceEmpty;
   }
 
   public void reset() {
@@ -167,14 +172,14 @@ public class TextAttributes implements Cloneable {
   public void setFontType(@JdkConstants.FontStyle int type) {
     if (type < 0 || type > 3) {
       LOG.error("Wrong font type: " + type);
-      type = 0;
+      type = Font.PLAIN;
     }
     myAttrs = myAttrs.withFontType(type);
   }
 
   @Override
   public TextAttributes clone() {
-    return new TextAttributes(myAttrs, myEnforcedDefaults);
+    return new TextAttributes(myAttrs, myEnforceEmpty);
   }
 
   public boolean equals(Object obj) {
@@ -198,7 +203,7 @@ public class TextAttributes implements Cloneable {
     }
 
     if (isEmpty()) {
-      myEnforcedDefaults = true;
+      myEnforceEmpty = true;
     }
   }
 
@@ -212,7 +217,16 @@ public class TextAttributes implements Cloneable {
            getEffectColor() + "," + getErrorStripeColor() + "]";
   }
 
-  public void setEnforcedDefaults(boolean enforcedDefaults) {
-    myEnforcedDefaults = enforcedDefaults;
+  /**
+   * Enforces empty attributes instead of treating empty values as undefined.
+   *
+   * @param enforceEmpty True if empty values should be used as is (fallback is disabled).
+   */
+  public void setEnforceEmpty(boolean enforceEmpty) {
+    myEnforceEmpty = enforceEmpty;
+  }
+
+  public boolean isEnforceEmpty() {
+    return myEnforceEmpty;
   }
 }

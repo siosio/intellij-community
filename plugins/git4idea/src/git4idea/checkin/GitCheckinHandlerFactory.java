@@ -42,7 +42,6 @@ import com.intellij.util.PairConsumer;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.xml.util.XmlStringUtil;
-import git4idea.GitPlatformFacade;
 import git4idea.GitUtil;
 import git4idea.GitVcs;
 import git4idea.commands.Git;
@@ -118,7 +117,6 @@ public class GitCheckinHandlerFactory extends VcsCheckinHandlerFactory {
         return ReturnResult.COMMIT;
       }
 
-      final GitPlatformFacade platformFacade = ServiceManager.getService(myProject, GitPlatformFacade.class);
       final Git git = ServiceManager.getService(Git.class);
 
       final Collection<VirtualFile> files = myPanel.getVirtualFiles(); // deleted files aren't included, but for them we don't care about CRLFs.
@@ -128,7 +126,7 @@ public class GitCheckinHandlerFactory extends VcsCheckinHandlerFactory {
           @Override
           public void run(@NotNull ProgressIndicator indicator) {
             crlfHelper.set(GitCrlfProblemsDetector.detect(GitCheckinHandlerFactory.MyCheckinHandler.this.myProject,
-                                                          platformFacade, git, files));
+                                                          git, files));
           }
         });
 
@@ -222,7 +220,7 @@ public class GitCheckinHandlerFactory extends VcsCheckinHandlerFactory {
                                                                  @NotNull final Collection<VirtualFile> roots,
                                                                  final boolean stopWhenFoundFirst) {
       final Map<VirtualFile, Couple<String>> defined = ContainerUtil.newHashMap();
-      ProgressManager.getInstance().run(new Task.Modal(project, "Checking Git user name...", false) {
+      ProgressManager.getInstance().run(new Task.Modal(project, "Checking Git user name...", true) {
         @Override
         public void run(@NotNull ProgressIndicator pi) {
           for (VirtualFile root : roots) {
@@ -251,7 +249,7 @@ public class GitCheckinHandlerFactory extends VcsCheckinHandlerFactory {
                                              @NotNull final Collection<VirtualFile> notDefined,
                                              @NotNull final GitUserNameNotDefinedDialog dialog) {
       final Ref<String> error = Ref.create();
-      ProgressManager.getInstance().run(new Task.Modal(project, "Setting Git User Name...", false) {
+      ProgressManager.getInstance().run(new Task.Modal(project, "Setting Git User Name...", true) {
         @Override
         public void run(@NotNull ProgressIndicator pi) {
           try {
@@ -323,27 +321,10 @@ public class GitCheckinHandlerFactory extends VcsCheckinHandlerFactory {
                   readMore("http://gitolite.com/detached-head.html", "Read more about detached HEAD");
       }
 
-      DialogWrapper.DoNotAskOption dontAskAgain = new DialogWrapper.DoNotAskOption() {
+      DialogWrapper.DoNotAskOption dontAskAgain = new DialogWrapper.DoNotAskOption.Adapter() {
         @Override
-        public boolean isToBeShown() {
-          return true;
-        }
-
-        @Override
-        public void setToBeShown(boolean toBeShown, int exitCode) {
-          if (exitCode == Messages.OK) {
-            GitVcsSettings.getInstance(myProject).setWarnAboutDetachedHead(toBeShown);
-          }
-        }
-
-        @Override
-        public boolean canBeHidden() {
-          return true;
-        }
-
-        @Override
-        public boolean shouldSaveOptionsOnCancel() {
-          return false;
+        public void rememberChoice(boolean isSelected, int exitCode) {
+          GitVcsSettings.getInstance(myProject).setWarnAboutDetachedHead(!isSelected);
         }
 
         @NotNull

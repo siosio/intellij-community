@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -90,7 +90,7 @@ public class MavenModuleBuilderHelper {
                          : PsiFile.EMPTY_ARRAY;
     final VirtualFile pom = new WriteCommandAction<VirtualFile>(project, myCommandName, psiFiles) {
       @Override
-      protected void run(Result<VirtualFile> result) throws Throwable {
+      protected void run(@NotNull Result<VirtualFile> result) throws Throwable {
         VirtualFile file;
         try {
           file = root.createChildData(this, MavenConstants.POM_XML);
@@ -132,13 +132,11 @@ public class MavenModuleBuilderHelper {
     }
 
     // execute when current dialog is closed (e.g. Project Structure)
-    MavenUtil.invokeLater(project, ModalityState.NON_MODAL, new Runnable() {
-      public void run() {
-        if (!pom.isValid()) return;
+    MavenUtil.invokeLater(project, ModalityState.NON_MODAL, () -> {
+      if (!pom.isValid()) return;
 
-        EditorHelper.openInEditor(getPsiFile(project, pom));
-        if (myArchetype != null) generateFromArchetype(project, pom);
-      }
+      EditorHelper.openInEditor(getPsiFile(project, pom));
+      if (myArchetype != null) generateFromArchetype(project, pom);
     });
   }
 
@@ -214,11 +212,7 @@ public class MavenModuleBuilderHelper {
 
     props.putAll(myPropertiesToCreateByArtifact);
 
-    runner.run(params, settings, new Runnable() {
-      public void run() {
-        copyGeneratedFiles(workingDir, pom, project);
-      }
-    });
+    runner.run(params, settings, () -> copyGeneratedFiles(workingDir, pom, project));
   }
 
   private void copyGeneratedFiles(File workingDir, VirtualFile pom, Project project) {

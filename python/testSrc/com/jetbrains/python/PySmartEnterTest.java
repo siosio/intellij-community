@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,9 +23,11 @@ import com.intellij.openapi.application.Result;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.Editor;
 import com.jetbrains.python.codeInsight.PyCodeInsightSettings;
-import com.jetbrains.python.documentation.DocStringFormat;
 import com.jetbrains.python.documentation.PyDocumentationSettings;
+import com.jetbrains.python.documentation.docstrings.DocStringFormat;
 import com.jetbrains.python.fixtures.PyTestCase;
+import com.jetbrains.python.psi.LanguageLevel;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
 
@@ -33,7 +35,7 @@ import java.util.List;
  * @author Alexey.Ivanov
  */
 public class PySmartEnterTest extends PyTestCase {
-  protected static List<SmartEnterProcessor> getSmartProcessors(Language language) {
+  private static List<SmartEnterProcessor> getSmartProcessors(Language language) {
     return SmartEnterProcessors.INSTANCE.forKey(language);
   }
 
@@ -42,7 +44,7 @@ public class PySmartEnterTest extends PyTestCase {
     final List<SmartEnterProcessor> processors = getSmartProcessors(PythonLanguage.getInstance());
     new WriteCommandAction(myFixture.getProject()) {
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         final Editor editor = myFixture.getEditor();
         for (SmartEnterProcessor processor : processors) {
           processor.process(myFixture.getProject(), editor, myFixture.getFile());
@@ -214,5 +216,26 @@ public class PySmartEnterTest extends PyTestCase {
   // PY-9209
   public void testSpaceInsertedAfterHashSignInComment() {
     doTest();
+  }
+
+  // PY-16765
+  public void testGoogleDocStringColonAndIndentAfterSection() {
+    runWithDocStringFormat(DocStringFormat.GOOGLE, this::doTest);
+  }
+
+  // PY-16765
+  public void testGoogleDocStringIndentAfterSection() {
+    runWithDocStringFormat(DocStringFormat.GOOGLE, this::doTest);
+  }
+
+  // PY-16765
+  public void testGoogleDocStringIndentAfterSectionCustomIndent() {
+    getIndentOptions().INDENT_SIZE = 2;
+    runWithDocStringFormat(DocStringFormat.GOOGLE, this::doTest);
+  }
+
+  // PY-19279
+  public void testColonAfterReturnTypeAnnotation() {
+    runWithLanguageLevel(LanguageLevel.PYTHON30, this::doTest);
   }
 }

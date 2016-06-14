@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,12 +23,13 @@ import com.intellij.ide.highlighter.ProjectFileType;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ApplicationNamesInfo;
 import com.intellij.openapi.application.ModalityState;
+import com.intellij.openapi.components.ServiceKt;
 import com.intellij.openapi.components.StorageScheme;
+import com.intellij.openapi.components.impl.stores.IComponentStore;
 import com.intellij.openapi.components.impl.stores.IProjectStore;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
-import com.intellij.openapi.project.ex.ProjectEx;
 import com.intellij.openapi.project.ex.ProjectManagerEx;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.ActionCallback;
@@ -43,8 +44,10 @@ import com.intellij.util.SystemProperties;
 import org.jdom.JDOMException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.PropertyKey;
 
 import javax.swing.*;
+import java.awt.*;
 import java.io.File;
 import java.io.IOException;
 
@@ -100,6 +103,9 @@ public class ProjectUtil {
     if (virtualFile == null) return null;
     virtualFile.refresh(false, false);
 
+    Project existing = findAndFocusExistingProjectForPath(path);
+    if (existing != null) return existing;
+
     ProjectOpenProcessor strong = ProjectOpenProcessor.getStrongImportProvider(virtualFile);
     if (strong != null) {
       return strong.doOpenProject(virtualFile, projectToClose, forceOpenInNewFrame);
@@ -124,14 +130,11 @@ public class ProjectUtil {
       final Project project = provider.doOpenProject(virtualFile, projectToClose, forceOpenInNewFrame);
 
       if (project != null) {
-        ApplicationManager.getApplication().invokeLater(new Runnable() {
-          @Override
-          public void run() {
-            if (!project.isDisposed()) {
-              final ToolWindow toolWindow = ToolWindowManager.getInstance(project).getToolWindow(ToolWindowId.PROJECT_VIEW);
-              if (toolWindow != null) {
-                toolWindow.activate(null);
-              }
+        ApplicationManager.getApplication().invokeLater(() -> {
+          if (!project.isDisposed()) {
+            final ToolWindow toolWindow = ToolWindowManager.getInstance(project).getToolWindow(ToolWindowId.PROJECT_VIEW);
+            if (toolWindow != null) {
+              toolWindow.activate(null);
             }
           }
         }, ModalityState.NON_MODAL);
@@ -157,14 +160,10 @@ public class ProjectUtil {
       return null;
     }
 
-    Project[] openProjects = ProjectManager.getInstance().getOpenProjects();
-    for (Project project : openProjects) {
-      if (isSameProject(path, project)) {
-        focusProjectWindow(project, false);
-        return project;
-      }
-    }
+    Project existing = findAndFocusExistingProjectForPath(path);
+    if (existing != null) return existing;
 
+    Project[] openProjects = ProjectManager.getInstance().getOpenProjects();
     if (!forceOpenInNewFrame && openProjects.length > 0) {
       int exitCode = confirmOpenNewProject(false);
       if (exitCode == GeneralSettings.OPEN_PROJECT_SAME_WINDOW) {
@@ -172,6 +171,12 @@ public class ProjectUtil {
         if (!closeAndDispose(toClose)) return null;
       }
       else if (exitCode != GeneralSettings.OPEN_PROJECT_NEW_WINDOW) {
+        return null;
+      }
+    }
+
+    if (isRemotePath(path) && !RecentProjectsManager.getInstance().hasPath(path)) {
+      if (!confirmLoadingFromRemotePath(path, "warning.load.project.from.share", "title.load.project.from.share")) {
         return null;
       }
     }
@@ -196,6 +201,49 @@ public class ProjectUtil {
                                  Messages.getErrorIcon());
     }
     return project;
+  }
+
+  public static boolean confirmLoadingFromRemotePath(@NotNull String path,
+                                                     @NotNull @PropertyKey(resourceBundle = IdeBundle.BUNDLE) String msgKey,
+                                                     @NotNull @PropertyKey(resourceBundle = IdeBundle.BUNDLE) String titleKey) {
+    return showYesNoDialog(IdeBundle.message(msgKey, path), titleKey);
+  }
+
+  public static boolean showYesNoDialog(@NotNull String message, @NotNull @PropertyKey(resourceBundle = IdeBundle.BUNDLE) String titleKey) {
+    final Window window = getActiveFrameOrWelcomeScreen();
+    final Icon icon = Messages.getWarningIcon();
+    String title = IdeBundle.message(titleKey);
+    final int answer = window == null ? Messages.showYesNoDialog(message, title, icon) : Messages.showYesNoDialog(window, message, title, icon);
+    return answer == Messages.YES;
+  }
+
+  public static Window getActiveFrameOrWelcomeScreen() {
+    Window window = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusedWindow();
+    if (window != null)  return window;
+
+    for (Frame frame : Frame.getFrames()) {
+      if (frame instanceof IdeFrame && frame.isVisible()) {
+        return frame;
+      }
+    }
+
+    return null;
+  }
+
+  public static boolean isRemotePath(@NotNull String path) {
+    return path.contains("://") || path.contains("\\\\");
+  }
+
+  @Nullable
+  private static Project findAndFocusExistingProjectForPath(String path) {
+    Project[] openProjects = ProjectManager.getInstance().getOpenProjects();
+    for (Project project : openProjects) {
+      if (!project.isDefault() && isSameProject(path, project)) {
+        focusProjectWindow(project, false);
+        return project;
+      }
+    }
+    return null;
   }
 
   /**
@@ -232,22 +280,25 @@ public class ProjectUtil {
     return confirmOpenNewProject;
   }
 
-  private static boolean isSameProject(String path, Project p) {
-    final IProjectStore projectStore = ((ProjectEx)p).getStateStore();
+  public static boolean isSameProject(String path, @NotNull Project project) {
+    IProjectStore projectStore = (IProjectStore)ServiceKt.getStateStore(project);
 
     String toOpen = FileUtil.toSystemIndependentName(path);
-    String existing = FileUtil.toSystemIndependentName(projectStore.getProjectFilePath());
+    String existing = projectStore.getProjectFilePath();
 
-    final VirtualFile existingBaseDir = projectStore.getProjectBaseDir();
-    if (existingBaseDir == null) return false; // could be null if not yet initialized
+    String existingBaseDir = projectStore.getProjectBasePath();
+    if (existingBaseDir == null) {
+      // could be null if not yet initialized
+      return false;
+    }
 
     final File openFile = new File(toOpen);
     if (openFile.isDirectory()) {
-      return FileUtil.pathsEqual(toOpen, existingBaseDir.getPath());
+      return FileUtil.pathsEqual(toOpen, existingBaseDir);
     }
     if (StorageScheme.DIRECTORY_BASED == projectStore.getStorageScheme()) {
       // todo: check if IPR is located not under the project base dir
-      return FileUtil.pathsEqual(FileUtil.toSystemIndependentName(openFile.getParentFile().getPath()), existingBaseDir.getPath());
+      return FileUtil.pathsEqual(FileUtil.toSystemIndependentName(openFile.getParentFile().getPath()), existingBaseDir);
     }
 
     return FileUtil.pathsEqual(toOpen, existing);
@@ -263,7 +314,7 @@ public class ProjectUtil {
           f.toFront();
           //f.requestFocus();
         }
-        return new ActionCallback.Done();
+        return ActionCallback.DONE;
       }
     };
 
@@ -284,5 +335,10 @@ public class ProjectUtil {
     //noinspection HardCodedStringLiteral
     return userHome.replace('/', File.separatorChar) + File.separator + ApplicationNamesInfo.getInstance().getLowercaseProductName() +
            "Projects";
+  }
+
+  public static boolean isDirectoryBased(@NotNull Project project) {
+    IComponentStore store = ServiceKt.getStateStore(project);
+    return store instanceof IProjectStore && StorageScheme.DIRECTORY_BASED.equals(((IProjectStore)store).getStorageScheme());
   }
 }

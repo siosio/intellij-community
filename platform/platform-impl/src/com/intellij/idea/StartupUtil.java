@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package com.intellij.idea;
 
 import com.intellij.ide.customize.CustomizeIDEWizardDialog;
+import com.intellij.ide.customize.CustomizeIDEWizardStepsProvider;
 import com.intellij.ide.plugins.PluginManagerCore;
 import com.intellij.ide.startupWizard.StartupWizard;
 import com.intellij.openapi.application.ApplicationInfo;
@@ -37,6 +38,10 @@ import com.intellij.util.EnvironmentUtil;
 import com.intellij.util.PlatformUtils;
 import com.intellij.util.lang.UrlClassLoader;
 import com.sun.jna.Native;
+import org.apache.log4j.ConsoleAppender;
+import org.apache.log4j.Level;
+import org.apache.log4j.PatternLayout;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.io.BuiltInServer;
 
@@ -56,7 +61,7 @@ import java.util.Locale;
 public class StartupUtil {
   public static final String NO_SPLASH = "nosplash";
 
-  private static SocketLock ourLock;
+  private static SocketLock ourSocketLock;
 
   private StartupUtil() { }
 
@@ -66,17 +71,19 @@ public class StartupUtil {
 
   public synchronized static void addExternalInstanceListener(@Nullable Consumer<List<String>> consumer) {
     // method called by app after startup
-    ourLock.setExternalInstanceListener(consumer);
+    if (ourSocketLock != null) {
+      ourSocketLock.setExternalInstanceListener(consumer);
+    }
   }
 
-  public synchronized static int getAcquiredPort() {
-    BuiltInServer server = ourLock.getServer();
+  public static int getAcquiredPort() {
+    BuiltInServer server = getServer();
     return server == null ? -1 : server.getPort();
   }
 
   @Nullable
   public synchronized static BuiltInServer getServer() {
-    return ourLock == null ? null : ourLock.getServer();
+    return ourSocketLock == null ? null : ourSocketLock.getServer();
   }
 
   interface AppStarter {
@@ -94,11 +101,31 @@ public class StartupUtil {
     if (!checkJdkVersion()) {
       System.exit(Main.JDK_CHECK_FAILED);
     }
+
+    // avoiding "log4j:WARN No appenders could be found"
+    System.setProperty("log4j.defaultInitOverride", "true");
+    try {
+      org.apache.log4j.Logger root = org.apache.log4j.Logger.getRootLogger();
+      if (!root.getAllAppenders().hasMoreElements()) {
+        root.setLevel(Level.WARN);
+        root.addAppender(new ConsoleAppender(new PatternLayout(PatternLayout.DEFAULT_CONVERSION_PATTERN)));
+      }
+    }
+    catch (Throwable e) {
+      //noinspection CallToPrintStackTrace
+      e.printStackTrace();
+    }
+
     // note: uses config folder!
     if (!checkSystemFolders()) {
       System.exit(Main.DIR_CHECK_FAILED);
     }
-    if (!lockSystemFolders(args)) {
+
+    ActivationResult result = lockSystemFolders(args);
+    if (result == ActivationResult.ACTIVATED) {
+      System.exit(0);
+    }
+    else if (result != ActivationResult.STARTED) {
       System.exit(Main.INSTANCE_CHECK_FAILED);
     }
 
@@ -115,6 +142,7 @@ public class StartupUtil {
     if (!Main.isHeadless()) {
       AppUIUtil.updateWindowIcon(JOptionPane.getRootFrame());
       AppUIUtil.registerBundledFonts();
+      AppUIUtil.showPrivacyPolicy();
     }
 
     appStarter.start(newConfigFolder);
@@ -124,7 +152,8 @@ public class StartupUtil {
    * Checks if the program can run under the JDK it was started with.
    */
   private static boolean checkJdkVersion() {
-    if (!"true".equals(System.getProperty("idea.no.jre.check"))) {
+    String jreCheck = System.getProperty("idea.jre.check");
+    if (jreCheck != null && "true".equals(jreCheck)) {
       try {
         // try to find a class from tools.jar
         Class.forName("com.sun.jdi.Field", false, StartupUtil.class.getClassLoader());
@@ -148,8 +177,8 @@ public class StartupUtil {
         return false;
       }
     }
-    
-    if (!"true".equals(System.getProperty("idea.no.64bit.check"))) {
+    jreCheck = System.getProperty("idea.64bit.check");
+    if (jreCheck != null && "true".equals(jreCheck)) {
       if (PlatformUtils.isCidr() && !SystemInfo.is64Bit) {
           String message = "32-bit JVM is not supported. Please install 64-bit version.";
           Main.showMessage("Unsupported JVM", message, true);
@@ -244,32 +273,52 @@ public class StartupUtil {
     finally { writer.close(); }
   }
 
+  @SuppressWarnings("SSBasedInspection")
   private static void delete(File ideTempFile) {
     if (!FileUtilRt.delete(ideTempFile)) {
       ideTempFile.deleteOnExit();
     }
   }
 
-  private synchronized static boolean lockSystemFolders(String[] args) {
-    assert ourLock == null;
-    ourLock = new SocketLock(PathManager.getConfigPath(), PathManager.getSystemPath());
+  private enum ActivationResult { STARTED, ACTIVATED, FAILED }
 
-    SocketLock.ActivateStatus activateStatus = ourLock.lock(args);
-    if (activateStatus != SocketLock.ActivateStatus.NO_INSTANCE) {
-      if (activateStatus != null && (Main.isHeadless() || activateStatus == SocketLock.ActivateStatus.CANNOT_ACTIVATE)) {
-        String message = "Only one instance of " + ApplicationNamesInfo.getInstance().getFullProductName() + " can be run at a time.";
-        Main.showMessage("Too Many Instances", message, true);
-      }
-      return false;
+  private synchronized static @NotNull ActivationResult lockSystemFolders(String[] args) {
+    if (ourSocketLock != null) {
+      throw new AssertionError();
     }
 
-    ShutDownTracker.getInstance().registerShutdownTask(new Runnable() {
-      @Override
-      public void run() {
-        ourLock.dispose();
-      }
-    });
-    return true;
+    ourSocketLock = new SocketLock(PathManager.getConfigPath(), PathManager.getSystemPath());
+
+    SocketLock.ActivateStatus status;
+    try {
+      status = ourSocketLock.lock(args);
+    }
+    catch (Exception e) {
+      Main.showMessage("Cannot Lock System Folders", e);
+      return ActivationResult.FAILED;
+    }
+
+    if (status == SocketLock.ActivateStatus.NO_INSTANCE) {
+      ShutDownTracker.getInstance().registerShutdownTask(() -> {
+        //noinspection SynchronizeOnThis
+        synchronized (StartupUtil.class) {
+          ourSocketLock.dispose();
+          ourSocketLock = null;
+        }
+      });
+      return ActivationResult.STARTED;
+    }
+    else if (status == SocketLock.ActivateStatus.ACTIVATED) {
+      //noinspection UseOfSystemOutOrSystemErr
+      System.out.println("Already running");
+      return ActivationResult.ACTIVATED;
+    }
+    else if (Main.isHeadless() || status == SocketLock.ActivateStatus.CANNOT_ACTIVATE) {
+      String message = "Only one instance of " + ApplicationNamesInfo.getInstance().getFullProductName() + " can be run at a time.";
+      Main.showMessage("Too Many Instances", message, true);
+    }
+
+    return ActivationResult.FAILED;
   }
 
   private static void fixProcessEnvironment(Logger log) {
@@ -282,8 +331,6 @@ public class StartupUtil {
     }
   }
 
-  private static final String JAVA_IO_TEMP_DIR = "java.io.tmpdir";
-
   private static void loadSystemLibraries(final Logger log) {
     // load JNA and Snappy in own temp directory - to avoid collisions and work around no-exec /tmp
     File ideTempDir = new File(PathManager.getTempPath());
@@ -291,24 +338,18 @@ public class StartupUtil {
       throw new RuntimeException("Unable to create temp directory '" + ideTempDir + "'");
     }
 
-    String javaTempDir = System.getProperty(JAVA_IO_TEMP_DIR);
-    try {
-      System.setProperty(JAVA_IO_TEMP_DIR, ideTempDir.getPath());
-      if (System.getProperty("jna.nosys") == null && System.getProperty("jna.nounpack") == null) {
-        // force using bundled JNA dispatcher (if not explicitly stated)
-        System.setProperty("jna.nosys", "true");
-        System.setProperty("jna.nounpack", "false");
-      }
-      try {
-        final long t = System.currentTimeMillis();
-        log.info("JNA library loaded (" + (Native.POINTER_SIZE * 8) + "-bit) in " + (System.currentTimeMillis() - t) + " ms");
-      }
-      catch (Throwable t) {
-        logError(log, "Unable to load JNA library", t);
-      }
+    if (System.getProperty("jna.tmpdir") == null) {
+      System.setProperty("jna.tmpdir", ideTempDir.getPath());
     }
-    finally {
-      System.setProperty(JAVA_IO_TEMP_DIR, javaTempDir);
+    if (System.getProperty("jna.nosys") == null) {
+      System.setProperty("jna.nosys", "true");  // prefer bundled JNA dispatcher lib
+    }
+    try {
+      long t = System.currentTimeMillis();
+      log.info("JNA library loaded (" + (Native.POINTER_SIZE * 8) + "-bit) in " + (System.currentTimeMillis() - t) + " ms");
+    }
+    catch (Throwable t) {
+      logError(log, "Unable to load JNA library", t);
     }
 
     if (SystemInfo.isWin2kOrNewer) {
@@ -348,7 +389,7 @@ public class StartupUtil {
     ApplicationInfo appInfo = ApplicationInfoImpl.getShadowInstance();
     ApplicationNamesInfo namesInfo = ApplicationNamesInfo.getInstance();
     String buildDate = new SimpleDateFormat("dd MMM yyyy HH:ss", Locale.US).format(appInfo.getBuildDate().getTime());
-    log.info("IDE: " + namesInfo.getFullProductName() + " (build #" + appInfo.getBuild().asStringWithAllDetails() + ", " + buildDate + ")");
+    log.info("IDE: " + namesInfo.getFullProductName() + " (build #" + appInfo.getBuild().asString() + ", " + buildDate + ")");
     log.info("OS: " + SystemInfoRt.OS_NAME + " (" + SystemInfoRt.OS_VERSION + ", " + SystemInfo.OS_ARCH + ")");
     log.info("JRE: " + System.getProperty("java.runtime.version", "-") + " (" + System.getProperty("java.vendor", "-") + ")");
     log.info("JVM: " + System.getProperty("java.vm.version", "-") + " (" + System.getProperty("java.vm.name", "-") + ")");
@@ -357,29 +398,44 @@ public class StartupUtil {
     if (arguments != null) {
       log.info("JVM Args: " + StringUtil.join(arguments, " "));
     }
+
+    String extDirs = System.getProperty("java.ext.dirs");
+    if (extDirs != null) {
+      for (String dir : StringUtil.split(extDirs, File.pathSeparator)) {
+        String[] content = new File(dir).list();
+        if (content != null && content.length > 0) {
+          log.info("ext: " + dir + ": " + Arrays.toString(content));
+        }
+      }
+    }
+
+    log.info("JNU charset: " + System.getProperty("sun.jnu.encoding"));
   }
 
   static void runStartupWizard() {
     ApplicationInfoEx appInfo = ApplicationInfoImpl.getShadowInstance();
 
-    String stepsProvider = appInfo.getCustomizeIDEWizardStepsProvider();
-    if (stepsProvider != null) {
-      CustomizeIDEWizardDialog.showCustomSteps(stepsProvider);
-      PluginManagerCore.invalidatePlugins();
-      return;
-    }
+    String stepsProviderName = appInfo.getCustomizeIDEWizardStepsProvider();
+    if (stepsProviderName != null) {
+      CustomizeIDEWizardStepsProvider provider;
 
-    if (PlatformUtils.isIntelliJ()) {
-      new CustomizeIDEWizardDialog().show();
+      try {
+        Class<?> providerClass = Class.forName(stepsProviderName);
+        provider = (CustomizeIDEWizardStepsProvider)providerClass.newInstance();
+      }
+      catch (Throwable e) {
+        Main.showMessage("Configuration Wizard Failed", e);
+        return;
+      }
+
+      new CustomizeIDEWizardDialog(provider).show();
       PluginManagerCore.invalidatePlugins();
       return;
     }
 
     List<ApplicationInfoEx.PluginChooserPage> pages = appInfo.getPluginChooserPages();
     if (!pages.isEmpty()) {
-      StartupWizard startupWizard = new StartupWizard(pages);
-      startupWizard.setCancelText("Skip");
-      startupWizard.show();
+      new StartupWizard(pages).show();
       PluginManagerCore.invalidatePlugins();
     }
   }

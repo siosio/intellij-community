@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -79,7 +79,9 @@ public abstract class BreakpointWithHighlighter<P extends JavaBreakpointProperti
 
   protected abstract Icon getInvalidIcon(boolean isMuted);
 
-  protected abstract Icon getSetIcon(boolean isMuted);
+  protected Icon getSetIcon(boolean isMuted) {
+    return null;
+  }
 
   protected abstract Icon getVerifiedIcon(boolean isMuted);
 
@@ -173,12 +175,7 @@ public abstract class BreakpointWithHighlighter<P extends JavaBreakpointProperti
   protected BreakpointWithHighlighter(@NotNull Project project, XBreakpoint xBreakpoint) {
     //for persistency
     super(project, xBreakpoint);
-    ApplicationManager.getApplication().runReadAction(new Runnable() {
-      @Override
-      public void run() {
-        reload();
-      }
-    });
+    ApplicationManager.getApplication().runReadAction((Runnable)this::reload);
   }
 
   @Override
@@ -190,7 +187,7 @@ public abstract class BreakpointWithHighlighter<P extends JavaBreakpointProperti
     return ApplicationManager.getApplication().runReadAction(new Computable<Boolean>() {
       @Override
       public Boolean compute() {
-        return sourcePosition != null && sourcePosition.getFile().isValid() ? Boolean.TRUE : Boolean.FALSE;
+        return sourcePosition != null && sourcePosition.getFile().isValid();
       }
     }).booleanValue();
   }
@@ -279,7 +276,7 @@ public abstract class BreakpointWithHighlighter<P extends JavaBreakpointProperti
       createOrWaitPrepare(debugProcess, position);
     }
     else {
-      LOG.error("Unable to create request for breakpoint with null position: " + getDisplayName() + " at " + myXBreakpoint.getSourcePosition());
+      LOG.error("Unable to create request for breakpoint with null position: " + toString() + " at " + myXBreakpoint.getSourcePosition());
     }
     updateUI();
   }
@@ -306,38 +303,29 @@ public abstract class BreakpointWithHighlighter<P extends JavaBreakpointProperti
       return;
     }
     final Project project = getProject();
-    DebuggerInvocationUtil.swingInvokeLater(project, new Runnable() {
-      @Override
-      public void run() {
-        if (!isValid()) {
-          return;
-        }
+    DebuggerInvocationUtil.swingInvokeLater(project, () -> {
+      if (!isValid()) {
+        return;
+      }
 
-        DebuggerContextImpl context = DebuggerManagerEx.getInstanceEx(project).getContext();
-        final DebugProcessImpl debugProcess = context.getDebugProcess();
-        if (debugProcess == null || !debugProcess.isAttached()) {
-          updateCaches(null);
-          updateGutter();
-        }
-        else {
-          debugProcess.getManagerThread().invoke(new DebuggerCommandImpl() {
-            @Override
-            protected void action() throws Exception {
-              ApplicationManager.getApplication().runReadAction(new Runnable() {
-                @Override
-                public void run() {
-                  updateCaches(debugProcess);
-                }
-              });
-              DebuggerInvocationUtil.swingInvokeLater(project, new Runnable() {
-                @Override
-                public void run() {
-                  updateGutter();
-                }
-              });
-            }
-          });
-        }
+      DebuggerContextImpl context = DebuggerManagerEx.getInstanceEx(project).getContext();
+      final DebugProcessImpl debugProcess = context.getDebugProcess();
+      if (debugProcess == null || !debugProcess.isAttached()) {
+        updateCaches(null);
+        updateGutter();
+      }
+      else {
+        debugProcess.getManagerThread().invoke(new DebuggerCommandImpl() {
+          @Override
+          protected void action() throws Exception {
+            ApplicationManager.getApplication().runReadAction(() -> {
+              if (!project.isDisposed()) {
+                updateCaches(debugProcess);
+              }
+            });
+            DebuggerInvocationUtil.swingInvokeLater(project, BreakpointWithHighlighter.this::updateGutter);
+          }
+        });
       }
     });
   }

@@ -38,7 +38,7 @@ import java.io.IOException;
  * @author max
  */
 public class JavaFileElementType extends ILightStubFileElementType<PsiJavaFileStub> {
-  public static final int STUB_VERSION = 19;
+  public static final int STUB_VERSION = 24;
 
   public JavaFileElementType() {
     super("java.FILE", JavaLanguage.INSTANCE);
@@ -106,5 +106,6 @@ public class JavaFileElementType extends ILightStubFileElementType<PsiJavaFileSt
   }
 
   @Override
-  public void indexStub(@NotNull final PsiJavaFileStub stub, @NotNull final IndexSink sink) { }
+  public void indexStub(@NotNull final PsiJavaFileStub stub, @NotNull final IndexSink sink) {
+  }
 }

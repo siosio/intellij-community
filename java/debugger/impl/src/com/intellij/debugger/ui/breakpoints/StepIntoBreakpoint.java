@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,21 +16,22 @@
 package com.intellij.debugger.ui.breakpoints;
 
 import com.intellij.debugger.SourcePosition;
-import com.intellij.debugger.engine.BreakpointStepMethodFilter;
-import com.intellij.debugger.engine.CompoundPositionManager;
-import com.intellij.debugger.engine.DebugProcessImpl;
-import com.intellij.debugger.engine.LambdaMethodFilter;
+import com.intellij.debugger.engine.*;
 import com.intellij.debugger.engine.evaluation.EvaluateException;
+import com.intellij.debugger.engine.events.SuspendContextCommandImpl;
 import com.intellij.debugger.engine.requests.RequestManagerImpl;
 import com.intellij.debugger.impl.DebuggerUtilsEx;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.intellij.util.containers.MultiMap;
 import com.sun.jdi.*;
+import com.sun.jdi.event.LocatableEvent;
 import com.sun.jdi.request.BreakpointRequest;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * @author Eugene Zhuravlev
@@ -38,8 +39,8 @@ import java.util.*;
  */
 public class StepIntoBreakpoint extends RunToCursorBreakpoint {
   private static final Logger LOG = Logger.getInstance("#com.intellij.debugger.ui.breakpoints.StepIntoBreakpoint");
-  @NotNull
-  private final BreakpointStepMethodFilter myFilter;
+  @NotNull private final BreakpointStepMethodFilter myFilter;
+  @Nullable private RequestHint myHint;
 
   StepIntoBreakpoint(@NotNull Project project, @NotNull SourcePosition pos, @NotNull BreakpointStepMethodFilter filter) {
     super(project, pos, false);
@@ -64,29 +65,29 @@ public class StepIntoBreakpoint extends RunToCursorBreakpoint {
       }
 
       if (!locations.isEmpty()) {
-        final Set<Method> methods = new HashSet<Method>();
+        MultiMap<Method, Location> methods = new MultiMap<>();
         for (Location loc : locations) {
           if (acceptLocation(debugProcess, classType, loc)) {
-            methods.add(loc.method());
+            methods.putValue(loc.method(), loc);
           }
         }
         Location location = null;
         final int methodsFound = methods.size();
         if (methodsFound == 1) {
-          location = methods.iterator().next().location();
+          location = methods.values().iterator().next();
         }
         else {
           if (myFilter instanceof LambdaMethodFilter) {
             final LambdaMethodFilter lambdaFilter = (LambdaMethodFilter)myFilter;
             if (lambdaFilter.getLambdaOrdinal() < methodsFound) {
-              final Method[] candidates = methods.toArray(new Method[methodsFound]);
+              Method[] candidates = methods.keySet().toArray(new Method[methodsFound]);
               Arrays.sort(candidates, DebuggerUtilsEx.LAMBDA_ORDINAL_COMPARATOR);
-              location = candidates[lambdaFilter.getLambdaOrdinal()].location();
+              location = methods.get(candidates[lambdaFilter.getLambdaOrdinal()]).iterator().next();
             }
           }
           else {
             if (methodsFound > 0) {
-              location = methods.iterator().next().location();
+              location = methods.values().iterator().next();
             }
           }
         }
@@ -134,5 +135,23 @@ public class StepIntoBreakpoint extends RunToCursorBreakpoint {
       return breakpoint;
     }
     return null;
+  }
+
+  @Override
+  public boolean processLocatableEvent(SuspendContextCommandImpl action, LocatableEvent event)
+    throws EventProcessingException {
+    boolean res = super.processLocatableEvent(action, event);
+    if (res && myHint != null && myHint.isResetIgnoreFilters()) {
+      SuspendContextImpl context = action.getSuspendContext();
+      if (context != null) {
+        DebugProcessImpl process = context.getDebugProcess();
+        process.checkPositionNotFiltered(context.getThread(), f -> process.getSession().resetIgnoreStepFiltersFlag());
+      }
+    }
+    return res;
+  }
+
+  public void setRequestHint(RequestHint hint) {
+    myHint = hint;
   }
 }

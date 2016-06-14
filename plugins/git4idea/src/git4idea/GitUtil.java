@@ -17,6 +17,7 @@ package git4idea;
 
 import com.google.common.base.Predicates;
 import com.google.common.collect.Collections2;
+import com.intellij.dvcs.DvcsUtil;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressIndicator;
@@ -34,8 +35,10 @@ import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.ChangeListManager;
 import com.intellij.openapi.vcs.changes.ChangeListManagerEx;
+import com.intellij.openapi.vcs.changes.ContentRevision;
 import com.intellij.openapi.vcs.versionBrowser.CommittedChangeList;
 import com.intellij.openapi.vcs.vfs.AbstractVcsVirtualFile;
+import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.Consumer;
@@ -66,32 +69,33 @@ import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.util.*;
 
+import static com.intellij.dvcs.DvcsUtil.getShortRepositoryName;
+import static com.intellij.dvcs.DvcsUtil.joinShortNames;
+import static com.intellij.util.ObjectUtils.assertNotNull;
+
 /**
  * Git utility/helper methods
  */
 public class GitUtil {
-  /**
-   * Comparator for virtual files by name
-   */
-  public static final Comparator<VirtualFile> VIRTUAL_FILE_COMPARATOR = new Comparator<VirtualFile>() {
-    public int compare(final VirtualFile o1, final VirtualFile o2) {
-      if (o1 == null && o2 == null) {
-        return 0;
-      }
-      if (o1 == null) {
-        return -1;
-      }
-      if (o2 == null) {
-        return 1;
-      }
-      return o1.getPresentableUrl().compareTo(o2.getPresentableUrl());
-    }
-  };
+
   public static final String DOT_GIT = ".git";
 
   public static final String ORIGIN_HEAD = "origin/HEAD";
 
+  public static final Function<GitRepository, VirtualFile> REPOSITORY_TO_ROOT = new Function<GitRepository, VirtualFile>() {
+    @Override
+    public VirtualFile fun(@NotNull GitRepository repository) {
+      return repository.getRoot();
+    }
+  };
+
+  public static final String HEAD = "HEAD";
+  public static final String CHERRY_PICK_HEAD = "CHERRY_PICK_HEAD";
+  public static final String MERGE_HEAD = "MERGE_HEAD";
+
+  private static final String SUBMODULE_REPO_PATH_PREFIX = "gitdir:";
   private final static Logger LOG = Logger.getInstance(GitUtil.class);
+  private static final String HEAD_FILE = "HEAD";
 
   /**
    * A private constructor to suppress instance creation
@@ -100,41 +104,84 @@ public class GitUtil {
     // do nothing
   }
 
+  /**
+   * Returns the Git repository location for the given repository root directory, or null if nothing can be found.
+   * Able to find the real repository root of a submodule.
+   * @see #findGitDir(VirtualFile) 
+   */
+  @Nullable
+  public static File findGitDir(@NotNull File rootDir) {
+    File dotGit = new File(rootDir, DOT_GIT);
+    if (!dotGit.exists()) return null;
+    if (dotGit.isDirectory()) {
+      boolean headExists = new File(dotGit, HEAD_FILE).exists();
+      return headExists ? dotGit : null;
+    }
+
+    String content = DvcsUtil.tryLoadFileOrReturn(dotGit, null, CharsetToolkit.UTF8);
+    if (content == null) return null;
+    String pathToDir = parsePathToRepository(content);
+    return findSubmoduleRepositoryDir(rootDir.getPath(), pathToDir);
+  }
+
+  /**
+   * Returns the Git repository location for the given repository root directory, or null if nothing can be found.
+   * Able to find the real repository root of a submodule.
+   * <p/>
+   * More precisely: checks if there is {@code .git} directory or file directly under rootDir. <br/>
+   * If there is a directory, performs a quick check that it looks like a Git repository;<br/>
+   * if it is a file, follows the path written inside this file to find the submodule repo dir.
+   */
   @Nullable
   public static VirtualFile findGitDir(@NotNull VirtualFile rootDir) {
-    VirtualFile child = rootDir.findChild(DOT_GIT);
-    if (child == null) {
+    VirtualFile dotGit = rootDir.findChild(DOT_GIT);
+    if (dotGit == null) {
       return null;
     }
-    if (child.isDirectory()) {
-      return child;
+    if (dotGit.isDirectory()) {
+      boolean headExists = dotGit.findChild(HEAD_FILE) != null;
+      return headExists ? dotGit : null;
     }
 
-    // this is standard for submodules, although probably it can
-    String content;
-    try {
-      content = readFile(child);
-    }
-    catch (IOException e) {
-      throw new RuntimeException("Couldn't read " + child, e);
-    }
-    String pathToDir;
-    String prefix = "gitdir:";
-    if (content.startsWith(prefix)) {
-      pathToDir = content.substring(prefix.length()).trim();
-    }
-    else {
-      pathToDir = content;
-    }
+    // if .git is a file with some specific content, it indicates a submodule with a link to the real repository path
+    String content = readContent(dotGit);
+    if (content == null) return null;
+    String pathToDir = parsePathToRepository(content);
+    File file = findSubmoduleRepositoryDir(rootDir.getPath(), pathToDir);
+    if (file == null) return null;
+    return VcsUtil.getVirtualFileWithRefresh(file);
+  }
 
-    if (!FileUtil.isAbsolute(pathToDir)) {
-      String canonicalPath = FileUtil.toCanonicalPath(FileUtil.join(rootDir.getPath(), pathToDir));
+  @Nullable
+  private static File findSubmoduleRepositoryDir(@NotNull String rootPath, @NotNull String path) {
+    if (!FileUtil.isAbsolute(path)) {
+      String canonicalPath = FileUtil.toCanonicalPath(FileUtil.join(rootPath, path), true);
       if (canonicalPath == null) {
         return null;
       }
-      pathToDir = FileUtil.toSystemIndependentName(canonicalPath);
+      path = FileUtil.toSystemIndependentName(canonicalPath);
     }
-    return VcsUtil.getVirtualFileWithRefresh(new File(pathToDir));
+    File file = new File(path);
+    return file.isDirectory() ? file : null;
+  }
+
+  @NotNull
+  private static String parsePathToRepository(@NotNull String content) {
+    content = content.trim();
+    return content.startsWith(SUBMODULE_REPO_PATH_PREFIX) ? content.substring(SUBMODULE_REPO_PATH_PREFIX.length()).trim() : content;
+  }
+
+  @Nullable
+  private static String readContent(@NotNull VirtualFile dotGit) {
+    String content;
+    try {
+      content = readFile(dotGit);
+    }
+    catch (IOException e) {
+      LOG.error("Couldn't read the content of " + dotGit, e);
+      return null;
+    }
+    return content;
   }
 
   /**
@@ -250,7 +297,7 @@ public class GitUtil {
    * @param value a value to parse
    * @return timestamp as {@link Date} object
    */
-  private static Date parseTimestamp(String value) {
+  public static Date parseTimestamp(String value) {
     final long parsed;
     parsed = Long.parseLong(value.trim());
     return new Date(parsed * 1000);
@@ -330,8 +377,8 @@ public class GitUtil {
     return getGitRootOrNull(filePath.getIOFile());
   }
 
-  public static boolean isGitRoot(final File file) {
-    return file != null && file.exists() && new File(file, DOT_GIT).exists();
+  public static boolean isGitRoot(@NotNull File folder) {
+    return findGitDir(folder) != null;
   }
 
   /**
@@ -409,12 +456,11 @@ public class GitUtil {
     if (contentRoots == null || contentRoots.length == 0) {
       throw new VcsException(GitBundle.getString("repository.action.missing.roots.unconfigured.message"));
     }
-    final List<VirtualFile> roots = new ArrayList<VirtualFile>(gitRootsForPaths(Arrays.asList(contentRoots)));
-    if (roots.size() == 0) {
+    final List<VirtualFile> sortedRoots = DvcsUtil.sortVirtualFilesByPresentation(gitRootsForPaths(Arrays.asList(contentRoots)));
+    if (sortedRoots.size() == 0) {
       throw new VcsException(GitBundle.getString("repository.action.missing.roots.misconfigured"));
     }
-    Collections.sort(roots, VIRTUAL_FILE_COMPARATOR);
-    return roots;
+    return sortedRoots;
   }
 
 
@@ -691,7 +737,7 @@ public class GitUtil {
                                                          @NotNull GitRemote remote,
                                                          @NotNull String branchName) {
     GitRemoteBranch remoteBranch = findRemoteBranch(repository, remote, branchName);
-    return ObjectUtils.notNull(remoteBranch, new GitStandardRemoteBranch(remote, branchName, GitBranch.DUMMY_HASH));
+    return ObjectUtils.notNull(remoteBranch, new GitStandardRemoteBranch(remote, branchName));
   }
 
   @Nullable
@@ -706,11 +752,7 @@ public class GitUtil {
 
   @NotNull
   public static Collection<VirtualFile> getRootsFromRepositories(@NotNull Collection<GitRepository> repositories) {
-    Collection<VirtualFile> roots = new ArrayList<VirtualFile>(repositories.size());
-    for (GitRepository repository : repositories) {
-      roots.add(repository.getRoot());
-    }
-    return roots;
+    return ContainerUtil.map(repositories, REPOSITORY_TO_ROOT);
   }
 
   @NotNull
@@ -781,16 +823,6 @@ public class GitUtil {
         return remote.getName() + ": [" + StringUtil.join(remote.getUrls(), ", ") + "]";
       }
     }, "\n");
-  }
-
-  @NotNull
-  public static String fileOrFolder(@NotNull VirtualFile file) {
-    if (file.isDirectory()) {
-      return "Folder";
-    }
-    else {
-      return "File";
-    }
   }
 
   /**
@@ -939,8 +971,11 @@ public class GitUtil {
           String message = "Change is not found for " + file.getPath();
           if (changeListManager.isInUpdate()) {
             message += " because ChangeListManager is being updated.";
+            LOG.debug(message);
           }
-          LOG.warn(message);
+          else {
+            LOG.info(message);
+          }
         }
       }
     }
@@ -965,7 +1000,7 @@ public class GitUtil {
     msg = msg.trim();
     for (String prefix : PREFIXES) {
       if (msg.startsWith(prefix)) {
-        return msg.substring(prefix.length()).trim();
+        msg = msg.substring(prefix.length()).trim();
       }
     }
     return msg;
@@ -979,5 +1014,79 @@ public class GitUtil {
       }
     }
     return null;
+  }
+
+  @NotNull
+  public static String joinToHtml(@NotNull Collection<GitRepository> repositories) {
+    return StringUtil.join(repositories, new Function<GitRepository, String>() {
+      @Override
+      public String fun(GitRepository repository) {
+        return repository.getPresentableUrl();
+      }
+    }, "<br/>");
+  }
+
+  @NotNull
+  public static String mention(@NotNull GitRepository repository) {
+    return getRepositoryManager(repository.getProject()).moreThanOneRoot() ? " in " + getShortRepositoryName(repository) : "";
+  }
+
+  @NotNull
+  public static String mention(@NotNull Collection<GitRepository> repositories) {
+    return mention(repositories, -1);
+  }
+
+  @NotNull
+  public static String mention(@NotNull Collection<GitRepository> repositories, int limit) {
+    if (repositories.isEmpty()) return "";
+    return " in " + joinShortNames(repositories, limit);
+  }
+
+  public static void updateRepositories(@NotNull Collection<GitRepository> repositories) {
+    for (GitRepository repository : repositories) {
+      repository.update();
+    }
+  }
+
+  public static boolean hasGitRepositories(@NotNull Project project) {
+    return !getRepositories(project).isEmpty();
+  }
+
+  @NotNull
+  public static Collection<GitRepository> getRepositories(@NotNull Project project) {
+    return getRepositoryManager(project).getRepositories();
+  }
+
+  /**
+   * Checks if the given paths are equal only by case.
+   * It is expected that the paths are different at least by the case.
+   */
+  public static boolean isCaseOnlyChange(@NotNull String oldPath, @NotNull String newPath) {
+    if (oldPath.equalsIgnoreCase(newPath)) {
+      if (oldPath.equals(newPath)) {
+        LOG.error("Comparing perfectly equal paths: " + newPath);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  @NotNull
+  public static String getLogString(@NotNull String root, @NotNull Collection<Change> changes) {
+    return StringUtil.join(changes, change -> {
+      ContentRevision after = change.getAfterRevision();
+      ContentRevision before = change.getBeforeRevision();
+      switch (change.getType()) {
+        case NEW: return "A: " + getRelativePath(root, assertNotNull(after));
+        case DELETED: return "D: " + getRelativePath(root, assertNotNull(before));
+        case MOVED: return "M: " + getRelativePath(root, assertNotNull(before)) + " -> " + getRelativePath(root, assertNotNull(after));
+        default: return "M: " + getRelativePath(root, assertNotNull(after));
+      }
+    }, ", ");
+  }
+
+  @Nullable
+  public static String getRelativePath(@NotNull String root, @NotNull ContentRevision after) {
+    return FileUtil.getRelativePath(root, after.getFile().getPath(), File.separatorChar);
   }
 }

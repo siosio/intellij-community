@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import com.sun.jdi.InternalException;
 import com.sun.jdi.ObjectCollectedException;
 import com.sun.jdi.event.EventSet;
 import com.sun.jdi.request.EventRequest;
+import org.intellij.lang.annotations.MagicConstant;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
@@ -32,13 +33,13 @@ import java.util.*;
 public class SuspendManagerImpl implements SuspendManager {
   private static final Logger LOG = Logger.getInstance("#com.intellij.debugger.engine.SuspendManager");
 
-  private final LinkedList<SuspendContextImpl> myEventContexts  = new LinkedList<SuspendContextImpl>();
+  private final LinkedList<SuspendContextImpl> myEventContexts  = new LinkedList<>();
   /**
    * contexts, paused at breakpoint or another debugger event requests. Note that thread, explicitly paused by user is not considered as
    * "paused at breakpoint" and JDI prohibits data queries on its stack frames
    */
-  private final LinkedList<SuspendContextImpl> myPausedContexts = new LinkedList<SuspendContextImpl>();
-  private final Set<ThreadReferenceProxyImpl>  myFrozenThreads  = Collections.synchronizedSet(new HashSet<ThreadReferenceProxyImpl>());
+  private final LinkedList<SuspendContextImpl> myPausedContexts = new LinkedList<>();
+  private final Set<ThreadReferenceProxyImpl>  myFrozenThreads  = Collections.synchronizedSet(new HashSet<>());
 
   private final DebugProcessImpl myDebugProcess;
 
@@ -57,15 +58,13 @@ public class SuspendManagerImpl implements SuspendManager {
   }
 
   @Override
-  public SuspendContextImpl pushSuspendContext(final int suspendPolicy, int nVotes) {
+  public SuspendContextImpl pushSuspendContext(@MagicConstant(flagsFromClass = EventRequest.class) final int suspendPolicy, int nVotes) {
     SuspendContextImpl suspendContext = new SuspendContextImpl(myDebugProcess, suspendPolicy, nVotes, null) {
       @Override
       protected void resumeImpl() {
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("Start resuming...");
-        }
+        LOG.debug("Start resuming...");
         myDebugProcess.logThreads();
-        switch(getSuspendPolicy()) {
+        switch (getSuspendPolicy()) {
           case EventRequest.SUSPEND_ALL:
             int resumeAttempts = 5;
             while (--resumeAttempts > 0) {
@@ -86,22 +85,18 @@ public class SuspendManagerImpl implements SuspendManager {
                 }
               }
             }
-            
-            if (LOG.isDebugEnabled()) {
-              LOG.debug("VM resumed ");
-            }
+
+            LOG.debug("VM resumed ");
             break;
           case EventRequest.SUSPEND_EVENT_THREAD:
             myFrozenThreads.remove(getThread());
             getThread().resume();
-            if(LOG.isDebugEnabled()) {
+            if (LOG.isDebugEnabled()) {
               LOG.debug("Thread resumed : " + getThread().toString());
             }
             break;
           case EventRequest.SUSPEND_NONE:
-            if (LOG.isDebugEnabled()) {
-              LOG.debug("None resumed");
-            }
+            LOG.debug("None resumed");
             break;
         }
         if (LOG.isDebugEnabled()) {
@@ -160,9 +155,7 @@ public class SuspendManagerImpl implements SuspendManager {
             }
           }
         }
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("Set resumed ");
-        }
+        LOG.debug("Set resumed ");
         myDebugProcess.logThreads();
       }
     };
@@ -184,10 +177,9 @@ public class SuspendManagerImpl implements SuspendManager {
     SuspendManagerUtil.prepareForResume(context);
 
     myDebugProcess.logThreads();
-    final int suspendPolicy = context.getSuspendPolicy();
     popContext(context);
     context.resume();
-    myDebugProcess.clearCashes(suspendPolicy);
+    myDebugProcess.clearCashes(context.getSuspendPolicy());
   }
 
   @Override
@@ -273,12 +265,12 @@ public class SuspendManagerImpl implements SuspendManager {
   }
 
   @Override
-  public void resumeThread(SuspendContextImpl context, ThreadReferenceProxyImpl thread) {
-    LOG.assertTrue(thread != context.getThread(), "Use resume() instead of resuming breakpoint thread");
+  public void resumeThread(SuspendContextImpl context, @NotNull ThreadReferenceProxyImpl thread) {
+    //LOG.assertTrue(thread != context.getThread(), "Use resume() instead of resuming breakpoint thread");
     LOG.assertTrue(!context.isExplicitlyResumed(thread));
 
     if(context.myResumedThreads == null) {
-      context.myResumedThreads = new HashSet<ThreadReferenceProxyImpl>();
+      context.myResumedThreads = new HashSet<>();
     }
     context.myResumedThreads.add(thread);
     thread.resume();
@@ -321,13 +313,11 @@ public class SuspendManagerImpl implements SuspendManager {
         });
       }
       else {
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("vote paused");
-        }
+        LOG.debug("vote paused");
         myDebugProcess.logThreads();
         myDebugProcess.cancelRunToCursorBreakpoint();
         final ThreadReferenceProxyImpl thread = suspendContext.getThread();
-        myDebugProcess.deleteStepRequests(thread != null? thread.getThreadReference() : null);
+        myDebugProcess.deleteStepRequests(thread != null ? thread.getThreadReference() : null);
         notifyPaused(suspendContext);
       }
     }
@@ -340,9 +330,7 @@ public class SuspendManagerImpl implements SuspendManager {
 
   @Override
   public void voteResume(SuspendContextImpl suspendContext) {
-    if (LOG.isDebugEnabled()) {
-      LOG.debug("Resume voted");
-    }
+    LOG.debug("Resume voted");
     processVote(suspendContext);
   }
 
@@ -352,7 +340,7 @@ public class SuspendManagerImpl implements SuspendManager {
     processVote(suspendContext);
   }
 
-  LinkedList<SuspendContextImpl> getPausedContexts() {
+  public List<SuspendContextImpl> getPausedContexts() {
     return myPausedContexts;
   }
 }

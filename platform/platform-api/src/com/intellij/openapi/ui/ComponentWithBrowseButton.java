@@ -34,9 +34,10 @@ import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.GuiUtils;
 import com.intellij.ui.UIBundle;
-import com.intellij.util.Consumer;
 import com.intellij.util.ui.UIUtil;
+import com.intellij.util.ui.accessibility.ScreenReader;
 import com.intellij.util.ui.update.LazyUiDisposable;
+import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -66,20 +67,23 @@ public class ComponentWithBrowseButton<Comp extends JComponent> extends JPanel i
     if (browseActionListener != null) {
       myBrowseButton.addActionListener(browseActionListener);
     }
-    // don't force FixedSizeButton to occupy the whole height
-    add(wrapWithoutResize(myBrowseButton), BorderLayout.EAST);
+    add(centerComponentVertically(myBrowseButton), BorderLayout.EAST);
 
     myBrowseButton.setToolTipText(UIBundle.message("component.with.browse.button.browse.button.tooltip.text"));
-
     // FixedSizeButton isn't focusable but it should be selectable via keyboard.
     if (ApplicationManager.getApplication() != null) {  // avoid crash at design time
       new MyDoClickAction(myBrowseButton).registerShortcut(myComponent);
     }
+    if (ScreenReader.isActive()) {
+      myBrowseButton.setFocusable(true);
+      myBrowseButton.getAccessibleContext().setAccessibleName("Browse");
+    }
   }
 
-  private static JPanel wrapWithoutResize(JComponent component) {
-    JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-    panel.add(component);
+  @NotNull
+  private static JPanel centerComponentVertically(@NotNull Component component) {
+    JPanel panel = new JPanel(new GridBagLayout());
+    panel.add(component, new GridBagConstraints());
     return panel;
   }
 
@@ -122,13 +126,17 @@ public class ComponentWithBrowseButton<Comp extends JComponent> extends JPanel i
     myBrowseButton.removeActionListener(listener);
   }
 
-  public void addBrowseFolderListener(@Nullable String title, @Nullable String description, @Nullable Project project,
+  public void addBrowseFolderListener(@Nullable @Nls(capitalization = Nls.Capitalization.Title) String title,
+                                      @Nullable @Nls(capitalization = Nls.Capitalization.Sentence) String description,
+                                      @Nullable Project project,
                                       FileChooserDescriptor fileChooserDescriptor,
                                       TextComponentAccessor<Comp> accessor) {
     addBrowseFolderListener(title, description, project, fileChooserDescriptor, accessor, true);
   }
 
-  public void addBrowseFolderListener(@Nullable String title, @Nullable String description, @Nullable Project project,
+  public void addBrowseFolderListener(@Nullable @Nls(capitalization = Nls.Capitalization.Title) String title,
+                                      @Nullable @Nls(capitalization = Nls.Capitalization.Sentence) String description,
+                                      @Nullable Project project,
                                       FileChooserDescriptor fileChooserDescriptor,
                                       TextComponentAccessor<Comp> accessor, boolean autoRemoveOnHide) {
     addBrowseFolderListener(project, new BrowseFolderActionListener<Comp>(title, description, this, project, fileChooserDescriptor, accessor), autoRemoveOnHide);
@@ -202,8 +210,8 @@ public class ComponentWithBrowseButton<Comp extends JComponent> extends JPanel i
     private Project myProject;
     protected final FileChooserDescriptor myFileChooserDescriptor;
 
-    public BrowseFolderActionListener(@Nullable String title,
-                                      @Nullable String description,
+    public BrowseFolderActionListener(@Nullable @Nls(capitalization = Nls.Capitalization.Title) String title,
+                                      @Nullable @Nls(capitalization = Nls.Capitalization.Sentence) String description,
                                       ComponentWithBrowseButton<T> textField,
                                       @Nullable Project project,
                                       FileChooserDescriptor fileChooserDescriptor,
@@ -248,12 +256,7 @@ public class ComponentWithBrowseButton<Comp extends JComponent> extends JPanel i
         }
       }
 
-      FileChooser.chooseFile(fileChooserDescriptor, getProject(), getInitialFile(), new Consumer<VirtualFile>() {
-        @Override
-        public void consume(VirtualFile file) {
-          onFileChosen(file);
-        }
-      });
+      FileChooser.chooseFile(fileChooserDescriptor, getProject(), getInitialFile(), file -> onFileChosen(file));
     }
 
     @Nullable

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ import java.util.TreeMap;
 
 @State(
   name = "TextDiffSettings",
-  storages = @Storage(file = DiffUtil.DIFF_CONFIG)
+  storages = @Storage(value = DiffUtil.DIFF_CONFIG)
 )
 public class TextDiffSettingsHolder implements PersistentStateComponent<TextDiffSettingsHolder.State> {
   public static final Key<TextDiffSettings> KEY = Key.create("TextDiffSettings");
@@ -42,6 +42,8 @@ public class TextDiffSettingsHolder implements PersistentStateComponent<TextDiff
   private final static class SharedSettings {
     // Fragments settings
     public int CONTEXT_RANGE = 4;
+
+    public boolean MERGE_AUTO_APPLY_NON_CONFLICTED_CHANGES = false;
   }
 
   private static class PlaceSettings {
@@ -57,6 +59,8 @@ public class TextDiffSettingsHolder implements PersistentStateComponent<TextDiff
     public boolean SHOW_LINE_NUMBERS = true;
     public boolean SHOW_INDENT_LINES = false;
     public boolean USE_SOFT_WRAPS = false;
+    public HighlightingLevel HIGHLIGHTING_LEVEL = HighlightingLevel.INSPECTIONS;
+    public boolean READ_ONLY_LOCK = true;
 
     // Fragments settings
     public boolean EXPAND_BY_DEFAULT = true;
@@ -82,7 +86,7 @@ public class TextDiffSettingsHolder implements PersistentStateComponent<TextDiff
     }
 
     public void setEnableSyncScroll(boolean value) {
-      this.PLACE_SETTINGS.ENABLE_SYNC_SCROLL = value;
+      PLACE_SETTINGS.ENABLE_SYNC_SCROLL = value;
     }
 
     // Diff settings
@@ -103,6 +107,18 @@ public class TextDiffSettingsHolder implements PersistentStateComponent<TextDiff
 
     public void setIgnorePolicy(@NotNull IgnorePolicy policy) {
       PLACE_SETTINGS.IGNORE_POLICY = policy;
+    }
+
+    //
+    // Merge
+    //
+
+    public boolean isAutoApplyNonConflictedChanges() {
+      return SHARED_SETTINGS.MERGE_AUTO_APPLY_NON_CONFLICTED_CHANGES;
+    }
+
+    public void setAutoApplyNonConflictedChanges(boolean value) {
+      SHARED_SETTINGS.MERGE_AUTO_APPLY_NON_CONFLICTED_CHANGES = value;
     }
 
     // Editor settings
@@ -139,6 +155,15 @@ public class TextDiffSettingsHolder implements PersistentStateComponent<TextDiff
       PLACE_SETTINGS.USE_SOFT_WRAPS = state;
     }
 
+    @NotNull
+    public HighlightingLevel getHighlightingLevel() {
+      return PLACE_SETTINGS.HIGHLIGHTING_LEVEL;
+    }
+
+    public void setHighlightingLevel(@NotNull HighlightingLevel state) {
+      PLACE_SETTINGS.HIGHLIGHTING_LEVEL = state;
+    }
+
     public int getContextRange() {
       return SHARED_SETTINGS.CONTEXT_RANGE;
     }
@@ -153,6 +178,14 @@ public class TextDiffSettingsHolder implements PersistentStateComponent<TextDiff
 
     public void setExpandByDefault(boolean value) {
       PLACE_SETTINGS.EXPAND_BY_DEFAULT = value;
+    }
+
+    public boolean isReadOnlyLock() {
+      return PLACE_SETTINGS.READ_ONLY_LOCK;
+    }
+
+    public void setReadOnlyLock(boolean state) {
+      PLACE_SETTINGS.READ_ONLY_LOCK = state;
     }
 
     //
@@ -191,10 +224,12 @@ public class TextDiffSettingsHolder implements PersistentStateComponent<TextDiff
   private State myState = new State();
 
   @NotNull
+  @Override
   public State getState() {
     return myState;
   }
 
+  @Override
   public void loadState(State state) {
     myState = state;
   }
@@ -205,7 +240,7 @@ public class TextDiffSettingsHolder implements PersistentStateComponent<TextDiff
 
   @NotNull
   public static Map<String, PlaceSettings> getDefaultPlaceSettings() {
-    Map<String, PlaceSettings> map = new TreeMap<String, PlaceSettings>();
+    Map<String, PlaceSettings> map = new TreeMap<>();
 
     PlaceSettings changes = new PlaceSettings();
     changes.EXPAND_BY_DEFAULT = false;

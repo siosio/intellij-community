@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ import com.intellij.openapi.util.JDOMExternalizerUtil;
 import com.intellij.openapi.util.WriteExternalException;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.CommonClassNames;
-import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiElement;
 import com.intellij.ui.classFilter.ClassFilter;
 import com.intellij.xdebugger.impl.ui.XDebuggerUIConstants;
 import com.sun.jdi.*;
@@ -137,19 +137,16 @@ public class ToStringRenderer extends NodeRendererImpl {
   }
 
   public void buildChildren(Value value, ChildrenBuilder builder, EvaluationContext evaluationContext) {
-    final DebugProcessImpl debugProcess = (DebugProcessImpl)evaluationContext.getDebugProcess();
-    debugProcess.getDefaultRenderer(value).buildChildren(value, builder, evaluationContext);
+    DebugProcessImpl.getDefaultRenderer(value).buildChildren(value, builder, evaluationContext);
   }
 
-  public PsiExpression getChildValueExpression(DebuggerTreeNode node, DebuggerContext context) throws EvaluateException {
-    final Value parentValue = ((ValueDescriptor)node.getParent().getDescriptor()).getValue();
-    final DebugProcessImpl debugProcess = (DebugProcessImpl)context.getDebugProcess();
-    return debugProcess.getDefaultRenderer(parentValue).getChildValueExpression(node, context);
+  public PsiElement getChildValueExpression(DebuggerTreeNode node, DebuggerContext context) throws EvaluateException {
+    return DebugProcessImpl.getDefaultRenderer(((ValueDescriptor)node.getParent().getDescriptor()).getType())
+      .getChildValueExpression(node, context);
   }
 
   public boolean isExpandable(Value value, EvaluationContext evaluationContext, NodeDescriptor parentDescriptor) {
-    final DebugProcessImpl debugProcess = (DebugProcessImpl)evaluationContext.getDebugProcess();
-    return debugProcess.getDefaultRenderer(value).isExpandable(value, evaluationContext, parentDescriptor);
+    return DebugProcessImpl.getDefaultRenderer(value).isExpandable(value, evaluationContext, parentDescriptor);
   }
 
   @SuppressWarnings({"HardCodedStringLiteral"})
@@ -178,7 +175,7 @@ public class ToStringRenderer extends NodeRendererImpl {
   private boolean isFiltered(Type t) {
     if (t instanceof ReferenceType) {
       for (ClassFilter classFilter : myClassFilters) {
-        if (classFilter.isEnabled() && DebuggerUtils.getSuperType(t, classFilter.getPattern()) != null) {
+        if (classFilter.isEnabled() && DebuggerUtils.instanceOf(t, classFilter.getPattern())) {
           return true;
         }
       }

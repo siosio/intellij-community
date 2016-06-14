@@ -19,7 +19,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vfs.VirtualFile;
-import git4idea.GitCommit;
+import git4idea.branch.GitRebaseParams;
 import git4idea.repo.GitRemote;
 import git4idea.repo.GitRepository;
 import git4idea.reset.GitResetMode;
@@ -103,6 +103,12 @@ public interface Git {
   GitCommandResult branchCreate(@NotNull GitRepository repository, @NotNull String branchName);
 
   @NotNull
+  GitCommandResult renameBranch(@NotNull GitRepository repository,
+                                @NotNull String currentName,
+                                @NotNull String newName,
+                                @NotNull GitLineHandlerListener... listeners);
+
+  @NotNull
   GitCommandResult reset(@NotNull GitRepository repository, @NotNull GitResetMode mode, @NotNull String target,
                          @NotNull GitLineHandlerListener... listeners);
 
@@ -146,9 +152,6 @@ public interface Git {
   GitCommandResult stashPop(@NotNull GitRepository repository, @NotNull GitLineHandlerListener... listeners);
 
   @NotNull
-  List<GitCommit> history(@NotNull GitRepository repository, @NotNull String range);
-
-  @NotNull
   GitCommandResult fetch(@NotNull GitRepository repository,
                          @NotNull GitRemote remote,
                          @NotNull List<GitLineHandlerListener> listeners,
@@ -168,4 +171,19 @@ public interface Git {
 
   @NotNull
   GitCommandResult remotePrune(@NotNull GitRepository repository, @NotNull GitRemote remote);
+
+  @NotNull
+  GitCommandResult rebase(@NotNull GitRepository repository,
+                          @NotNull GitRebaseParams parameters,
+                          @NotNull GitLineHandlerListener... listeners);
+
+  @NotNull
+  GitCommandResult rebaseAbort(@NotNull GitRepository repository, @NotNull GitLineHandlerListener... listeners);
+
+  @NotNull
+  GitCommandResult rebaseContinue(@NotNull GitRepository repository, @NotNull GitLineHandlerListener... listeners);
+
+  @NotNull
+  GitCommandResult rebaseSkip(@NotNull GitRepository repository, @NotNull GitLineHandlerListener... listeners);
+
 }

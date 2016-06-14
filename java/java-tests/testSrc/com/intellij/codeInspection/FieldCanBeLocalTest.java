@@ -27,6 +27,7 @@ public class FieldCanBeLocalTest extends InspectionTestCase {
   }
 
   public void testConstructor () throws Exception { doTest(); }
+  public void testConstructorThisRef() throws Exception { doTest(); }
   public void testStaticFinal() throws Exception { doTest(); }
   public void testStaticAccess() throws Exception { doTest(); }
   public void testInnerClassConstructor() throws Exception { doTest(); }
@@ -40,9 +41,14 @@ public class FieldCanBeLocalTest extends InspectionTestCase {
   public void testFieldUsedForWritingInLambda() throws Exception {doTest();}
   public void testStaticQualifiedFieldAccessForWriting() throws Exception {doTest();}
   public void testFieldReferencedFromAnotherObject() throws Exception {doTest();}
+  public void testDontSimplifyRuntimeConstants() throws Exception {doTest();}
   public void testIgnoreAnnotated() throws Exception {
     final FieldCanBeLocalInspection inspection = new FieldCanBeLocalInspection();
     doTestConfigured(inspection);
+  }
+
+  public void testFieldUsedInAnotherMethodAsQualifier() throws Exception {
+    doTest();
   }
 
   private void doTestConfigured(FieldCanBeLocalInspection inspection) {

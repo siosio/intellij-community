@@ -76,7 +76,7 @@ public abstract class HgCommitTypeCommand {
   }
 
 
-  public void execute() throws HgCommandException, VcsException {
+  public void executeInCurrentThread() throws HgCommandException, VcsException {
     if (StringUtil.isEmptyOrSpaces(myMessage)) {
       throw new HgCommandException(HgVcsMessages.message("hg4idea.commit.error.messageEmpty"));
     }
@@ -90,7 +90,7 @@ public abstract class HgCommitTypeCommand {
           return file.getRelativePath();
         }
       });
-      List<List<String>> chunkedCommits = VcsFileUtil.chunkRelativePaths(relativePaths);
+      List<List<String>> chunkedCommits = VcsFileUtil.chunkArguments(relativePaths);
       executeChunked(chunkedCommits);
     }
     myRepository.update();

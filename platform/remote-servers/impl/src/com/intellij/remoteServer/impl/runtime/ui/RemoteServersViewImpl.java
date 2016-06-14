@@ -1,6 +1,7 @@
 package com.intellij.remoteServer.impl.runtime.ui;
 
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.remoteServer.runtime.ServerConnection;
@@ -20,15 +21,12 @@ public class RemoteServersViewImpl extends RemoteServersView {
 
   @Override
   public void showServerConnection(@NotNull final ServerConnection<?> connection) {
-    final ToolWindow toolWindow = ToolWindowManager.getInstance(myProject).getToolWindow(ServersToolWindow.ID);
+    final ToolWindow toolWindow = ToolWindowManager.getInstance(myProject).getToolWindow(getToolWindowId(connection));
     if (toolWindow != null) {
-      toolWindow.activate(new Runnable() {
-        @Override
-        public void run() {
-          ServersToolWindowContent content = getServersViewComponent(toolWindow);
-          if (content != null) {
-            content.select(connection);
-          }
+      toolWindow.activate(() -> {
+        ServersToolWindowContent content = getServersViewComponent(toolWindow);
+        if (content != null) {
+          content.select(connection);
         }
       });
     }
@@ -42,17 +40,19 @@ public class RemoteServersViewImpl extends RemoteServersView {
   @Override
   public void showDeployment(@NotNull final ServerConnection<?> connection, @NotNull final String deploymentName) {
     ToolWindowManager toolWindowManager = ToolWindowManager.getInstance(myProject);
-    final ToolWindow toolWindow = toolWindowManager.getToolWindow(ServersToolWindow.ID);
+    final ToolWindow toolWindow = toolWindowManager.getToolWindow(getToolWindowId(connection));
     if (toolWindow != null) {
-      toolWindowManager.invokeLater(new Runnable() {
-        @Override
-        public void run() {
-          ServersToolWindowContent component = getServersViewComponent(toolWindow);
-          if (component != null) {
-            component.select(connection, deploymentName);
-          }
+      toolWindowManager.invokeLater(() -> {
+        ServersToolWindowContent component = getServersViewComponent(toolWindow);
+        if (component != null) {
+          component.select(connection, deploymentName);
         }
       });
     }
+  }
+
+  private static String getToolWindowId(ServerConnection<?> connection) {
+    String customToolWindowId = connection.getServer().getType().getCustomToolWindowId();
+    return StringUtil.notNullize(customToolWindowId, DefaultServersToolWindowManager.WINDOW_ID);
   }
 }

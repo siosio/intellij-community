@@ -18,7 +18,6 @@ package com.jetbrains.python.debugger;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
-import com.google.common.collect.Lists;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
@@ -40,7 +39,6 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
-import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
@@ -98,14 +96,8 @@ public class PySignatureCacheManagerImpl extends PySignatureCacheManager {
       String[] parts = sign.split("\t");
       if (parts.length > 0 && parts[0].equals(signature.getFunctionName())) {
         found = true;
-        if (SHOULD_OVERWRITE_TYPES) {
-          lines[i] = signatureToString(signature);
-        }
-        else {
-          //noinspection ConstantConditions
-          lines[i] = signatureToString(stringToSignature(file.
-            getCanonicalPath(), lines[i]).addAllArgs(signature));
-        }
+
+        lines[i] = changeSignatureString(file.getCanonicalPath(), signature, lines[i]);
       }
       i++;
     }
@@ -120,6 +112,16 @@ public class PySignatureCacheManagerImpl extends PySignatureCacheManager {
     String attrString = StringUtil.join(lines, "\n");
 
     writeAttribute(file, attrString);
+  }
+
+  static String changeSignatureString(@NotNull String filePath, @NotNull PySignature signature, @NotNull String oldSignatureString) {
+    if (SHOULD_OVERWRITE_TYPES) {
+      return signatureToString(signature);
+    }
+    else {
+      //noinspection ConstantConditions
+      return signatureToString(stringToSignature(filePath, oldSignatureString).addAllArgs(signature).addReturnType(signature.getReturnTypeQualifiedName()));
+    }
   }
 
   private void writeAttribute(@NotNull VirtualFile file, @NotNull String attrString) {
@@ -137,18 +139,6 @@ public class PySignatureCacheManagerImpl extends PySignatureCacheManager {
     catch (IOException e) {
       LOG.warn("Can't write attribute " + file.getCanonicalPath() + " " + attrString);
     }
-  }
-
-  private static String signatureToString(PySignature signature) {
-    return signature.getFunctionName() + "\t" + StringUtil.join(arguments(signature), "\t");
-  }
-
-  private static List<String> arguments(PySignature signature) {
-    List<String> res = Lists.newArrayList();
-    for (PySignature.NamedParameter param : signature.getArgs()) {
-      res.add(param.getName() + ":" + param.getTypeQualifiedName());
-    }
-    return res;
   }
 
   @Nullable
@@ -239,17 +229,27 @@ public class PySignatureCacheManagerImpl extends PySignatureCacheManager {
 
 
   @Nullable
-  private static PySignature stringToSignature(String path, String string) {
+  private static PySignature stringToSignature(@NotNull String path, @NotNull String string) {
     String[] parts = string.split("\t");
     if (parts.length > 0) {
       PySignature signature = new PySignature(path, parts[0]);
       for (int i = 1; i < parts.length; i++) {
-        String[] var = parts[i].split(":");
+        String part = parts[i];
+        if (part.isEmpty()) {
+          continue;
+        }
+        String[] var = part.split(":");
         if (var.length == 2) {
-          signature = signature.addArgument(var[0], var[1]);
+          if (RETURN_TYPE.equals(var[0])) {
+            signature = signature.addReturnType(var[1]);
+          }
+          else {
+            signature = signature.addArgument(var[0], var[1]);
+          }
         }
         else {
-          throw new IllegalStateException("Should be <name>:<type> format. " + parts[i] + " instead.");
+          throw new IllegalStateException(
+            "Should be <name>:<type> format for arg or " + RETURN_TYPE + ":<type> for return type; '" + part + "' instead.");
         }
       }
       return signature;
@@ -259,7 +259,7 @@ public class PySignatureCacheManagerImpl extends PySignatureCacheManager {
 
   @Nullable
   private static VirtualFile getFile(@NotNull PySignature signature) {
-    return LocalFileSystem.getInstance().findFileByPath(signature.getFile());
+    return LocalFileSystem.getInstance().refreshAndFindFileByPath(signature.getFile());
   }
 
   @Nullable
@@ -273,25 +273,20 @@ public class PySignatureCacheManagerImpl extends PySignatureCacheManager {
   @Override
   public void clearCache() {
     final Ref<Boolean> deleted = Ref.create(false);
-    ProgressManager.getInstance().runProcessWithProgressSynchronously(new Runnable() {
-
-      @Override
-      public void run() {
-        ProjectFileIndex.SERVICE.getInstance(myProject).iterateContent(new ContentIterator() {
-          @Override
-          public boolean processFile(VirtualFile fileOrDir) {
-            if (readAttribute(fileOrDir) != null) {
-              writeAttribute(fileOrDir, "");
-              deleted.set(true);
-            }
-            if (ProgressManager.getInstance().getProgressIndicator().isCanceled()) {
-              return false;
-            }
-            return true;
+    ProgressManager.getInstance().runProcessWithProgressSynchronously(
+      (Runnable)() -> ProjectFileIndex.SERVICE.getInstance(myProject).iterateContent(new ContentIterator() {
+        @Override
+        public boolean processFile(VirtualFile fileOrDir) {
+          if (readAttribute(fileOrDir) != null) {
+            writeAttribute(fileOrDir, "");
+            deleted.set(true);
           }
-        });
-      }
-    }, "Cleaning the cache of dynamically collected types", true, myProject);
+          if (ProgressManager.getInstance().getProgressIndicator().isCanceled()) {
+            return false;
+          }
+          return true;
+        }
+      }), "Cleaning the Cache of Dynamically Collected Types", true, myProject);
 
 
     String message;

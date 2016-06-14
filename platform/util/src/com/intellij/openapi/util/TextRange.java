@@ -122,7 +122,9 @@ public class TextRange implements Segment, Serializable {
   public TextRange cutOut(@NotNull TextRange subRange) {
     assert subRange.getStartOffset() <= getLength() : subRange + "; this="+this;
     assert subRange.getEndOffset() <= getLength() : subRange + "; this="+this;
-    return new TextRange(myStartOffset + subRange.getStartOffset(), Math.min(myEndOffset, myStartOffset + subRange.getEndOffset()));
+    assertProperRange(subRange);
+    return new TextRange(myStartOffset + subRange.getStartOffset(),
+                         Math.min(myEndOffset, myStartOffset + subRange.getEndOffset()));
   }
 
   @NotNull
@@ -202,7 +204,8 @@ public class TextRange implements Segment, Serializable {
     return startOffset == myStartOffset && endOffset == myEndOffset;
   }
 
-  public static TextRange allOf(String s) {
+  @NotNull
+  public static TextRange allOf(@NotNull String s) {
     return new TextRange(0, s.length());
   }
 
@@ -210,11 +213,11 @@ public class TextRange implements Segment, Serializable {
     assertProperRange(range, "");
   }
 
-  public static void assertProperRange(@NotNull Segment range, Object message) throws AssertionError {
+  public static void assertProperRange(@NotNull Segment range, @NotNull Object message) throws AssertionError {
     assertProperRange(range.getStartOffset(), range.getEndOffset(), message);
   }
 
-  public static void assertProperRange(int startOffset, int endOffset, Object message) {
+  public static void assertProperRange(int startOffset, int endOffset, @NotNull Object message) {
     if (startOffset > endOffset) {
       LOG.error("Invalid range specified: (" + startOffset + "," + endOffset + "); " + message);
     }

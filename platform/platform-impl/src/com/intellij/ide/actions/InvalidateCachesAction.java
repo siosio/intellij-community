@@ -49,11 +49,11 @@ public class InvalidateCachesAction extends AnAction implements DumbAware {
     boolean canRestart = app.isRestartCapable();
     
     String[] options = new String[canRestart ? 4 : 3];
-    options[0] = canRestart ? "Invalidate and Restart" : "Invalidate and Exit";
-    options[1] = mac ? "Cancel" : "Invalidate";
-    options[2] = mac ? "Invalidate" : "Cancel";
+    options[0] = canRestart ? "Invalidate and &Restart" : "Invalidate and &Exit";
+    options[1] = mac ? "Cancel" : "&Invalidate";
+    options[2] = mac ? "&Invalidate" : "Cancel";
     if (canRestart) {
-      options[3] = "Just Restart";
+      options[3] = "&Just Restart";
     }
 
     List<String> descriptions = new SmartList<String>();
@@ -69,15 +69,10 @@ public class InvalidateCachesAction extends AnAction implements DumbAware {
     }
     else {
       warnings += "The following items will also be cleared:\n"
-                  + StringUtil.join(descriptions, new Function<String, String>() {
-        @Override
-        public String fun(String s) {
-          return "  " + s;
-        }
-      }, "\n");
+                  + StringUtil.join(descriptions, s -> "  " + s, "\n");
     }
     
-    String message = "<html>The caches will be invalidated and rebuilt on the next startup.\n\n" +
+    String message = "The caches will be invalidated and rebuilt on the next startup.\n\n" +
                      warnings + "\n\n" +
                      "Would you like to continue?\n";
     int result = Messages.showDialog(e.getData(CommonDataKeys.PROJECT),

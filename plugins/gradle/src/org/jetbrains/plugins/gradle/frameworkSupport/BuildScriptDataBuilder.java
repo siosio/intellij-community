@@ -34,6 +34,9 @@ public class BuildScriptDataBuilder {
   private final Set<String> repositories = ContainerUtil.newTreeSet();
   private final Set<String> dependencies = ContainerUtil.newTreeSet();
   private final Set<String> properties = ContainerUtil.newTreeSet();
+  private final Set<String> buildScriptProperties = ContainerUtil.newTreeSet();
+  private final Set<String> buildScriptRepositories = ContainerUtil.newTreeSet();
+  private final Set<String> buildScriptDependencies = ContainerUtil.newTreeSet();
   private final Set<String> other = ContainerUtil.newTreeSet();
 
   public BuildScriptDataBuilder(@NotNull VirtualFile buildScriptFile) {
@@ -48,12 +51,8 @@ public class BuildScriptDataBuilder {
   public String build() {
     List<String> lines = ContainerUtil.newArrayList();
 
-    final Function<String, String> padding = new Function<String, String>() {
-      @Override
-      public String fun(String s) {
-        return StringUtil.isNotEmpty(s) ? "    " + s : "";
-      }
-    };
+    final Function<String, String> padding = s -> StringUtil.isNotEmpty(s) ? "    " + s : "";
+    addBuildscriptLines(lines, padding);
     if (!plugins.isEmpty()) {
       lines.addAll(plugins);
       lines.add("");
@@ -78,6 +77,45 @@ public class BuildScriptDataBuilder {
       lines.addAll(other);
     }
     return StringUtil.join(lines, "\n");
+  }
+
+  private void addBuildscriptLines(@NotNull List<String> lines, @NotNull Function<String, String> padding) {
+    if (!buildScriptRepositories.isEmpty() || !buildScriptDependencies.isEmpty() || !buildScriptProperties.isEmpty()) {
+      lines.add("buildscript {");
+      final List<String> buildScriptLines = ContainerUtil.newSmartList();
+      if (!buildScriptProperties.isEmpty()) {
+        buildScriptLines.addAll(buildScriptProperties);
+        buildScriptLines.add("");
+      }
+      if (!buildScriptRepositories.isEmpty()) {
+        buildScriptLines.add("repositories {");
+        buildScriptLines.addAll(ContainerUtil.map(buildScriptRepositories, padding));
+        buildScriptLines.add("}");
+      }
+      if (!buildScriptDependencies.isEmpty()) {
+        buildScriptLines.add("dependencies {");
+        buildScriptLines.addAll(ContainerUtil.map(buildScriptDependencies, padding));
+        buildScriptLines.add("}");
+      }
+      lines.addAll(ContainerUtil.map(buildScriptLines, padding));
+      lines.add("}");
+      lines.add("");
+    }
+  }
+
+  public BuildScriptDataBuilder addBuildscriptPropertyDefinition(@NotNull String definition) {
+    buildScriptProperties.add(definition.trim());
+    return this;
+  }
+
+  public BuildScriptDataBuilder addBuildscriptRepositoriesDefinition(@NotNull String definition) {
+    buildScriptRepositories.add(definition.trim());
+    return this;
+  }
+
+  public BuildScriptDataBuilder addBuildscriptDependencyNotation(@NotNull String notation) {
+    buildScriptDependencies.add(notation.trim());
+    return this;
   }
 
   public BuildScriptDataBuilder addPluginDefinition(@NotNull String definition) {

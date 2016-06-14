@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,12 +16,14 @@
 package com.intellij.ide.util.treeView;
 
 import com.intellij.openapi.util.NamedRunnable;
+import com.intellij.util.Consumer;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * @author Sergey.Malenkov
  */
 abstract class TreeRunnable extends NamedRunnable {
-  protected TreeRunnable(String name) {
+  TreeRunnable(@NotNull String name) {
     super(name);
   }
 
@@ -30,7 +32,22 @@ abstract class TreeRunnable extends NamedRunnable {
   @Override
   public final void run() {
     debug("started");
-    perform();
-    debug("finished");
+    try {
+      perform();
+    }
+    finally {
+      debug("finished");
+    }
+  }
+
+  abstract static class TreeConsumer<T> extends TreeRunnable implements Consumer<T> {
+    TreeConsumer(@NotNull String name) {
+      super(name);
+    }
+
+    @Override
+    public final void consume(T t) {
+      run();
+    }
   }
 }

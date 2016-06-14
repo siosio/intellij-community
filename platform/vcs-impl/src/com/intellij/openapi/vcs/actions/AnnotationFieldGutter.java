@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,10 +28,10 @@ import com.intellij.openapi.vcs.annotate.TextAnnotationPresentation;
 import com.intellij.openapi.vcs.history.VcsRevisionNumber;
 import com.intellij.vcsUtil.VcsUtil;
 import com.intellij.xml.util.XmlStringUtil;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.awt.*;
-import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
@@ -40,20 +40,17 @@ import java.util.Map;
  * @author Konstantin Bulenkov
  */
 public class AnnotationFieldGutter implements ActiveAnnotationGutter {
-  protected final FileAnnotation myAnnotation;
-  private final Editor myEditor;
+  @NotNull protected final FileAnnotation myAnnotation;
   protected final LineAnnotationAspect myAspect;
-  private final TextAnnotationPresentation myPresentation;
+  @NotNull private final TextAnnotationPresentation myPresentation;
   private final boolean myIsGutterAction;
-  private Couple<Map<VcsRevisionNumber, Color>> myColorScheme;
+  @Nullable private Couple<Map<VcsRevisionNumber, Color>> myColorScheme;
 
-  AnnotationFieldGutter(FileAnnotation annotation,
-                        Editor editor,
+  AnnotationFieldGutter(@NotNull FileAnnotation annotation,
                         LineAnnotationAspect aspect,
-                        final TextAnnotationPresentation presentation,
-                        Couple<Map<VcsRevisionNumber, Color>> colorScheme) {
+                        @NotNull TextAnnotationPresentation presentation,
+                        @Nullable Couple<Map<VcsRevisionNumber, Color>> colorScheme) {
     myAnnotation = annotation;
-    myEditor = editor;
     myAspect = aspect;
     myPresentation = presentation;
     myIsGutterAction = myAspect instanceof EditorGutterAction;
@@ -102,8 +99,7 @@ public class AnnotationFieldGutter implements ActiveAnnotationGutter {
 
   @Nullable
   public String getToolTip(final int line, final Editor editor) {
-    return isAvailable() ?
-    XmlStringUtil.escapeString(myAnnotation.getToolTip(line)) : null;
+    return isAvailable() ? XmlStringUtil.escapeString(myAnnotation.getToolTip(line)) : null;
   }
 
   public void doAction(int line) {
@@ -137,14 +133,11 @@ public class AnnotationFieldGutter implements ActiveAnnotationGutter {
   public void gutterClosed() {
     myAnnotation.unregister();
     myAnnotation.dispose();
-    final Collection<ActiveAnnotationGutter> gutters = myEditor.getUserData(AnnotateToggleAction.KEY_IN_EDITOR);
-    if (gutters != null) {
-      gutters.remove(this);
-    }
   }
 
   @Nullable
   public Color getBgColor(int line, Editor editor) {
+    if (myColorScheme == null) return null;
     ColorMode type = ShowAnnotationColorsAction.getType();
     Map<VcsRevisionNumber, Color> colorMap = type == ColorMode.AUTHOR ? myColorScheme.second : myColorScheme.first;
     if (colorMap == null || type == ColorMode.NONE) return null;
@@ -154,7 +147,8 @@ public class AnnotationFieldGutter implements ActiveAnnotationGutter {
   }
 
   public boolean isAvailable() {
-    return VcsUtil.isAspectAvailableByDefault(getID());
+    if (myAspect == null) return false;
+    return VcsUtil.isAspectAvailableByDefault(getID(), myAspect.isShowByDefault());
   }
 
   @Nullable

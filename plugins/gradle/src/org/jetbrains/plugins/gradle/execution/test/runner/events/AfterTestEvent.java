@@ -16,10 +16,14 @@
 package org.jetbrains.plugins.gradle.execution.test.runner.events;
 
 import com.intellij.execution.testframework.sm.runner.SMTestProxy;
+import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Couple;
-import org.jetbrains.plugins.gradle.execution.test.runner.GradleTestsExecutionConsoleManager;
+import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.util.ObjectUtils;
+import org.jetbrains.plugins.gradle.execution.test.runner.GradleTestsExecutionConsole;
 import org.jetbrains.plugins.gradle.util.XmlXpathHelper;
 
+import java.util.ArrayList;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -28,8 +32,8 @@ import java.util.regex.Pattern;
  * @since 2/28/14
  */
 public class AfterTestEvent extends AbstractTestEvent {
-  public AfterTestEvent(GradleTestsExecutionConsoleManager consoleManager) {
-    super(consoleManager);
+  public AfterTestEvent(GradleTestsExecutionConsole executionConsole) {
+    super(executionConsole);
   }
 
   @Override
@@ -39,10 +43,10 @@ public class AfterTestEvent extends AbstractTestEvent {
 
     final String startTime = eventXml.queryXml("/ijLog/event/test/result/@startTime");
     final String endTime = eventXml.queryXml("/ijLog/event/test/result/@endTime");
-    final String exceptionMsg = eventXml.queryXml("/ijLog/event/test/result/errorMsg");
-    final String stackTrace = eventXml.queryXml("/ijLog/event/test/result/stackTrace");
+    final String exceptionMsg = decode(eventXml.queryXml("/ijLog/event/test/result/errorMsg"));
+    final String stackTrace = decode(eventXml.queryXml("/ijLog/event/test/result/stackTrace"));
 
-    final SMTestProxy testProxy = getConsoleManager().getTestsMap().get(testId);
+    final SMTestProxy testProxy = findTestProxy(testId);
     if (testProxy == null) return;
 
     try {
@@ -51,23 +55,22 @@ public class AfterTestEvent extends AbstractTestEvent {
     catch (NumberFormatException ignored) {
     }
 
+    final CompositeRunnable runInEdt = new CompositeRunnable();
     final TestEventResult result = getTestEventResultType(eventXml);
     switch (result) {
       case SUCCESS:
-        addToInvokeLater(new Runnable() {
-          @Override
-          public void run() {
-            testProxy.setFinished();
-            getResultsViewer().onTestFinished(testProxy);
-          }
-        });
+        runInEdt.add(testProxy::setFinished);
         break;
       case FAILURE:
         final String failureType = eventXml.queryXml("/ijLog/event/test/result/failureType");
         if ("comparison".equals(failureType)) {
-          String actualText = eventXml.queryXml("/ijLog/event/test/result/actual");
-          String expectedText = eventXml.queryXml("/ijLog/event/test/result/expected");
-          testProxy.setTestComparisonFailed(exceptionMsg, stackTrace, actualText, expectedText);
+          String actualText = decode(eventXml.queryXml("/ijLog/event/test/result/actual"));
+          String expectedText = decode(eventXml.queryXml("/ijLog/event/test/result/expected"));
+          final Condition<String> emptyString = StringUtil::isEmpty;
+          String filePath = ObjectUtils.nullizeByCondition(decode(eventXml.queryXml("/ijLog/event/test/result/filePath")), emptyString);
+          String actualFilePath = ObjectUtils.nullizeByCondition(
+            decode(eventXml.queryXml("/ijLog/event/test/result/actualFilePath")), emptyString);
+          testProxy.setTestComparisonFailed(exceptionMsg, stackTrace, actualText, expectedText, filePath, actualFilePath);
         }
         else {
           Couple<String> comparisonPair =
@@ -89,36 +92,30 @@ public class AfterTestEvent extends AbstractTestEvent {
           }
 
           final Couple<String> finalComparisonPair = comparisonPair;
-          addToInvokeLater(new Runnable() {
-            @Override
-            public void run() {
-              if (finalComparisonPair != null) {
-                testProxy.setTestComparisonFailed(exceptionMsg, stackTrace, finalComparisonPair.second, finalComparisonPair.first);
-              }
-              else {
-                testProxy.setTestFailed(exceptionMsg, stackTrace, "error".equals(failureType));
-              }
-            }});
+          runInEdt.add(() -> {
+            if (finalComparisonPair != null) {
+              testProxy.setTestComparisonFailed(exceptionMsg, stackTrace, finalComparisonPair.second, finalComparisonPair.first);
+            }
+            else {
+              testProxy.setTestFailed(exceptionMsg, stackTrace, "error".equals(failureType));
+            }
+          });
         }
-        addToInvokeLater(new Runnable() {
-          @Override
-          public void run() {
-            getResultsViewer().onTestFailed(testProxy);
-          }
-        });
+        runInEdt.add(() -> getResultsViewer().onTestFailed(testProxy));
         break;
       case SKIPPED:
-        testProxy.setTestIgnored(null, null);
-        addToInvokeLater(new Runnable() {
-          @Override
-          public void run() {
-            getResultsViewer().onTestIgnored(testProxy);
-          }
+        runInEdt.add(() -> {
+          testProxy.setTestIgnored(null, null);
+          getResultsViewer().onTestIgnored(testProxy);
         });
         break;
       case UNKNOWN_RESULT:
         break;
     }
+
+    runInEdt.add(() -> getResultsViewer().onTestFinished(testProxy));
+
+    addToInvokeLater(runInEdt);
   }
 
   private static Couple<String> parseComparisonMessage(String message, final String regex) {
@@ -127,5 +124,14 @@ public class AfterTestEvent extends AbstractTestEvent {
       return Couple.of(matcher.group(1).replaceAll("\\\\n", "\n"), matcher.group(2).replaceAll("\\\\n", "\n"));
     }
     return null;
+  }
+
+  private static class CompositeRunnable extends ArrayList<Runnable> implements Runnable {
+    @Override
+    public void run() {
+      for (Runnable runnable : this) {
+        runnable.run();
+      }
+    }
   }
 }

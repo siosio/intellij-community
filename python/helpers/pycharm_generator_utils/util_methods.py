@@ -1,4 +1,5 @@
 from pycharm_generator_utils.constants import *
+import keyword
 
 try:
     import inspect
@@ -134,6 +135,39 @@ class __method(object):
         self.__self__ = None
 """
     return txt
+
+
+def create_coroutine():
+    if version[0] == 3 and version[1] >= 5:
+        return """
+class __coroutine(object):
+    '''A mock class representing coroutine type.'''
+
+    def __init__(self):
+        self.__name__ = ''
+        self.__qualname__ = ''
+        self.cr_await = None
+        self.cr_frame = None
+        self.cr_running = False
+        self.cr_code = None
+
+    def __await__(self):
+        return []
+
+    def __iter__(self):
+        return []
+
+    def close(self):
+        pass
+
+    def send(self, value):
+        pass
+
+    def throw(self, type, value=None, traceback=None):
+        pass
+"""
+    return ""
+
 
 def _searchbases(cls, accum):
     # logic copied from inspect.py
@@ -367,6 +401,8 @@ def make_names_unique(seq, name_map=None):
         if type(one) is list:
             ret.append(make_names_unique(one, name_map))
         else:
+            if keyword.iskeyword(one):
+                one += "_"
             one_key = lstrip(one, "*") # starred parameters are unique sans stars
             if one_key in name_map:
                 old_one = one_key

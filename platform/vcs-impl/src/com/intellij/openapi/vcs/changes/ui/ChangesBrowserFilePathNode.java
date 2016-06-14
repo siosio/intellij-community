@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,14 +16,17 @@
 
 package com.intellij.openapi.vcs.changes.ui;
 
+import com.intellij.openapi.util.SystemInfoRt;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.ChangesUtil;
 import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.util.PlatformIcons;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
-import java.io.File;
+import static com.intellij.util.FontUtil.spaceAndThinSpace;
 
 /**
  * @author yole
@@ -55,8 +58,8 @@ public class ChangesBrowserFilePathNode extends ChangesBrowserNode<FilePath> {
     else {
       if (renderer.isShowFlatten()) {
         renderer.append(path.getName(), SimpleTextAttributes.REGULAR_ATTRIBUTES);
-        final FilePath parentPath = path.getParentPath();
-        renderer.append(" (" + FileUtil.getLocationRelativeToUserHome(parentPath.getPresentableUrl()) + ")", SimpleTextAttributes.GRAYED_ATTRIBUTES);
+        FilePath parentPath = path.getParentPath();
+        renderer.append(spaceAndThinSpace() + FileUtil.getLocationRelativeToUserHome(parentPath.getPresentableUrl()), SimpleTextAttributes.GRAYED_ATTRIBUTES);
       }
       else {
         renderer.append(getRelativePath(safeCastToFilePath(((ChangesBrowserNode)getParent()).getUserObject()), path),
@@ -76,6 +79,7 @@ public class ChangesBrowserFilePathNode extends ChangesBrowserNode<FilePath> {
     return FileUtil.toSystemDependentName(getUserObject().getPath());
   }
 
+  @Nullable
   public static FilePath safeCastToFilePath(Object o) {
     if (o instanceof FilePath) return (FilePath)o;
     if (o instanceof Change) {
@@ -84,14 +88,15 @@ public class ChangesBrowserFilePathNode extends ChangesBrowserNode<FilePath> {
     return null;
   }
 
-  public static String getRelativePath(FilePath parent, FilePath child) {
-    final String systemDependentChild = child.getPath().replace('/', File.separatorChar);
-    final String systemDependentParent = parent == null ? null : parent.getPath().replace('/', File.separatorChar);
-    if (systemDependentParent == null || ! systemDependentChild.startsWith(systemDependentParent)) {
-      return systemDependentChild;
-    }
-    final int beginOffset = (systemDependentParent.length() == 1 && '/' == systemDependentParent.charAt(0)) ? 0 : 1; // IDEADEV-35767
-    return systemDependentChild.substring(systemDependentParent.length() + beginOffset).replace('/', File.separatorChar);
+  @NotNull
+  public static String getRelativePath(@Nullable FilePath parent, @NotNull FilePath child) {
+    boolean isLocal = !child.isNonLocal();
+    boolean caseSensitive = isLocal && SystemInfoRt.isFileSystemCaseSensitive;
+    String result = parent != null ? FileUtil.getRelativePath(parent.getPath(), child.getPath(), '/', caseSensitive) : null;
+
+    result = result == null ? child.getPath() : result;
+
+    return isLocal ? FileUtil.toSystemDependentName(result) : result;
   }
 
   public int getSortWeight() {
@@ -105,9 +110,5 @@ public class ChangesBrowserFilePathNode extends ChangesBrowserNode<FilePath> {
     }
 
     return 0;
-  }
-
-  public FilePath[] getFilePathsUnder() {
-    return new FilePath[] { getUserObject() };
   }
 }

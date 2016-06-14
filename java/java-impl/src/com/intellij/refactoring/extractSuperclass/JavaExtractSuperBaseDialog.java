@@ -126,6 +126,11 @@ public abstract class JavaExtractSuperBaseDialog extends ExtractSuperBaseDialog<
     return directories[0];
   }
 
+  @Override
+  protected boolean isPossibleToRenameOriginal() {
+    //disable for anonymous classes
+    return mySourceClass.getNameIdentifier() != null;
+  }
 
   @Override
   protected void preparePackage() throws OperationFailedException {
@@ -172,7 +177,8 @@ public abstract class JavaExtractSuperBaseDialog extends ExtractSuperBaseDialog<
   @Override
   protected String validateName(String name) {
     return PsiNameHelper.getInstance(myProject).isIdentifier(name)
-           ? null
+           ? name.equals(mySourceClass.getName())
+             ? "Different name expected" : null
            : RefactoringMessageUtil.getIncorrectIdentifierMessage(name);
   }
 }

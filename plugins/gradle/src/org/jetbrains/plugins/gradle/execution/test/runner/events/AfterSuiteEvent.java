@@ -16,16 +16,16 @@
 package org.jetbrains.plugins.gradle.execution.test.runner.events;
 
 import com.intellij.execution.testframework.sm.runner.SMTestProxy;
+import org.jetbrains.plugins.gradle.execution.test.runner.GradleTestsExecutionConsole;
 import org.jetbrains.plugins.gradle.util.XmlXpathHelper;
-import org.jetbrains.plugins.gradle.execution.test.runner.GradleTestsExecutionConsoleManager;
 
 /**
  * @author Vladislav.Soroka
  * @since 2/28/14
  */
 public class AfterSuiteEvent extends AbstractTestEvent {
-  public AfterSuiteEvent(GradleTestsExecutionConsoleManager consoleManager) {
-    super(consoleManager);
+  public AfterSuiteEvent(GradleTestsExecutionConsole executionConsole) {
+    super(executionConsole);
   }
 
   @Override
@@ -33,31 +33,25 @@ public class AfterSuiteEvent extends AbstractTestEvent {
     final String testId = getTestId(eventXml);
     final TestEventResult result = getTestEventResultType(eventXml);
 
-    addToInvokeLater(new Runnable() {
-      @Override
-      public void run() {
-        final SMTestProxy testProxy = getConsoleManager().getTestsMap().get(testId);
-        if (testProxy == null) return;
+    addToInvokeLater(() -> {
+      final SMTestProxy testProxy = findTestProxy(testId);
+      if (testProxy == null) return;
 
-        switch (result) {
-          case SUCCESS:
-            testProxy.setFinished();
-            break;
-          case FAILURE:
-            testProxy.setTestFailed("", null, false);
-            break;
-          case SKIPPED:
-            testProxy.setTestIgnored(null, null);
-            break;
-          case UNKNOWN_RESULT:
-            break;
-        }
-
-        if (testProxy.isEmptySuite() && !(testProxy instanceof SMTestProxy.SMRootTestProxy)) {
-          testProxy.getParent().getChildren().remove(testProxy);
-        }
-        getResultsViewer().onSuiteFinished(testProxy);
+      switch (result) {
+        case SUCCESS:
+          testProxy.setFinished();
+          break;
+        case FAILURE:
+          testProxy.setTestFailed("", null, false);
+          break;
+        case SKIPPED:
+          testProxy.setTestIgnored(null, null);
+          break;
+        case UNKNOWN_RESULT:
+          break;
       }
+
+      getResultsViewer().onSuiteFinished(testProxy);
     });
   }
 }

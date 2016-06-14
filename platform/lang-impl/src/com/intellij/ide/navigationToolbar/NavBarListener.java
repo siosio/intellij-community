@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,7 +43,7 @@ import com.intellij.problems.WolfTheProblemSolver;
 import com.intellij.psi.PsiManager;
 import com.intellij.psi.PsiTreeChangeEvent;
 import com.intellij.psi.PsiTreeChangeListener;
-import com.intellij.ui.ListScrollingUtil;
+import com.intellij.ui.ScrollingUtil;
 import com.intellij.util.messages.MessageBusConnection;
 import org.jetbrains.annotations.NotNull;
 
@@ -185,12 +185,7 @@ public class NavBarListener extends WolfTheProblemSolver.ProblemListener
     // required invokeLater since in current call sequence KeyboardFocusManager is not initialized yet
     // but future focused component
     //noinspection SSBasedInspection
-    SwingUtilities.invokeLater(new Runnable() {
-      @Override
-      public void run() {
-        processFocusLost(e);
-      }
-    });
+    SwingUtilities.invokeLater(() -> processFocusLost(e));
   }
 
   private void processFocusLost(FocusEvent e) {
@@ -311,7 +306,7 @@ public class NavBarListener extends WolfTheProblemSolver.ProblemListener
     return action instanceof PopupAction
            || action instanceof CopyAction
            || action instanceof CutAction
-           || action instanceof ListScrollingUtil.ListScrollAction;
+           || action instanceof ScrollingUtil.ListScrollAction;
   }
 
   @Override
@@ -326,24 +321,21 @@ public class NavBarListener extends WolfTheProblemSolver.ProblemListener
       focusManager.typeAheadUntil(firstCharTyped);
       myPanel.moveDown();
       //noinspection SSBasedInspection
-      SwingUtilities.invokeLater(new Runnable() {
-        @Override
-        public void run() {
-          try {
-            final Robot robot = new Robot();
-            final boolean shiftOn = e.isShiftDown();
-            final int code = e.getKeyCode();
-            if (shiftOn) {
-              robot.keyPress(KeyEvent.VK_SHIFT);
-            }
-            robot.keyPress(code);
-            robot.keyRelease(code);
+      SwingUtilities.invokeLater(() -> {
+        try {
+          final Robot robot = new Robot();
+          final boolean shiftOn = e.isShiftDown();
+          final int code = e.getKeyCode();
+          if (shiftOn) {
+            robot.keyPress(KeyEvent.VK_SHIFT);
+          }
+          robot.keyPress(code);
+          robot.keyRelease(code);
 
-            //don't release Shift
-            firstCharTyped.setDone();
-          }
-          catch (AWTException ignored) {
-          }
+          //don't release Shift
+          firstCharTyped.setDone();
+        }
+        catch (AWTException ignored) {
         }
       });
     }
@@ -351,12 +343,9 @@ public class NavBarListener extends WolfTheProblemSolver.ProblemListener
 
   @Override
   public void fileOpened(@NotNull final FileEditorManager manager, @NotNull final VirtualFile file) {
-    ApplicationManager.getApplication().invokeLater(new Runnable() {
-      @Override
-      public void run() {
-        if (myPanel.hasFocus()) {
-          manager.openFile(file, true);
-        }
+    ApplicationManager.getApplication().invokeLater(() -> {
+      if (myPanel.hasFocus()) {
+        manager.openFile(file, true);
       }
     });
   }

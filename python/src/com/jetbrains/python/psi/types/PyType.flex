@@ -8,16 +8,13 @@ import static com.jetbrains.python.psi.types.PyTypeTokenTypes.*;
 %%
 
 
-%class PyTypeLexer
+%class _PyTypeLexer
 %implements FlexLexer
 %unicode
 %public
 
 %function advance
 %type PyElementType
-
-%eof{ return;
-%eof}
 
 
 %%
@@ -26,6 +23,6 @@ import static com.jetbrains.python.psi.types.PyTypeTokenTypes.*;
 [\r\n]+ { return NL; }
 [\ \t] { return SPACE; }
 (":py"?":class:`"[~!]?)|("`")|([A-Z]"{")|("}") { return MARKUP; }
-("or")|("of")|("from")|("to")|("<=")|("->")|[,\(\)\.\[\]|] { return OP; }
+("...")|("*")|("or")|("of")|("from")|("to")|("<=")|("->")|[,\(\)\.\[\]|] { return OP; }
 [T-Z] { return PARAMETER; }
 [A-Za-z_][A-Za-z_0-9]* { return IDENTIFIER; }

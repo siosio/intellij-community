@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ import com.intellij.codeInsight.template.CustomTemplateCallback;
 import com.intellij.codeInsight.template.TemplateManager;
 import com.intellij.diagnostic.AttachmentFactory;
 import com.intellij.featureStatistics.FeatureUsageTracker;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.Result;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.diagnostic.Logger;
@@ -75,7 +76,9 @@ public class ListTemplatesHandler implements CodeInsightActionHandler {
     }
 
     if (matchingTemplates.isEmpty() && customTemplatesLookupElements.isEmpty()) {
-      HintManager.getInstance().showErrorHint(editor, CodeInsightBundle.message("templates.no.defined"));
+      if (!ApplicationManager.getApplication().isUnitTestMode()) {
+        HintManager.getInstance().showErrorHint(editor, CodeInsightBundle.message("templates.no.defined"));
+      }
       return;
     }
 
@@ -204,17 +207,13 @@ public class ListTemplatesHandler implements CodeInsightActionHandler {
   }
 
   private static void showLookup(LookupImpl lookup, @Nullable Map<TemplateImpl, String> template2Argument) {
-    Editor editor = lookup.getEditor();
-    Project project = editor.getProject();
-    lookup.addLookupListener(new MyLookupAdapter(project, editor, template2Argument));
+    lookup.addLookupListener(new MyLookupAdapter(template2Argument));
     lookup.refreshUi(false, true);
     lookup.showLookup();
   }
 
   private static void showLookup(LookupImpl lookup, @NotNull PsiFile file) {
-    Editor editor = lookup.getEditor();
-    Project project = editor.getProject();
-    lookup.addLookupListener(new MyLookupAdapter(project, editor, file));
+    lookup.addLookupListener(new MyLookupAdapter(file));
     lookup.refreshUi(false, true);
     lookup.showLookup();
   }
@@ -237,21 +236,15 @@ public class ListTemplatesHandler implements CodeInsightActionHandler {
   }
 
   private static class MyLookupAdapter extends LookupAdapter {
-    private final Project myProject;
-    private final Editor myEditor;
     private final Map<TemplateImpl, String> myTemplate2Argument;
     private final PsiFile myFile;
 
-    public MyLookupAdapter(Project project, Editor editor, @Nullable Map<TemplateImpl, String> template2Argument) {
-      myProject = project;
-      myEditor = editor;
+    public MyLookupAdapter(@Nullable Map<TemplateImpl, String> template2Argument) {
       myTemplate2Argument = template2Argument;
       myFile = null;
     }
 
-    public MyLookupAdapter(Project project, Editor editor, @Nullable PsiFile file) {
-      myProject = project;
-      myEditor = editor;
+    public MyLookupAdapter(@Nullable PsiFile file) {
       myTemplate2Argument = null;
       myFile = file;
     }
@@ -260,22 +253,24 @@ public class ListTemplatesHandler implements CodeInsightActionHandler {
     public void itemSelected(final LookupEvent event) {
       FeatureUsageTracker.getInstance().triggerFeatureUsed("codeassists.liveTemplates");
       final LookupElement item = event.getItem();
+      final Lookup lookup = event.getLookup();
+      final Project project = lookup.getProject();
       if (item instanceof LiveTemplateLookupElementImpl) {
         final TemplateImpl template = ((LiveTemplateLookupElementImpl)item).getTemplate();
         final String argument = myTemplate2Argument != null ? myTemplate2Argument.get(template) : null;
-        new WriteCommandAction(myProject) {
+        new WriteCommandAction(project) {
           @Override
           protected void run(@NotNull Result result) throws Throwable {
-            ((TemplateManagerImpl)TemplateManager.getInstance(myProject)).startTemplateWithPrefix(myEditor, template, null, argument);
+            ((TemplateManagerImpl)TemplateManager.getInstance(project)).startTemplateWithPrefix(lookup.getEditor(), template, null, argument);
           }
         }.execute();
       }
       else if (item instanceof CustomLiveTemplateLookupElement) {
         if (myFile != null) {
-          new WriteCommandAction(myProject) {
+          new WriteCommandAction(project) {
             @Override
             protected void run(@NotNull Result result) throws Throwable {
-              ((CustomLiveTemplateLookupElement)item).expandTemplate(myEditor, myFile);
+              ((CustomLiveTemplateLookupElement)item).expandTemplate(lookup.getEditor(), myFile);
             }
           }.execute();
         }

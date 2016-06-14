@@ -49,11 +49,16 @@ public class MnemonicHelper extends ComponentTreeWatcher {
   public static final PropertyChangeListener TEXT_LISTENER = new PropertyChangeListener() {
    public void propertyChange(PropertyChangeEvent evt) {
      final Object source = evt.getSource();
-     if (source instanceof AbstractButton) {
-       DialogUtil.registerMnemonic(((AbstractButton)source));
-     } else if (source instanceof JLabel) {
-       DialogUtil.registerMnemonic(((JLabel)source), null);
-     }
+     //noinspection SSBasedInspection
+     SwingUtilities.invokeLater(() -> {
+       if (source instanceof AbstractButton) {
+         // see javax.swing.AbstractButton.setText
+         DialogUtil.registerMnemonic(((AbstractButton)source));
+       } else if (source instanceof JLabel) {
+         // javax.swing.JLabel.setText
+         DialogUtil.registerMnemonic(((JLabel)source), null);
+       }
+     });
    }
   };
   @NonNls public static final String TEXT_CHANGED_PROPERTY = "text";

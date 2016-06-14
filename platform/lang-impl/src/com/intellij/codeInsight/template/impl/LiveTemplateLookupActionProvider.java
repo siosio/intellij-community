@@ -40,21 +40,12 @@ public class LiveTemplateLookupActionProvider implements LookupActionProvider {
         consumer.consume(new LookupElementAction(PlatformIcons.EDIT, "Edit live template settings") {
           @Override
           public Result performLookupAction() {
-            final Project project = lookup.getEditor().getProject();
-            assert project != null;
-            ApplicationManager.getApplication().invokeLater(new Runnable() {
-              @Override
-              public void run() {
-                if (project.isDisposed()) return;
+            final Project project = lookup.getProject();
+            ApplicationManager.getApplication().invokeLater(() -> {
+              if (project.isDisposed()) return;
 
-                final LiveTemplatesConfigurable configurable = new LiveTemplatesConfigurable();
-                ShowSettingsUtil.getInstance().editConfigurable(project, configurable, new Runnable() {
-                  @Override
-                  public void run() {
-                    configurable.getTemplateListPanel().editTemplate(template);
-                  }
-                });
-              }
+              final LiveTemplatesConfigurable configurable = new LiveTemplatesConfigurable();
+              ShowSettingsUtil.getInstance().editConfigurable(project, configurable, () -> configurable.getTemplateListPanel().editTemplate(template));
             });
             return Result.HIDE_LOOKUP;
           }
@@ -64,12 +55,7 @@ public class LiveTemplateLookupActionProvider implements LookupActionProvider {
         consumer.consume(new LookupElementAction(AllIcons.Actions.Delete, String.format("Disable '%s' template", template.getKey())) {
           @Override
           public Result performLookupAction() {
-            ApplicationManager.getApplication().invokeLater(new Runnable() {
-              @Override
-              public void run() {
-                templateFromSettings.setDeactivated(true);
-              }
-            });
+            ApplicationManager.getApplication().invokeLater(() -> templateFromSettings.setDeactivated(true));
             return Result.HIDE_LOOKUP;
           }
         });

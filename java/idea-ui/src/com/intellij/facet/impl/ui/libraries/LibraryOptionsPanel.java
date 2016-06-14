@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,8 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.Result;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.project.DumbModePermission;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.roots.OrderRootType;
@@ -113,13 +115,7 @@ public class LibraryOptionsPanel implements Disposable {
                              @NotNull final LibrariesContainer librariesContainer,
                              final boolean showDoNotCreateOption) {
 
-    this(libraryDescription, new NotNullComputable<String>() {
-      @NotNull
-      @Override
-      public String compute() {
-        return path;
-      }
-    }, versionFilter, librariesContainer, showDoNotCreateOption);
+    this(libraryDescription, () -> path, versionFilter, librariesContainer, showDoNotCreateOption);
   }
 
   public LibraryOptionsPanel(@NotNull final CustomLibraryDescription libraryDescription,
@@ -136,13 +132,10 @@ public class LibraryOptionsPanel implements Disposable {
         @Override
         public void onSuccess(@NotNull final List<? extends FrameworkLibraryVersion> versions) {
           //noinspection SSBasedInspection
-          SwingUtilities.invokeLater(new Runnable() {
-            @Override
-            public void run() {
-              if (!myDisposed) {
-                showSettingsPanel(libraryDescription, pathProvider, versionFilter, showDoNotCreateOption, versions);
-                onVersionChanged(getPresentableVersion());
-              }
+          SwingUtilities.invokeLater(() -> {
+            if (!myDisposed) {
+              showSettingsPanel(libraryDescription, pathProvider, versionFilter, showDoNotCreateOption, versions);
+              onVersionChanged(getPresentableVersion());
             }
           });
         }
@@ -215,13 +208,10 @@ public class LibraryOptionsPanel implements Disposable {
     });
 
     myDoNotCreateRadioButton.setVisible(showDoNotCreateOption);
-    myLibraryComboBoxModel = new SortedComboBoxModel<LibraryEditor>(new Comparator<LibraryEditor>() {
-      @Override
-      public int compare(LibraryEditor o1, LibraryEditor o2) {
-        final String name1 = o1.getName();
-        final String name2 = o2.getName();
-        return -StringUtil.notNullize(name1).compareToIgnoreCase(StringUtil.notNullize(name2));
-      }
+    myLibraryComboBoxModel = new SortedComboBoxModel<LibraryEditor>((o1, o2) -> {
+      final String name1 = o1.getName();
+      final String name2 = o2.getName();
+      return -StringUtil.notNullize(name1).compareToIgnoreCase(StringUtil.notNullize(name2));
     });
 
     for (Library library : libraries) {
@@ -248,7 +238,7 @@ public class LibraryOptionsPanel implements Disposable {
     });
     myExistingLibraryComboBox.setRenderer(new ColoredListCellRenderer(myExistingLibraryComboBox) {
       @Override
-      protected void customizeCellRenderer(JList list, Object value, int index, boolean selected, boolean hasFocus) {
+      protected void customizeCellRenderer(@NotNull JList list, Object value, int index, boolean selected, boolean hasFocus) {
         if (value == null) {
           append("[No library selected]");
         }
@@ -278,6 +268,7 @@ public class LibraryOptionsPanel implements Disposable {
     }
     else {
       selectedOption = Choice.USE_LIBRARY;
+      doCreate(true);
     }
     myButtonEnumModel.setSelected(selectedOption);
 
@@ -295,12 +286,12 @@ public class LibraryOptionsPanel implements Disposable {
     myCreateButton.addActionListener(new ActionListener() {
       @Override
       public void actionPerformed(ActionEvent e) {
-        doCreate();
+        doCreate(false);
       }
     });
     myConfigureButton.addActionListener(new ActionListener() {
       public void actionPerformed(final ActionEvent e) {
-        doConfigure();
+        DumbService.allowStartingDumbModeInside(DumbModePermission.MAY_START_BACKGROUND, () -> doConfigure());
       }
     });
     updateState();
@@ -334,7 +325,7 @@ public class LibraryOptionsPanel implements Disposable {
           dialog.show();
           if (item instanceof ExistingLibraryEditor) {
             new WriteAction() {
-              protected void run(final Result result) {
+              protected void run(@NotNull final Result result) {
                 ((ExistingLibraryEditor)item).commit();
               }
             }.execute();
@@ -374,8 +365,10 @@ public class LibraryOptionsPanel implements Disposable {
     }
   }
 
-  private void doCreate() {
-    final NewLibraryConfiguration libraryConfiguration = myLibraryDescription.createNewLibrary(myCreateButton, getBaseDirectory());
+  private void doCreate(boolean useDefaultSettings) {
+    final NewLibraryConfiguration libraryConfiguration = useDefaultSettings
+                                                         ? myLibraryDescription.createNewLibraryWithDefaultSettings(getBaseDirectory())
+                                                         : myLibraryDescription.createNewLibrary(myCreateButton, getBaseDirectory());
     if (libraryConfiguration != null) {
       final NewLibraryEditor libraryEditor = new NewLibraryEditor(libraryConfiguration.getLibraryType(), libraryConfiguration.getProperties());
       libraryEditor.setName(myLibrariesContainer.suggestUniqueLibraryName(libraryConfiguration.getDefaultLibraryName()));

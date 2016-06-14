@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,9 @@
  */
 package com.intellij.refactoring.introduceParameter;
 
+import com.intellij.codeInspection.AnonymousCanBeLambdaInspection;
+import com.intellij.codeInspection.LambdaCanBeMethodReferenceInspection;
+import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.help.HelpManager;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
@@ -36,14 +39,17 @@ import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.ui.*;
 import com.intellij.ui.NonFocusableCheckBox;
 import com.intellij.usageView.UsageInfo;
+import com.intellij.util.ui.JBUI;
 import gnu.trove.TIntArrayList;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import java.awt.*;
+import java.util.Collections;
 import java.util.List;
 
 public class IntroduceParameterDialog extends RefactoringDialog {
+  private static final String INTRODUCE_PARAMETER_LAMBDA = "introduce.parameter.lambda";
   private TypeSelector myTypeSelector;
   private NameSuggestionsManager myNameSuggestionsManager;
 
@@ -55,7 +61,8 @@ public class IntroduceParameterDialog extends RefactoringDialog {
   private final boolean myMustBeFinal;
   private final PsiExpression myExpression;
   private final PsiLocalVariable myLocalVar;
-  protected JCheckBox myCbDeclareFinal = null;
+  protected JCheckBox myCbDeclareFinal;
+  protected JCheckBox myCbCollapseToLambda;
 
   //  private JComponent myParameterNameField = null;
   private NameSuggestionsField myParameterNameField;
@@ -67,7 +74,7 @@ public class IntroduceParameterDialog extends RefactoringDialog {
   private NameSuggestionsField.DataChanged myParameterNameChangedListener;
 
   private final IntroduceParameterSettingsPanel myPanel;
-  private boolean myHasWriteAccess = false;
+  private boolean myHasWriteAccess;
 
   IntroduceParameterDialog(@NotNull Project project,
                            @NotNull List<UsageInfo> classMembersList,
@@ -139,7 +146,7 @@ public class IntroduceParameterDialog extends RefactoringDialog {
     gbConstraints.fill = GridBagConstraints.NONE;
     gbConstraints.gridx = 0;
 
-    gbConstraints.insets = new Insets(4, 4, 4, 0);
+    gbConstraints.insets = JBUI.insets(4, 4, 4, 0);
     gbConstraints.gridwidth = 1;
     gbConstraints.weightx = 0;
     gbConstraints.weighty = 0;
@@ -147,7 +154,7 @@ public class IntroduceParameterDialog extends RefactoringDialog {
     JLabel type = new JLabel(RefactoringBundle.message("parameter.of.type"));
     panel.add(type, gbConstraints);
 
-    gbConstraints.insets = new Insets(4, 4, 4, 8);
+    gbConstraints.insets = JBUI.insets(4, 4, 4, 8);
     gbConstraints.gridx++;
     gbConstraints.weightx = 1;
     gbConstraints.fill = GridBagConstraints.BOTH;
@@ -155,7 +162,7 @@ public class IntroduceParameterDialog extends RefactoringDialog {
     panel.add(myTypeSelector.getComponent(), gbConstraints);
 
 
-    gbConstraints.insets = new Insets(4, 4, 4, 8);
+    gbConstraints.insets = JBUI.insets(4, 4, 4, 8);
     gbConstraints.gridwidth = 1;
     gbConstraints.weightx = 0;
     gbConstraints.gridx = 0;
@@ -176,7 +183,7 @@ public class IntroduceParameterDialog extends RefactoringDialog {
     }
 */
     gbConstraints.gridx++;
-    gbConstraints.insets = new Insets(4, 4, 4, 8);
+    gbConstraints.insets = JBUI.insets(4, 4, 4, 8);
     gbConstraints.weightx = 1;
     gbConstraints.fill = GridBagConstraints.BOTH;
     panel.add(myParameterNameField.getComponent(), gbConstraints);
@@ -192,20 +199,20 @@ public class IntroduceParameterDialog extends RefactoringDialog {
     myNameSuggestionsManager.setLabelsFor(type, nameLabel);
 
     gbConstraints.gridx = 0;
-    gbConstraints.insets = new Insets(4, 0, 4, 8);
+    gbConstraints.insets = JBUI.insets(4, 0, 4, 8);
     gbConstraints.gridwidth = 2;
     if (myOccurenceNumber > 1 && !myPanel.myIsInvokedOnDeclaration) {
       gbConstraints.gridy++;
       myPanel.createOccurrencesCb(gbConstraints, panel, myOccurenceNumber);
     }
     if(myPanel.myCbReplaceAllOccurences != null) {
-      gbConstraints.insets = new Insets(0, 16, 4, 8);
+      gbConstraints.insets = JBUI.insets(0, 16, 4, 8);
     }
     JavaRefactoringSettings settings = JavaRefactoringSettings.getInstance();
     myPanel.createLocalVariablePanel(gbConstraints, panel, settings);
 
     myPanel.createRemoveParamsPanel(gbConstraints, panel);
-    gbConstraints.insets =  new Insets(4, 0, 4, 8);
+    gbConstraints.insets = JBUI.insets(4, 0, 4, 8);
 
     gbConstraints.gridy++;
     myCbDeclareFinal = new NonFocusableCheckBox(RefactoringBundle.message("declare.final"));
@@ -225,7 +232,15 @@ public class IntroduceParameterDialog extends RefactoringDialog {
 
     gbConstraints.gridy++;
     myPanel.createDelegateCb(gbConstraints, panel);
-
+    
+    myCbCollapseToLambda = new NonFocusableCheckBox(RefactoringBundle.message("introduce.parameter.convert.lambda"));
+    final PsiAnonymousClass anonymClass = myExpression instanceof PsiNewExpression ? ((PsiNewExpression)myExpression).getAnonymousClass() 
+                                                                                   : null;
+    myCbCollapseToLambda.setVisible(anonymClass != null && AnonymousCanBeLambdaInspection.canBeConvertedToLambda(anonymClass, false, Collections.emptySet()));
+    myCbCollapseToLambda.setSelected(PropertiesComponent.getInstance(myProject).getBoolean(INTRODUCE_PARAMETER_LAMBDA));
+    gbConstraints.gridy++;
+    panel.add(myCbCollapseToLambda, gbConstraints);
+    
     return panel;
   }
 
@@ -245,6 +260,9 @@ public class IntroduceParameterDialog extends RefactoringDialog {
     if (myCbDeclareFinal != null && myCbDeclareFinal.isEnabled()) {
       settings.INTRODUCE_PARAMETER_CREATE_FINALS = Boolean.valueOf(myCbDeclareFinal.isSelected());
     }
+    if (myCbCollapseToLambda.isVisible()) {
+      PropertiesComponent.getInstance(myProject).setValue(INTRODUCE_PARAMETER_LAMBDA, myCbCollapseToLambda.isSelected());
+    }
 
     myPanel.saveSettings(settings);
 
@@ -255,16 +273,30 @@ public class IntroduceParameterDialog extends RefactoringDialog {
     PsiExpression parameterInitializer = myExpression;
     if (myLocalVar != null) {
       if (myPanel.isUseInitializer()) {
-      parameterInitializer = myLocalVar.getInitializer();      }
+        parameterInitializer = myLocalVar.getInitializer();    
+      }
       isDeleteLocalVariable = myPanel.isDeleteLocalVariable();
     }
 
+    final PsiType selectedType = getSelectedType();
     final IntroduceParameterProcessor processor = new IntroduceParameterProcessor(
       myProject, myMethodToReplaceIn, myMethodToSearchFor,
       parameterInitializer, myExpression,
       myLocalVar, isDeleteLocalVariable,
       getParameterName(), myPanel.isReplaceAllOccurences(),
-      myPanel.getReplaceFieldsWithGetters(), isDeclareFinal(), myPanel.isGenerateDelegate(), getSelectedType(), myPanel.getParametersToRemove());
+      myPanel.getReplaceFieldsWithGetters(), isDeclareFinal(), myPanel.isGenerateDelegate(), selectedType, myPanel.getParametersToRemove());
+    if (myCbCollapseToLambda.isVisible() && myCbCollapseToLambda.isSelected() && parameterInitializer != null) {
+      PsiExpression lambda = AnonymousCanBeLambdaInspection.replaceAnonymousWithLambda(parameterInitializer, selectedType);
+      if (lambda != null) {
+        final PsiParameter[] lambdaParameters = ((PsiLambdaExpression)lambda).getParameterList().getParameters();
+        final String methodReferenceText = LambdaCanBeMethodReferenceInspection.convertToMethodReference(((PsiLambdaExpression)lambda).getBody(), lambdaParameters, selectedType, null);
+        if (methodReferenceText != null) {
+          lambda = JavaPsiFacade.getElementFactory(getProject()).createExpressionFromText(methodReferenceText, lambda);
+        }
+
+        processor.setParameterInitializer(lambda);
+      }
+    }
     invokeRefactoring(processor);
   }
 

@@ -28,6 +28,7 @@ import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.*;
+import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.util.ArrayUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -120,12 +121,7 @@ public abstract class CopyPasteReferenceProcessor<TRef extends PsiElement> exten
       askReferencesToRestore(project, refs, referenceData);
     }
     PsiDocumentManager.getInstance(project).commitAllDocuments();
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      @Override
-      public void run() {
-        restoreReferences(referenceData, refs);
-      }
-    });
+    ApplicationManager.getApplication().runWriteAction(() -> restoreReferences(referenceData, refs));
   }
 
   protected static void addReferenceData(final PsiElement element,
@@ -189,13 +185,10 @@ public abstract class CopyPasteReferenceProcessor<TRef extends PsiElement> exten
     Object[] selectedObjects = ArrayUtil.toObjectArray(array);
     Arrays.sort(
       selectedObjects,
-      new Comparator<Object>() {
-        @Override
-        public int compare(Object o1, Object o2) {
-          String fqName1 = getFQName(o1);
-          String fqName2 = getFQName(o2);
-          return fqName1.compareToIgnoreCase(fqName2);
-        }
+      (o1, o2) -> {
+        String fqName1 = getFQName(o1);
+        String fqName2 = getFQName(o2);
+        return fqName1.compareToIgnoreCase(fqName2);
       }
     );
 
@@ -206,7 +199,7 @@ public abstract class CopyPasteReferenceProcessor<TRef extends PsiElement> exten
     for (int i = 0; i < referenceData.length; i++) {
       PsiElement ref = refs[i];
       if (ref != null) {
-        LOG.assertTrue(ref.isValid());
+        PsiUtilCore.ensureValid(ref);
         Object refObject = refObjects[i];
         boolean found = false;
         for (Object selected : selectedObjects) {

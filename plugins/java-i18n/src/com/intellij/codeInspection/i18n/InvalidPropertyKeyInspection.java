@@ -191,6 +191,7 @@ public class InvalidPropertyKeyInspection extends BaseJavaLocalInspectionTool {
     }
 
     private void visitPropertyKeyAnnotationParameter(PsiExpression expression, String key) {
+      if (!(expression.getParent() instanceof PsiExpressionList)) return;
       Ref<String> resourceBundleName = new Ref<String>();
       if (!JavaI18nUtil.isValidPropertyReference(myManager.getProject(), expression, key, resourceBundleName)) {
         String bundleName = resourceBundleName.get();
@@ -219,7 +220,7 @@ public class InvalidPropertyKeyInspection extends BaseJavaLocalInspectionTool {
       else if (expression.getParent() instanceof PsiExpressionList && expression.getParent().getParent() instanceof PsiMethodCallExpression) {
         final Map<String, Object> annotationParams = new HashMap<String, Object>();
         annotationParams.put(AnnotationUtil.PROPERTY_KEY_RESOURCE_BUNDLE_PARAMETER, null);
-        if (!JavaI18nUtil.mustBePropertyKey(myManager.getProject(), expression, annotationParams)) return;
+        if (!JavaI18nUtil.mustBePropertyKey(expression, annotationParams)) return;
 
         final SortedSet<Integer> paramsCount = JavaI18nUtil.getPropertyValueParamsCount(expression, resourceBundleName.get());
         if (paramsCount.isEmpty() || (paramsCount.size() != 1 && resourceBundleName.get() == null)) {

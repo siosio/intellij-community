@@ -1,20 +1,18 @@
 package org.jetbrains.plugins.github.tasks;
 
-import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.tasks.config.BaseRepositoryEditor;
 import com.intellij.ui.DocumentAdapter;
+import com.intellij.ui.components.JBCheckBox;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBTextField;
 import com.intellij.util.Consumer;
-import com.intellij.util.ThrowableConvertor;
 import com.intellij.util.ui.FormBuilder;
 import com.intellij.util.ui.GridBag;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.github.api.GithubApiUtil;
-import org.jetbrains.plugins.github.api.GithubConnection;
 import org.jetbrains.plugins.github.util.GithubAuthDataHolder;
 import org.jetbrains.plugins.github.util.GithubNotifications;
 import org.jetbrains.plugins.github.util.GithubUtil;
@@ -23,8 +21,6 @@ import javax.swing.*;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.*;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
 import java.io.IOException;
 
 /**
@@ -34,6 +30,7 @@ public class GithubRepositoryEditor extends BaseRepositoryEditor<GithubRepositor
   private MyTextField myRepoAuthor;
   private MyTextField myRepoName;
   private MyTextField myToken;
+  private JBCheckBox myShowNotAssignedIssues;
   private JButton myTokenButton;
   private JBLabel myHostLabel;
   private JBLabel myRepositoryLabel;
@@ -51,6 +48,8 @@ public class GithubRepositoryEditor extends BaseRepositoryEditor<GithubRepositor
     myRepoAuthor.setText(repository.getRepoAuthor());
     myRepoName.setText(repository.getRepoName());
     myToken.setText(repository.getToken());
+    myToken.setText(repository.getToken());
+    myShowNotAssignedIssues.setSelected(!repository.isAssignedIssuesOnly());
 
     DocumentListener buttonUpdater = new DocumentAdapter() {
       @Override
@@ -88,11 +87,9 @@ public class GithubRepositoryEditor extends BaseRepositoryEditor<GithubRepositor
     myTokenLabel = new JBLabel("API Token:", SwingConstants.RIGHT);
     myToken = new MyTextField("OAuth2 token");
     myTokenButton = new JButton("Create API token");
-    myTokenButton.addActionListener(new ActionListener() {
-      public void actionPerformed(ActionEvent e) {
-        generateToken();
-        doApply();
-      }
+    myTokenButton.addActionListener(e -> {
+      generateToken();
+      doApply();
     });
 
     JPanel myTokenPanel = new JPanel();
@@ -100,12 +97,20 @@ public class GithubRepositoryEditor extends BaseRepositoryEditor<GithubRepositor
     myTokenPanel.add(myToken, BorderLayout.CENTER);
     myTokenPanel.add(myTokenButton, BorderLayout.EAST);
 
+    myShowNotAssignedIssues = new JBCheckBox("Include issues not assigned to me");
+
     installListener(myRepoAuthor);
     installListener(myRepoName);
     installListener(myToken);
+    installListener(myShowNotAssignedIssues);
 
-    return FormBuilder.createFormBuilder().setAlignLabelOnRight(true).addLabeledComponent(myHostLabel, myHostPanel)
-      .addLabeledComponent(myRepositoryLabel, myRepoPanel).addLabeledComponent(myTokenLabel, myTokenPanel).getPanel();
+    return FormBuilder.createFormBuilder()
+      .setAlignLabelOnRight(true)
+      .addLabeledComponent(myHostLabel, myHostPanel)
+      .addLabeledComponent(myRepositoryLabel, myRepoPanel)
+      .addLabeledComponent(myTokenLabel, myTokenPanel)
+      .addComponentToRightColumn(myShowNotAssignedIssues)
+      .getPanel();
   }
 
   @Override
@@ -113,30 +118,17 @@ public class GithubRepositoryEditor extends BaseRepositoryEditor<GithubRepositor
     myRepository.setRepoName(getRepoName());
     myRepository.setRepoAuthor(getRepoAuthor());
     myRepository.setToken(getToken());
+    myRepository.setAssignedIssuesOnly(isAssignedIssuesOnly());
     super.apply();
   }
 
   private void generateToken() {
     try {
-      myToken.setText(
-        GithubUtil.computeValueInModal(myProject, "Access to GitHub", new ThrowableConvertor<ProgressIndicator, String, IOException>() {
-          @NotNull
-          @Override
-          public String convert(ProgressIndicator indicator) throws IOException {
-            return GithubUtil
-              .runTaskWithBasicAuthForHost(myProject, GithubAuthDataHolder.createFromSettings(), indicator, getHost(),
-                                           new ThrowableConvertor<GithubConnection, String, IOException>() {
-                                             @NotNull
-                                             @Override
-                                             public String convert(@NotNull GithubConnection connection) throws IOException {
-                                               return GithubApiUtil
-                                                 .getTasksToken(connection, getRepoAuthor(), getRepoName(), "IntelliJ tasks plugin");
-                                             }
-                                           }
-              );
-          }
-        })
-      );
+      String token = GithubUtil.computeValueInModalIO(myProject, "Access to GitHub", indicator ->
+        GithubUtil.runTaskWithBasicAuthForHost(myProject, GithubAuthDataHolder.createFromSettings(), indicator, getHost(), connection ->
+          GithubApiUtil.getTasksToken(connection, getRepoAuthor(), getRepoName(), "IntelliJ tasks plugin")
+        ));
+      myToken.setText(token);
     }
     catch (IOException e) {
       GithubNotifications.showErrorDialog(myProject, "Can't Get Access Token", e);
@@ -180,6 +172,10 @@ public class GithubRepositoryEditor extends BaseRepositoryEditor<GithubRepositor
   @NotNull
   private String getToken() {
     return myToken.getText().trim();
+  }
+
+  private boolean isAssignedIssuesOnly() {
+    return !myShowNotAssignedIssues.isSelected();
   }
 
   public static class MyTextField extends JBTextField {

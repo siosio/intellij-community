@@ -15,21 +15,69 @@
  */
 package com.intellij.codeInsight.navigation;
 
+import com.intellij.application.options.editor.GutterIconsConfigurable;
+import com.intellij.codeInsight.daemon.GutterIconDescriptor;
+import com.intellij.codeInsight.daemon.GutterMark;
+import com.intellij.openapi.actionSystem.ActionGroup;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.editor.markup.GutterIconRenderer;
+import com.intellij.testFramework.TestActionEvent;
 import com.intellij.testFramework.fixtures.LightCodeInsightFixtureTestCase;
+import com.intellij.util.Function;
+import com.intellij.util.containers.ContainerUtil;
+
+import java.util.List;
+import java.util.Set;
 
 /**
  * @author Dmitry Avdeev
  */
+@SuppressWarnings("ConstantConditions")
 public class RunLineMarkerTest extends LightCodeInsightFixtureTestCase {
 
   public void testRunLineMarker() throws Exception {
     myFixture.configureByText("MainTest.java", "public class MainTest {\n" +
-                                               "    public static void fo<caret>o(String[] args) {\n" +
+                                               "    public static void <caret>foo(String[] args) {\n" +
                                                "    }\n " +
                                                "    public static void main(String[] args) {\n" +
                                                "    }\n" +
                                                "}");
     assertEquals(0, myFixture.findGuttersAtCaret().size());
     assertEquals(2, myFixture.findAllGutters().size());
+  }
+
+  public void testTestClassWithMain() throws Exception {
+    myFixture.addClass("package junit.framework; public class TestCase {}");
+    myFixture.configureByText("MainTest.java", "public class <caret>MainTest extends junit.framework.TestCase {\n" +
+                                               "    public static void main(String[] args) {\n" +
+                                               "    }\n" +
+                                               "    public void testFoo() {\n" +
+                                               "    }\n" +
+                                               "}");
+    List<GutterMark> marks = myFixture.findGuttersAtCaret();
+    assertEquals(1, marks.size());
+    GutterIconRenderer mark = (GutterIconRenderer)marks.get(0);
+    ActionGroup group = mark.getPopupMenuActions();
+    assertNotNull(group);
+    TestActionEvent event = new TestActionEvent();
+    List<AnAction> list = ContainerUtil.findAll(group.getChildren(event), action -> {
+      TestActionEvent actionEvent = new TestActionEvent();
+      action.update(actionEvent);
+      String text = actionEvent.getPresentation().getText();
+      return text != null && text.startsWith("Run ") && text.endsWith("'");
+    });
+    assertEquals(list.toString(), 2, list.size());
+    list.get(0).update(event);
+    assertEquals("Run 'MainTest.main()'", event.getPresentation().getText());
+    list.get(1).update(event);
+    assertEquals("Run 'MainTest'", event.getPresentation().getText());
+  }
+
+  public void testConfigurable() throws Exception {
+    GutterIconsConfigurable configurable = new GutterIconsConfigurable();
+    configurable.createComponent();
+    List<GutterIconDescriptor> descriptors = configurable.getDescriptors();
+    Set<String> strings = ContainerUtil.map2Set(descriptors, descriptor -> descriptor.getId());
+    assertEquals(descriptors.size(), strings.size());
   }
 }

@@ -34,21 +34,21 @@ import java.util.regex.Pattern;
  * @author peter
  */
 public class StringPattern extends ObjectPattern<String, StringPattern> {
-  private static final InitialPatternCondition<String> CONDITION = new InitialPatternCondition<String>(String.class) {
-    @Override
-    public boolean accepts(@Nullable final Object o, final ProcessingContext context) {
-      return o instanceof String;
-    }
+  static final StringPattern STRING_PATTERN = new StringPattern();
+
+  private StringPattern() {
+    super(new InitialPatternCondition<String>(String.class) {
+      @Override
+      public boolean accepts(@Nullable final Object o, final ProcessingContext context) {
+        return o instanceof String;
+      }
 
 
-    @Override
-    public void append(@NotNull @NonNls final StringBuilder builder, final String indent) {
-      builder.append("string()");
-    }
-  };
-
-  protected StringPattern() {
-    super(CONDITION);
+      @Override
+      public void append(@NotNull @NonNls final StringBuilder builder, final String indent) {
+        builder.append("string()");
+      }
+    });
   }
 
   @NotNull
@@ -212,6 +212,7 @@ public class StringPattern extends ObjectPattern<String, StringPattern> {
 
   @NotNull
   public static CharSequence newBombedCharSequence(@NotNull CharSequence sequence) {
+    if (sequence instanceof StringUtil.BombedCharSequence) return sequence;
     return new StringUtil.BombedCharSequence(sequence) {
       @Override
       protected void checkCanceled() {

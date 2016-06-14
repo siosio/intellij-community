@@ -31,12 +31,12 @@ import org.jetbrains.annotations.Nullable;
 
 public class RefusedBequestInspectionBase extends BaseInspection {
 
-  @SuppressWarnings("PublicField") public boolean ignoreEmptySuperMethods = false;
+  @SuppressWarnings("PublicField") public boolean ignoreEmptySuperMethods;
 
   @SuppressWarnings("PublicField") final ExternalizableStringSet annotations =
     new ExternalizableStringSet("javax.annotation.OverridingMethodsMustInvokeSuper");
 
-  @SuppressWarnings("PublicField") boolean onlyReportWhenAnnotated = false;
+  @SuppressWarnings("PublicField") boolean onlyReportWhenAnnotated = true;
 
   @Override
   public void writeSettings(@NotNull Element node) throws WriteExternalException {
@@ -56,6 +56,7 @@ public class RefusedBequestInspectionBase extends BaseInspection {
   @Override
   public void readSettings(@NotNull Element node) throws InvalidDataException {
     super.readSettings(node);
+    onlyReportWhenAnnotated = false;
     for (Element option : node.getChildren("option")) {
       if ("onlyReportWhenAnnotated".equals(option.getAttributeValue("name"))) {
         onlyReportWhenAnnotated = Boolean.parseBoolean(option.getAttributeValue("value"));
@@ -98,7 +99,7 @@ public class RefusedBequestInspectionBase extends BaseInspection {
       if (method.getNameIdentifier() == null) {
         return;
       }
-      final PsiMethod leastConcreteSuperMethod = getLeastConcreteSuperMethod(method);
+      final PsiMethod leastConcreteSuperMethod = getDirectSuperMethod(method);
       if (leastConcreteSuperMethod == null) {
         return;
       }
@@ -108,7 +109,8 @@ public class RefusedBequestInspectionBase extends BaseInspection {
         return;
       }
       if (ignoreEmptySuperMethods) {
-        final PsiMethod superMethod = (PsiMethod)leastConcreteSuperMethod.getNavigationElement();
+        final PsiElement element = leastConcreteSuperMethod.getNavigationElement();
+        final PsiMethod superMethod = element instanceof PsiMethod ? (PsiMethod)element : leastConcreteSuperMethod;
         if (MethodUtils.isTrivial(superMethod, true)) {
           return;
         }
@@ -125,15 +127,16 @@ public class RefusedBequestInspectionBase extends BaseInspection {
     }
 
     @Nullable
-    private PsiMethod getLeastConcreteSuperMethod(PsiMethod method) {
-      final PsiMethod[] superMethods = method.findSuperMethods(true);
-      for (final PsiMethod superMethod : superMethods) {
-        final PsiClass containingClass = superMethod.getContainingClass();
-        if (containingClass != null && !superMethod.hasModifierProperty(PsiModifier.ABSTRACT) && !containingClass.isInterface()) {
-          return superMethod;
-        }
+    private PsiMethod getDirectSuperMethod(PsiMethod method) {
+      final PsiMethod superMethod = MethodUtils.getSuper(method);
+      if (superMethod ==  null || superMethod.hasModifierProperty(PsiModifier.ABSTRACT)) {
+        return null;
       }
-      return null;
+      final PsiClass containingClass = superMethod.getContainingClass();
+      if (containingClass == null || containingClass.isInterface()) {
+        return null;
+      }
+      return superMethod;
     }
 
     private boolean containsSuperCall(@NotNull PsiElement context, @NotNull PsiMethod method) {
@@ -143,10 +146,10 @@ public class RefusedBequestInspectionBase extends BaseInspection {
     }
   }
 
-  private static class SuperCallVisitor extends JavaRecursiveElementVisitor {
+  private static class SuperCallVisitor extends JavaRecursiveElementWalkingVisitor {
 
     private final PsiMethod methodToSearchFor;
-    private boolean hasSuperCall = false;
+    private boolean hasSuperCall;
 
     SuperCallVisitor(PsiMethod methodToSearchFor) {
       this.methodToSearchFor = methodToSearchFor;
@@ -185,7 +188,7 @@ public class RefusedBequestInspectionBase extends BaseInspection {
       }
     }
 
-    public boolean hasSuperCall() {
+    boolean hasSuperCall() {
       return hasSuperCall;
     }
   }

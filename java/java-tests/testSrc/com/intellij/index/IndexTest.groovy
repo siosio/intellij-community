@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,6 @@ import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditor
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileTypes.PlainTextFileType
-import com.intellij.openapi.util.Factory
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
@@ -33,20 +32,29 @@ import com.intellij.pom.java.LanguageLevel
 import com.intellij.psi.*
 import com.intellij.psi.codeStyle.CodeStyleManager
 import com.intellij.psi.impl.PsiManagerEx
+import com.intellij.psi.impl.cache.impl.id.IdIndex
+import com.intellij.psi.impl.cache.impl.id.IdIndexEntry
 import com.intellij.psi.impl.file.impl.FileManagerImpl
+import com.intellij.psi.impl.java.stubs.index.JavaStubIndexKeys
 import com.intellij.psi.impl.source.PostprocessReformattingAspect
 import com.intellij.psi.impl.source.PsiFileWithStubSupport
+import com.intellij.psi.search.EverythingGlobalScope
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.search.PsiSearchHelper
+import com.intellij.psi.stubs.SerializedStubTree
+import com.intellij.psi.stubs.StubIndex
+import com.intellij.psi.stubs.StubUpdatingIndex
 import com.intellij.testFramework.IdeaTestUtil
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.SkipSlowTestLocally
+import com.intellij.testFramework.exceptionCases.IllegalArgumentExceptionCase
 import com.intellij.testFramework.fixtures.JavaCodeInsightFixtureTestCase
+import com.intellij.util.Processor
+import com.intellij.util.indexing.FileBasedIndex
 import com.intellij.util.indexing.MapIndexStorage
 import com.intellij.util.indexing.StorageException
 import com.intellij.util.io.*
 import org.jetbrains.annotations.NotNull
-
 /**
  * @author Eugene Zhuravlev
  * @since Dec 12, 2007
@@ -64,7 +72,7 @@ public class IndexTest extends JavaCodeInsightFixtureTestCase {
   }
 
   public void testUpdate() throws StorageException, IOException {
-    StringIndex index = createIndex(new EnumeratorStringDescriptor())
+    StringIndex index = createIndex(getTestName(false), new EnumeratorStringDescriptor())
 
     try {
       // build index
@@ -111,7 +119,7 @@ public class IndexTest extends JavaCodeInsightFixtureTestCase {
   }
 
   public void testUpdateWithCustomEqualityPolicy() {
-    def index = createIndex(new CaseInsensitiveEnumeratorStringDescriptor())
+    def index = createIndex(getTestName(false), new CaseInsensitiveEnumeratorStringDescriptor())
     try {
       index.update("a.java", "x", null)
       assertDataEquals(index.getFilesByWord("x"), "a.java")
@@ -129,21 +137,12 @@ public class IndexTest extends JavaCodeInsightFixtureTestCase {
     }
   }
 
-  private static StringIndex createIndex(EnumeratorStringDescriptor keyDescriptor) {
+  private static StringIndex createIndex(String testName, EnumeratorStringDescriptor keyDescriptor) {
     final File storageFile = FileUtil.createTempFile("index_test", "storage");
     final File metaIndexFile = FileUtil.createTempFile("index_test_inputs", "storage");
+    PersistentHashMap<Integer, Collection<String>>  index = createMetaIndex(metaIndexFile);
     final MapIndexStorage indexStorage = new MapIndexStorage(storageFile, keyDescriptor, new EnumeratorStringDescriptor(), 16 * 1024);
-    return new StringIndex(indexStorage, new Factory<PersistentHashMap<Integer, Collection<String>>>() {
-      @Override
-      public PersistentHashMap<Integer, Collection<String>> create() {
-        try {
-          return createMetaIndex(metaIndexFile);
-        }
-        catch (IOException e) {
-          throw new RuntimeException(e);
-        }
-      }
-    });
+    return new StringIndex(testName, indexStorage, index);
   }
   
   private static PersistentHashMap<Integer, Collection<String>> createMetaIndex(File metaIndexFile) throws IOException {
@@ -183,11 +182,6 @@ public class IndexTest extends JavaCodeInsightFixtureTestCase {
     document.deleteString(0, document.getTextLength());
     assertNotNull(findClass("Foo"));
 
-    //noinspection GroovyUnusedAssignment
-    psiFile = null;
-    PlatformTestUtil.tryGcSoftlyReachableObjects();
-    assertNull(getPsiManager().getFileManager().getCachedPsiFile(vFile));
-
     PsiClass foo = findClass("Foo");
     assertNotNull(foo);
     assertTrue(foo.isValid());
@@ -209,12 +203,6 @@ public class IndexTest extends JavaCodeInsightFixtureTestCase {
     document.deleteString(0, document.getTextLength());
     PsiDocumentManager.getInstance(getProject()).commitAllDocuments();
     document.insertString(0, " ");
-    //assertNotNull(myJavaFacade.findClass("Foo", scope));
-
-    //noinspection GroovyUnusedAssignment
-    psiFile = null;
-    PlatformTestUtil.tryGcSoftlyReachableObjects();
-    assertNull(getPsiManager().getFileManager().getCachedPsiFile(vFile));
 
     PsiClass foo = findClass("Foo");
     assertNull(foo);
@@ -395,19 +383,30 @@ public class IndexTest extends JavaCodeInsightFixtureTestCase {
     FileDocumentManager.instance.getDocument(vFile).text = "import zoo.Zoo; class Foo1 {}"
     assert PsiDocumentManager.getInstance(project).uncommittedDocuments
 
+    FileDocumentManager.instance.saveAllDocuments()
+    PsiDocumentManager.getInstance(project).commitAllDocuments();
+
     //noinspection GroovyUnusedAssignment
     psiFile = null
     PlatformTestUtil.tryGcSoftlyReachableObjects()
-
     assert !((PsiManagerEx) psiManager).fileManager.getCachedPsiFile(vFile)
-
-    FileDocumentManager.instance.saveAllDocuments()
 
     VfsUtil.saveText(vFile, "class Foo3 {}")
 
     assert !PsiDocumentManager.getInstance(project).uncommittedDocuments
 
     assert JavaPsiFacade.getInstance(project).findClass("Foo3", scope)
+  }
+
+  public void "test rename file invalidates indices in right order"() throws IOException {
+    GlobalSearchScope scope = GlobalSearchScope.allScope(getProject());
+
+    for(def i = 0; i < 100; ++i) {
+      final VirtualFile file = myFixture.addFileToProject("foo/Foo" + i + ".java", "package foo; class Foo" + i + " {}").getVirtualFile();
+      assertNotNull(JavaPsiFacade.getInstance(getProject()).findClass("foo.Foo" + i, scope));
+      file.rename(this, "Bar" + i + ".java");
+      assertNotNull(JavaPsiFacade.getInstance(getProject()).findClass("foo.Foo" + i, scope));
+    }
   }
 
   public void "test do not collect stub tree while holding stub elements"() throws IOException {
@@ -424,5 +423,83 @@ public class IndexTest extends JavaCodeInsightFixtureTestCase {
     def stubTree = psiFile.getStubTree()
     assertNotNull(stubTree)
     assertEquals(stubTreeHash, stubTree.hashCode())
+  }
+
+  public void "test report using index from other index"() throws IOException {
+    def vfile = myFixture.addClass("class Foo { void bar() {} }").getContainingFile().getVirtualFile();
+    def scope = GlobalSearchScope.allScope(project)
+    def foundClass = [false];
+    def foundMethod = [false];
+
+    try {
+      StubIndex.instance.processElements(JavaStubIndexKeys.CLASS_SHORT_NAMES, "Foo", project, scope,
+                                         PsiClass.class,
+                                         new Processor<PsiClass>() {
+                                           @Override
+                                           boolean process(PsiClass aClass) {
+                                             foundClass[0] = true
+                                             StubIndex.instance.processElements(JavaStubIndexKeys.METHODS, "bar", project, scope,
+                                                                                PsiMethod.class,
+                                                                                new Processor<PsiMethod>() {
+                                                                                  @Override
+                                                                                  boolean process(PsiMethod method) {
+                                                                                    foundMethod[0] = true;
+                                                                                    return true;
+                                                                                  }
+                                                                                });
+                                             return true;
+                                           }
+                                         });
+    } catch (e) {
+      if (!(e instanceof RuntimeException)) throw e;
+    }
+
+    assertTrue(foundClass[0])
+    assertTrue(!foundMethod[0])
+
+    def foundId = [false];
+    def foundStub = [false];
+
+    try {
+      FileBasedIndex.instance.
+        processValues(IdIndex.NAME, new IdIndexEntry("Foo", true), null, new FileBasedIndex.ValueProcessor<Integer>() {
+          @Override
+          boolean process(VirtualFile file, Integer value) {
+            foundId[0] = true
+            FileBasedIndex.instance.processValues(
+              StubUpdatingIndex.INDEX_ID,
+              vfile.id,
+              null,
+              new FileBasedIndex.ValueProcessor<SerializedStubTree>() {
+                @Override
+                boolean process(VirtualFile file2, SerializedStubTree value2) {
+                  foundStub[0] = true
+                  return true
+                }
+              },
+              scope
+            );
+            return true
+          }
+        }, scope)
+    } catch (e) {
+      if (!(e instanceof RuntimeException)) throw e;
+    }
+
+    assertTrue(foundId[0])
+    assertTrue(!foundStub[0])
+  }
+
+  public void testNullProjectScope() throws Throwable {
+    final GlobalSearchScope allScope = new EverythingGlobalScope(null);
+    // create file to be indexed
+    final VirtualFile testFile = myFixture.addFileToProject("test.txt", "test").getVirtualFile();
+    assertNoException(new IllegalArgumentExceptionCase() {
+      @Override
+      public void tryClosure() throws IllegalArgumentException {
+        //force to index new file with null project scope
+        FileBasedIndex.getInstance().ensureUpToDate(IdIndex.NAME, null, allScope);
+      }
+    });
   }
 }

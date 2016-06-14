@@ -49,10 +49,14 @@ public class HgStatusCommand {
   private final boolean myIncludeUnknown;
   private final boolean myIncludeIgnored;
   private final boolean myIncludeCopySource;
+  private boolean myCleanStatus = false; // should be always false, except checking file existence in revision
 
   @Nullable private final HgRevisionNumber myBaseRevision;
   @Nullable private final HgRevisionNumber myTargetRevision;
 
+  public void cleanFilesOption(boolean clean) {
+    myCleanStatus = clean;
+  }
 
   public static class Builder {
     private boolean includeAdded;
@@ -127,11 +131,11 @@ public class HgStatusCommand {
     myTargetRevision = builder.targetRevision;
   }
 
-  public Set<HgChange> execute(VirtualFile repo) {
-    return execute(repo, null);
+  public Set<HgChange> executeInCurrentThread(VirtualFile repo) {
+    return executeInCurrentThread(repo, null);
   }
 
-  public Set<HgChange> execute(VirtualFile repo, @Nullable Collection<FilePath> paths) {
+  public Set<HgChange> executeInCurrentThread(VirtualFile repo, @Nullable Collection<FilePath> paths) {
     if (repo == null) {
       return Collections.emptySet();
     }
@@ -160,6 +164,9 @@ public class HgStatusCommand {
     }
     if (myIncludeCopySource) {
       options.add("--copies");
+    }
+    if (myCleanStatus) {
+      options.add("--clean");
     }
     if (myBaseRevision != null && (!myBaseRevision.getRevision().isEmpty() || !myBaseRevision.getChangeset().isEmpty())) {
       options.add("--rev");
@@ -233,7 +240,7 @@ public class HgStatusCommand {
   public Collection<VirtualFile> getHgUntrackedFiles(@NotNull VirtualFile repo, @NotNull List<VirtualFile> files) throws VcsException {
     Collection<VirtualFile> untrackedFiles = new HashSet<VirtualFile>();
     List<FilePath> filePaths = ObjectsConvertor.vf2fp(files);
-    Set<HgChange> change = execute(repo, filePaths);
+    Set<HgChange> change = executeInCurrentThread(repo, filePaths);
     for (HgChange hgChange : change) {
       untrackedFiles.add(hgChange.afterFile().toFilePath().getVirtualFile());
     }

@@ -36,6 +36,7 @@ public abstract class ApplicationInfo {
   public abstract String getThirdPartySoftwareURL();
   public abstract String getJetbrainsTvUrl();
   public abstract String getEvalLicenseUrl();
+  public abstract String getKeyConversionUrl();
 
   public abstract Rectangle getAboutLogoRect();
   public abstract boolean hasHelp();
@@ -54,5 +55,11 @@ public abstract class ApplicationInfo {
 
   public static boolean contextHelpAvailable() {
     return ApplicationManager.getApplication() != null && getInstance() != null && getInstance().hasContextHelp();
+  }
+
+  /** @deprecated use {@link #getBuild()} instead (to remove in IDEA 16) */
+  @SuppressWarnings("UnusedDeclaration")
+  public String getBuildNumber() {
+    return getBuild().asString();
   }
 }

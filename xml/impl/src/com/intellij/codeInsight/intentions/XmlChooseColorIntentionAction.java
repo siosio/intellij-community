@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -82,19 +82,16 @@ public class XmlChooseColorIntentionAction extends PsiElementBaseIntentionAction
       if (!FileModificationService.getInstance().preparePsiElementForWrite(element)) return;
       final String newText = "#" + ColorUtil.toHex(color);
       final PsiManager manager = literal.getManager();
-      final XmlAttribute newAttribute = XmlElementFactory.getInstance(manager.getProject()).createXmlAttribute("name", newText);
-      final Runnable replaceRunnable = new Runnable() {
-        @Override
-        public void run() {
-          final XmlAttributeValue valueElement = newAttribute.getValueElement();
-          assert valueElement != null;
-          literal.replace(valueElement);
-        }
+      final XmlAttribute newAttribute = XmlElementFactory.getInstance(manager.getProject()).createAttribute("name", newText, element);
+      final Runnable replaceRunnable = () -> {
+        final XmlAttributeValue valueElement = newAttribute.getValueElement();
+        assert valueElement != null;
+        literal.replace(valueElement);
       };
       if (startInWriteAction) {
         new WriteCommandAction(element.getProject(), caption) {
           @Override
-          protected void run(Result result) throws Throwable {
+          protected void run(@NotNull Result result) throws Throwable {
             replaceRunnable.run();
           }
         }.execute();

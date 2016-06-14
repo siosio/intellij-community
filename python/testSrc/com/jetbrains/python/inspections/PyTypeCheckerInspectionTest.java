@@ -151,6 +151,11 @@ public class PyTypeCheckerInspectionTest extends PyTestCase {
     doTest();
   }
 
+  // PY-18096
+  public void testNamedTupleBaseClass() {
+    doTest();
+  }
+
   // PY-6803
   public void testPropertyAndFactoryFunction() {
     doTest();
@@ -269,6 +274,25 @@ public class PyTypeCheckerInspectionTest extends PyTestCase {
   }
 
   public void testComparisonOperatorsForNumericTypes() {
+    doTest();
+  }
+
+  public void testClassNew() {
+    doTest();
+  }
+
+  // PY-18275
+  public void testStrFormat() {
+    doTest();
+  }
+
+  // PY-9924
+  public void testTupleGetItemWithSlice() {
+    doTest();
+  }
+
+  // PY-9924
+  public void testListGetItemWithSlice() {
     doTest();
   }
 }

@@ -48,6 +48,10 @@ import java.util.*;
 import java.util.List;
 
 public class MavenArtifactSearchPanel extends JPanel {
+
+  public static final boolean USE_LUCENE_INDEXES = Boolean.getBoolean("idea.maven.artifact.search.use.lucene");
+
+  private static final int MAX_RESULT = 1000;
   private final Project myProject;
   private final MavenArtifactSearchDialog myDialog;
   private final boolean myClassMode;
@@ -81,7 +85,7 @@ public class MavenArtifactSearchPanel extends JPanel {
 
   private void initComponents(String initialText) {
     myResultList = new Tree();
-    myResultList.getExpandableItemsHandler().setEnabled(false);
+    myResultList.setExpandableItemsEnabled(false);
     myResultList.getEmptyText().setText("Loading...");
     myResultList.setRootVisible(false);
     myResultList.setShowsRootHandles(true);
@@ -176,17 +180,14 @@ public class MavenArtifactSearchPanel extends JPanel {
     final String text = mySearchField.getText();
 
     myAlarm.cancelAllRequests();
-    myAlarm.addRequest(new Runnable() {
-        @Override
-        public void run() {
-          try {
-            doSearch(text);
-          }
-          catch (Throwable e) {
-            MavenLog.LOG.warn(e);
-          }
-        }
-      }, 500);
+    myAlarm.addRequest(() -> {
+      try {
+        doSearch(text);
+      }
+      catch (Throwable e) {
+        MavenLog.LOG.warn(e);
+      }
+    }, 500);
   }
 
   private void resortUsingDependencyVersionMap(List<MavenArtifactSearchResult> result) {
@@ -196,39 +197,33 @@ public class MavenArtifactSearchPanel extends JPanel {
       MavenArtifactInfo artifactInfo = searchResult.versions.get(0);
       final String managedVersion = myManagedDependenciesMap.get(Pair.create(artifactInfo.getGroupId(), artifactInfo.getArtifactId()));
       if (managedVersion != null) {
-        Collections.sort(searchResult.versions, new Comparator<MavenArtifactInfo>() {
-          @Override
-          public int compare(MavenArtifactInfo o1, MavenArtifactInfo o2) {
-            String v1 = o1.getVersion();
-            String v2 = o2.getVersion();
-            if (Comparing.equal(v1, v2)) return 0;
-            if (managedVersion.equals(v1)) return -1;
-            if (managedVersion.equals(v2)) return 1;
-            return 0;
-          }
+        Collections.sort(searchResult.versions, (o1, o2) -> {
+          String v1 = o1.getVersion();
+          String v2 = o2.getVersion();
+          if (Comparing.equal(v1, v2)) return 0;
+          if (managedVersion.equals(v1)) return -1;
+          if (managedVersion.equals(v2)) return 1;
+          return 0;
         });
       }
     }
   }
 
   private void doSearch(String searchText) {
-    MavenSearcher searcher = myClassMode ? new MavenClassSearcher() : new MavenArtifactSearcher();
-    List<MavenArtifactSearchResult> result = searcher.search(myProject, searchText, 200);
+    MavenSearcher searcher = myClassMode ? new MavenClassSearcher() : new MavenArtifactSearcher(USE_LUCENE_INDEXES);
+    List<MavenArtifactSearchResult> result = searcher.search(myProject, searchText, MAX_RESULT);
 
     resortUsingDependencyVersionMap(result);
 
     final TreeModel model = new MyTreeModel(result);
 
-    SwingUtilities.invokeLater(new Runnable() {
-      @Override
-      public void run() {
-        if (!myDialog.isVisible()) return;
+    SwingUtilities.invokeLater(() -> {
+      if (!myDialog.isVisible()) return;
 
-        myResultList.getEmptyText().setText("No results");
-        myResultList.setModel(model);
-        myResultList.setSelectionRow(0);
-        myResultList.setPaintBusy(false);
-      }
+      myResultList.getEmptyText().setText("No results");
+      myResultList.setModel(model);
+      myResultList.setSelectionRow(0);
+      myResultList.setPaintBusy(false);
     });
   }
 

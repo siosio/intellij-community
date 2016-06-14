@@ -41,6 +41,9 @@ import java.util.*;
  * Time: 7:07:02 PM
  */
 public class PyRefactoringUtil {
+  private PyRefactoringUtil() {
+  }
+
   @NotNull
   public static List<PsiElement> getOccurrences(@NotNull final PsiElement pattern, @Nullable final PsiElement context) {
     if (context == null) {
@@ -279,9 +282,6 @@ public class PyRefactoringUtil {
     return PsiUtilCore.toPsiElementArray(array);
   }
 
-  private PyRefactoringUtil() {
-  }
-
   public static boolean areConflictingMethods(PyFunction pyFunction, PyFunction pyFunction1) {
     final PyParameter[] firstParams = pyFunction.getParameterList().getParameters();
     final PyParameter[] secondParams = pyFunction1.getParameterList().getParameters();
@@ -300,14 +300,11 @@ public class PyRefactoringUtil {
     Collections.addAll(elementsToProcess, handler.getPrimaryElements());
     Collections.addAll(elementsToProcess, handler.getSecondaryElements());
     for (PsiElement e : elementsToProcess) {
-      handler.processElementUsages(e, new Processor<UsageInfo>() {
-        @Override
-        public boolean process(UsageInfo usageInfo) {
-          if (!usageInfo.isNonCodeUsage) {
-            usages.add(usageInfo);
-          }
-          return true;
+      handler.processElementUsages(e, usageInfo -> {
+        if (!usageInfo.isNonCodeUsage) {
+          usages.add(usageInfo);
         }
+        return true;
       }, FindUsagesHandler.createFindUsagesOptions(element.getProject(), null));
     }
     return usages;

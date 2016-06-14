@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,6 +49,9 @@ import java.util.List;
 public class JVMNameUtil {
   private static final Logger LOG = Logger.getInstance("#com.intellij.debugger.engine.JVMNameUtil");
 
+  public static final String CONSTRUCTOR_NAME = "<init>";
+
+  @Nullable
   @SuppressWarnings({"HardCodedStringLiteral"})
   public static String getPrimitiveSignature(String typeName) {
     if(PsiType.BOOLEAN.getCanonicalText().equals(typeName)) {
@@ -123,7 +126,7 @@ public class JVMNameUtil {
   }
 
   private static class JVMNameBuffer {
-    List<JVMName> myList = new ArrayList<JVMName>();
+    private final List<JVMName> myList = new ArrayList<>();
 
     public void append(@NotNull JVMName evaluator){
       myList.add(evaluator);
@@ -138,7 +141,7 @@ public class JVMNameUtil {
     }
 
     public JVMName toName() {
-      final List<JVMName> optimised = new ArrayList<JVMName>();
+      final List<JVMName> optimised = new ArrayList<>();
       for (JVMName evaluator : myList) {
         if (evaluator instanceof JVMRawText && !optimised.isEmpty() && optimised.get(optimised.size() - 1) instanceof JVMRawText) {
           JVMRawText nameEvaluator = (JVMRawText)optimised.get(optimised.size() - 1);
@@ -201,6 +204,11 @@ public class JVMNameUtil {
     public void setName(String name) {
       myText = name;
     }
+
+    @Override
+    public String toString() {
+      return myText;
+    }
   }
 
   private static class JVMClassAt implements JVMName {
@@ -241,6 +249,7 @@ public class JVMNameUtil {
     }
   }
 
+  @NotNull
   public static JVMName getJVMRawText(String qualifiedName) {
     return new JVMRawText(qualifiedName);
   }
@@ -263,7 +272,8 @@ public class JVMNameUtil {
       return getJVMQualifiedName(psiClass);
     }
   }
-                               
+
+  @NotNull
   public static JVMName getJVMQualifiedName(@NotNull PsiClass psiClass) {
     final String name = getNonAnonymousClassName(psiClass);
     if (name != null) {
@@ -288,7 +298,7 @@ public class JVMNameUtil {
   }
 
   @Nullable
-  public static String getNonAnonymousClassName(PsiClass aClass) {
+  public static String getNonAnonymousClassName(@NotNull PsiClass aClass) {
     if (PsiUtil.isLocalOrAnonymousClass(aClass)) {
       return null;
     }
@@ -307,19 +317,27 @@ public class JVMNameUtil {
     return DebuggerManager.getInstance(aClass.getProject()).getVMClassQualifiedName(aClass);
   }
 
+  @NotNull
   public static JVMName getJVMConstructorSignature(@Nullable PsiMethod method, @Nullable PsiClass declaringClass) {
     return getJVMSignature(method, true, declaringClass);
   }
 
+  @NotNull
   public static JVMName getJVMSignature(@NotNull PsiMethod method) {
     return getJVMSignature(method, method.isConstructor(), method.getContainingClass());
   }
 
+  @NotNull
+  public static String getJVMMethodName(@NotNull PsiMethod method) {
+    return method.isConstructor() ? CONSTRUCTOR_NAME : method.getName();
+  }
+
+  @NotNull
   @SuppressWarnings({"HardCodedStringLiteral"})
   private static JVMName getJVMSignature(@Nullable PsiMethod method, boolean constructor, @Nullable PsiClass declaringClass) {
     JVMNameBuffer signature = new JVMNameBuffer();
     signature.append("(");
-    
+
     if (constructor) {
       if (declaringClass != null) {
         final PsiClass outerClass = declaringClass.getContainingClass();
@@ -352,7 +370,7 @@ public class JVMNameUtil {
       return null;
     }
     final PsiElement element = position.getElementAt();
-    return (element != null) ? PsiTreeUtil.getParentOfType(element, PsiClass.class, false) : null;
+    return element != null && element.isValid() ? PsiTreeUtil.getParentOfType(element, PsiClass.class, false) : null;
   }
 
   @Nullable
@@ -405,7 +423,7 @@ public class JVMNameUtil {
       return calcClassDisplayName(parent) + "$" + name;
     }
     
-    final Ref<Integer> classIndex = new Ref<Integer>(0);
+    final Ref<Integer> classIndex = new Ref<>(0);
     try {
         parent.accept(new JavaRecursiveElementVisitor() {
           public void visitAnonymousClass(PsiAnonymousClass cls) {
@@ -466,20 +484,21 @@ public class JVMNameUtil {
   }
 
   public static PsiClass getTopLevelParentClass(PsiClass psiClass) {
-    PsiClass enclosing = PsiTreeUtil.getParentOfType(psiClass, PsiClass.class, true);
-    while (enclosing != null) {
-      psiClass = enclosing;
-      enclosing = PsiTreeUtil.getParentOfType(enclosing, PsiClass.class, true); 
-    }
-    return psiClass;
+    return PsiTreeUtil.getTopmostParentOfType(psiClass, PsiClass.class);
   }
 
   @Nullable
   public static String getClassVMName(@Nullable PsiClass containingClass) {
-    if (containingClass == null) return null;
+    // no support for local classes for now
+    if (containingClass == null || PsiUtil.isLocalClass(containingClass)) return null;
     if (containingClass instanceof PsiAnonymousClass) {
-      return getClassVMName(PsiTreeUtil.getParentOfType(containingClass, PsiClass.class)) +
-             JavaAnonymousClassesHelper.getName((PsiAnonymousClass)containingClass);
+      String parentName = getClassVMName(PsiTreeUtil.getParentOfType(containingClass, PsiClass.class));
+      if (parentName == null) {
+        return null;
+      }
+      else {
+        return parentName + JavaAnonymousClassesHelper.getName((PsiAnonymousClass)containingClass);
+      }
     }
     return ClassUtil.getJVMClassName(containingClass);
   }

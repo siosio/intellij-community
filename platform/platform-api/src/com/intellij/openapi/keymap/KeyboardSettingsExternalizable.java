@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,9 +16,13 @@
 package com.intellij.openapi.keymap;
 
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.components.*;
+import com.intellij.openapi.components.PersistentStateComponent;
+import com.intellij.openapi.components.ServiceManager;
+import com.intellij.openapi.components.State;
+import com.intellij.openapi.components.Storage;
 import com.intellij.openapi.util.SystemInfo;
-import com.sun.istack.internal.NotNull;
+import com.intellij.openapi.util.registry.Registry;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.awt.*;
@@ -29,15 +33,13 @@ import java.util.Locale;
  * @author Denis Fokin
  */
 
-@State(
-  name = "KeyboardSettings",
-  storages = {@Storage(file = StoragePathMacros.APP_CONFIG + "/keyboard.xml")}
-)
+@State(name = "KeyboardSettings", storages = @Storage("keyboard.xml"))
 public class KeyboardSettingsExternalizable implements PersistentStateComponent<KeyboardSettingsExternalizable.OptionSet> {
 
   private static final String [] supportedNonEnglishLanguages = {"de", "fr", "it", "uk"};
 
   public static boolean isSupportedKeyboardLayout(@NotNull Component component) {
+    if (Registry.is("ide.keyboard.dvorak")) return true;
     if (SystemInfo.isMac) return false;
     String keyboardLayoutLanguage = getLanguageForComponent(component);
     for (String language : supportedNonEnglishLanguages) {

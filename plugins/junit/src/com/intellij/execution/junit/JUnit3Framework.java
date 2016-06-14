@@ -15,9 +15,10 @@
  */
 package com.intellij.execution.junit;
 
+import com.intellij.execution.junit2.info.MethodLocation;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.fileTemplates.FileTemplateDescriptor;
-import com.intellij.openapi.projectRoots.ex.JavaSdkUtil;
+import com.intellij.openapi.roots.ExternalLibraryDescriptor;
 import com.intellij.psi.*;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.testIntegration.JavaTestFramework;
@@ -48,6 +49,11 @@ public class JUnit3Framework extends JavaTestFramework {
     return true;
   }
 
+  @Override
+  public boolean isTestMethod(PsiMethod method, PsiClass myClass) {
+    return JUnitUtil.isTestMethod(MethodLocation.elementInClass(method, myClass));
+  }
+
   @NotNull
   @Override
   public Icon getIcon() {
@@ -58,9 +64,10 @@ public class JUnit3Framework extends JavaTestFramework {
     return "junit.framework.TestCase";
   }
 
-  @NotNull
-  public String getLibraryPath() {
-    return JavaSdkUtil.getJunit3JarPath();
+  @Nullable
+  @Override
+  public ExternalLibraryDescriptor getFrameworkLibraryDescriptor() {
+    return JUnitExternalLibraryDescriptor.JUNIT3;
   }
 
   @Nullable

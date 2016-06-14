@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,17 +17,20 @@ package com.intellij.ide.util.projectWizard;
 
 import com.intellij.ide.IdeBundle;
 import com.intellij.ide.highlighter.ProjectFileType;
+import com.intellij.ide.impl.ProjectUtil;
 import com.intellij.ide.util.BrowseFilesListener;
 import com.intellij.openapi.application.ApplicationInfo;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.DocumentAdapter;
 import com.intellij.ui.FieldPanel;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 
@@ -58,7 +61,6 @@ public class NamePathComponent extends JPanel{
   private FieldPanel myPathPanel;
   private JLabel myNameLabel;
   private JLabel myPathLabel;
-  private boolean myForceSync;
   private boolean myShouldBeAbsolute;
 
   public NamePathComponent(String nameLabelText, String pathLabelText, char nameMnemonic, char locationMnemonic, final String pathChooserTitle, final String pathChooserDescription) {
@@ -92,11 +94,11 @@ public class NamePathComponent extends JPanel{
     myNameLabel = new JLabel(nameLabelText);
     if (bold) myNameLabel.setFont(UIUtil.getLabelFont().deriveFont(Font.BOLD));
     myNameLabel.setLabelFor(myTfName);
-    Insets insets = new Insets(0, 0, 5, 4);
+    Insets insets = JBUI.insets(0, 0, 5, 4);
     this.add(myNameLabel, new GridBagConstraints(0, GridBagConstraints.RELATIVE, 1, 1, 0.0, 0.0, GridBagConstraints.WEST, GridBagConstraints.NONE,
                                                  insets, 0, 0));
 
-    insets = new Insets(0, 0, 5, 0);
+    insets = JBUI.insets(0, 0, 5, 0);
     this.add(myTfName, new GridBagConstraints(1, GridBagConstraints.RELATIVE, 1, 1, 1.0, 0.0, GridBagConstraints.NORTHWEST, GridBagConstraints.HORIZONTAL,
                                               insets, 0, 0));
     // todo: review texts
@@ -112,10 +114,10 @@ public class NamePathComponent extends JPanel{
     myPathLabel = new JLabel(pathLabelText);
     myPathLabel.setLabelFor(myTfPath);
     if (bold) myPathLabel.setFont(UIUtil.getLabelFont().deriveFont(Font.BOLD));
-    insets = new Insets(0, 0, 5, 4);
+    insets = JBUI.insets(0, 0, 5, 4);
     this.add(myPathLabel, new GridBagConstraints(0, GridBagConstraints.RELATIVE, 1, 1, 0.0, 0.0, GridBagConstraints.WEST, GridBagConstraints.NONE,
                                                    insets, 0, 0));
-    insets = new Insets(0, 0, 5, 0);
+    insets = JBUI.insets(0, 0, 5, 0);
     this.add(myPathPanel, new GridBagConstraints(1, GridBagConstraints.RELATIVE, 1, 1, 1.0, 0.0, GridBagConstraints.NORTHWEST, GridBagConstraints.HORIZONTAL,
                                                  insets, 0, 0));
   }
@@ -161,7 +163,12 @@ public class NamePathComponent extends JPanel{
 
     File file = new File(projectDirectory);
     if (file.exists() && !file.canWrite()) {
-      throw new ConfigurationException(String.format("Directory '%s' is not writable!\nPlease choose another project location.", projectDirectory));
+      throw new ConfigurationException(String.format("Directory '%s' is not seem to be writable. Please consider another location.", projectDirectory));
+    }
+    for (Project p : ProjectManager.getInstance().getOpenProjects()) {
+      if (ProjectUtil.isSameProject(projectDirectory, p)) {
+        throw new ConfigurationException(String.format("Directory '%s' is already taken by the project '%s'. Please consider another location.", projectDirectory, p.getName()));
+      }
     }
 
     boolean shouldContinue = true;
@@ -273,11 +280,6 @@ public class NamePathComponent extends JPanel{
     myIsNamePathSyncEnabled = isNamePathSyncEnabled;
   }
 
-  public void syncNameToPath(boolean b) {
-    myForceSync = b;
-    if (b) ((PathFieldDocument)myTfPath.getDocument()).syncPathAndName();
-  }
-
   public void addChangeListener(final Runnable callback) {
     DocumentAdapter adapter = new DocumentAdapter() {
       @Override
@@ -315,7 +317,7 @@ public class NamePathComponent extends JPanel{
     }
 
     private void syncNameAndPath() {
-      if (isNamePathSyncEnabled() && (myForceSync || !myIsPathChangedByUser)) {
+      if (isNamePathSyncEnabled() && !myIsPathChangedByUser) {
         try {
           setPathNameSyncEnabled(false);
           final String name = getText(0, getLength());
@@ -346,7 +348,7 @@ public class NamePathComponent extends JPanel{
     }
 
     private void syncPathAndName() {
-      if (isPathNameSyncEnabled() && (myForceSync || !myIsNameChangedByUser)) {
+      if (isPathNameSyncEnabled() && !myIsNameChangedByUser) {
         try {
           setNamePathSyncEnabled(false);
           final String path = getText(0, getLength());

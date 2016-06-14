@@ -1,6 +1,22 @@
+/*
+ * Copyright 2000-2016 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.intellij.codeInsight.psi;
 
 import com.intellij.openapi.application.ex.PathManagerEx;
+import com.intellij.openapi.fileEditor.impl.LoadTextUtil;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
@@ -52,7 +68,7 @@ public class ControlFlowTest extends LightCodeInsightTestCase {
 
     final String expectedFullPath = StringUtil.trimEnd(file.getPath(),".java") + ".txt";
     VirtualFile expectedFile = LocalFileSystem.getInstance().findFileByPath(expectedFullPath);
-    String expected = new String(expectedFile.contentsToByteArray()).trim();
+    String expected = LoadTextUtil.loadText(expectedFile).toString().trim();
     expected = expected.replaceAll("\r","");
     assertEquals("Text mismatch (in file "+expectedFullPath+"):\n",expected, result);
   }
@@ -60,12 +76,7 @@ public class ControlFlowTest extends LightCodeInsightTestCase {
   private static void doAllTests() throws Exception {
     final String testDirPath = PathManagerEx.getTestDataPath().replace(File.separatorChar, '/') + BASE_PATH;
     File testDir = new File(testDirPath);
-    final File[] files = testDir.listFiles(new FilenameFilter() {
-      @Override
-      public boolean accept(File dir, String name) {
-        return name.endsWith(".java");
-      }
-    });
+    final File[] files = testDir.listFiles((dir, name) -> name.endsWith(".java"));
     for (int i = 0; i < files.length; i++) {
       File file = files[i];
       doTestFor(file);

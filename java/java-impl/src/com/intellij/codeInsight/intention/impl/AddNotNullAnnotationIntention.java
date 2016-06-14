@@ -23,14 +23,16 @@
 package com.intellij.codeInsight.intention.impl;
 
 import com.intellij.codeInsight.NullableNotNullManager;
+import com.intellij.codeInsight.intention.LowPriorityAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Pair;
+import com.intellij.psi.PsiModifierListOwner;
 import com.intellij.util.ArrayUtil;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
 
-public class AddNotNullAnnotationIntention extends AddAnnotationIntention {
+public class AddNotNullAnnotationIntention extends AddAnnotationIntention implements LowPriorityAction {
   @NotNull
   @Override
   public Pair<String, String[]> getAnnotations(@NotNull Project project) {
@@ -41,5 +43,10 @@ public class AddNotNullAnnotationIntention extends AddAnnotationIntention {
   private static String[] getNullables(@NotNull Project project) {
     final List<String> nullables = NullableNotNullManager.getInstance(project).getNullables();
     return ArrayUtil.toStringArray(nullables);
+  }
+
+  @Override
+  protected boolean canAnnotate(@NotNull PsiModifierListOwner owner) {
+    return AddNullableNotNullAnnotationFix.canAnnotate(owner);
   }
 }

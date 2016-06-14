@@ -1,3 +1,18 @@
+/*
+ * Copyright 2000-2016 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.jetbrains.java.debugger;
 
 import com.intellij.debugger.engine.evaluation.CodeFragmentFactory;
@@ -9,6 +24,7 @@ import com.intellij.lang.Language;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.util.PsiTreeUtil;
@@ -20,12 +36,11 @@ import com.intellij.xdebugger.impl.breakpoints.XExpressionImpl;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.stream.Collectors;
 
 public class JavaDebuggerEditorsProvider extends XDebuggerEditorsProviderBase {
-  @NotNull
   @Override
   public FileType getFileType() {
     return JavaFileType.INSTANCE;
@@ -44,11 +59,9 @@ public class JavaDebuggerEditorsProvider extends XDebuggerEditorsProviderBase {
   public Collection<Language> getSupportedLanguages(@NotNull Project project, @Nullable XSourcePosition sourcePosition) {
     if (sourcePosition != null) {
       PsiElement context = getContextElement(sourcePosition.getFile(), sourcePosition.getOffset(), project);
-      Collection<Language> res = new ArrayList<Language>();
-      for (CodeFragmentFactory factory : DebuggerUtilsEx.getCodeFragmentFactories(context)) {
-        res.add(factory.getFileType().getLanguage());
-      }
-      return res;
+      return DebuggerUtilsEx.getCodeFragmentFactories(context).stream()
+        .map(factory -> factory.getFileType().getLanguage())
+        .collect(Collectors.toList());
     }
     return Collections.emptyList();
   }
@@ -56,10 +69,9 @@ public class JavaDebuggerEditorsProvider extends XDebuggerEditorsProviderBase {
   @NotNull
   @Override
   public XExpression createExpression(@NotNull Project project, @NotNull Document document, @Nullable Language language, @NotNull EvaluationMode mode) {
-    PsiDocumentManager.getInstance(project).commitDocument(document);
     PsiFile psiFile = PsiDocumentManager.getInstance(project).getPsiFile(document);
     if (psiFile != null) {
-      return new XExpressionImpl(psiFile.getText(), language, ((JavaCodeFragment)psiFile).importsToString(), mode);
+      return new XExpressionImpl(document.getText(), language, StringUtil.nullize(((JavaCodeFragment)psiFile).importsToString()), mode);
     }
     return super.createExpression(project, document, language, mode);
   }

@@ -118,9 +118,7 @@ public class MultiModuleEditingTest extends ModuleTestCase {
       final ContentEntry contentEntryB = rootModelB.addContentEntry(getVirtualFileInTestData("b"));
       contentEntryB.addSourceFolder(getVirtualFileInTestData("b/src"), false);
 
-      ApplicationManager.getApplication().runWriteAction(() -> {
-        ModifiableModelCommitter.multiCommit(new ModifiableRootModel[]{rootModelB, rootModelA}, moduleModel);
-      });
+      ApplicationManager.getApplication().runWriteAction(() -> ModifiableModelCommitter.multiCommit(new ModifiableRootModel[]{rootModelB, rootModelA}, moduleModel));
     }
 
     final JavaPsiFacade psiManager = getJavaFacade();
@@ -152,9 +150,7 @@ public class MultiModuleEditingTest extends ModuleTestCase {
       final ModifiableRootModel rootModelB = ModuleRootManager.getInstance(moduleB).getModifiableModel();
       rootModelB.addModuleOrderEntry(moduleC);
       moduleModel.disposeModule(moduleC);
-      ApplicationManager.getApplication().runWriteAction(() -> {
-        ModifiableModelCommitter.multiCommit(new ModifiableRootModel[]{rootModelB}, moduleModel);
-      });
+      ApplicationManager.getApplication().runWriteAction(() -> ModifiableModelCommitter.multiCommit(new ModifiableRootModel[]{rootModelB}, moduleModel));
     }
 
     final ModuleRootManager rootManagerB = ModuleRootManager.getInstance(moduleB);
@@ -166,11 +162,17 @@ public class MultiModuleEditingTest extends ModuleTestCase {
     {
       final ModifiableModuleModel moduleModel = moduleManager.getModifiableModel();
       moduleModel.renameModule(moduleA, "c");
-      moduleModel.commit();
+      assertSame(moduleA, moduleModel.findModuleByName("a"));
+      assertSame(moduleA, moduleManager.findModuleByName("a"));
+      assertEquals("c", moduleModel.getNewName(moduleA));
+      assertSame(moduleA, moduleModel.getModuleToBeRenamed("c"));
+      ApplicationManager.getApplication().runWriteAction(() -> moduleModel.commit());
     }
 
     assertEquals(1, rootManagerB.getDependencies().length);
     assertEquals(moduleA, rootManagerB.getDependencies()[0]);
+    assertSame(moduleA, moduleManager.findModuleByName("c"));
+    assertNull(moduleManager.findModuleByName("a"));
     assertEquals("c", moduleA.getName());
     moduleManager.disposeModule(moduleA);
     moduleManager.disposeModule(moduleB);
@@ -181,7 +183,7 @@ public class MultiModuleEditingTest extends ModuleTestCase {
       final String path =
         TEST_PATH + File.separatorChar + getTestName(true) + File.separatorChar + relativeVfsPath.replace('/', File.separatorChar);
       final VirtualFile result = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(new File(path));
-      assertNotNull("File " + path + " doen\'t exist", result);
+      assertNotNull("File " + path + " doesn't exist", result);
       return result;
     });
   }

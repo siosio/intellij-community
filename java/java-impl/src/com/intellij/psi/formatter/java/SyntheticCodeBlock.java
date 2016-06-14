@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,7 +42,7 @@ public class SyntheticCodeBlock implements Block, JavaBlock{
   private final TextRange myTextRange;
 
   private ChildAttributes myChildAttributes;
-  private boolean myIsIncomplete = false;
+  private boolean myIsIncomplete;
 
   public SyntheticCodeBlock(List<Block> subBlocks,
                             Alignment alignment,
@@ -140,7 +140,12 @@ public class SyntheticCodeBlock implements Block, JavaBlock{
     if (myChildAttributes != null) {
       return myChildAttributes;
     } else {
-      return new ChildAttributes(getIndent(), null);
+      Alignment alignment = null;
+      if (mySubBlocks.size() > newChildIndex) {
+        Block block = mySubBlocks.get(newChildIndex);
+        alignment = block.getAlignment();
+      }
+      return new ChildAttributes(getIndent(), alignment);
     }
   }
 

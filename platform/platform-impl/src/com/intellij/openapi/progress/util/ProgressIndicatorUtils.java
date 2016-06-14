@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,12 +20,14 @@ import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationAdapter;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ex.ApplicationEx;
+import com.intellij.openapi.application.ex.ApplicationManagerEx;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.util.Ref;
 import com.intellij.util.ui.EdtInvocationManager;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.ide.PooledThreadExecutor;
 
 import java.util.concurrent.Executor;
@@ -33,9 +35,9 @@ import java.util.concurrent.Executor;
 /**
  * Methods in this class are used to equip long background processes which take read actions with a special listener
  * that fires when a write action is about to begin, and cancels corresponding progress indicators to avoid blocking the UI.
- * These processes should be ready to get {@link com.intellij.openapi.progress.ProcessCanceledException} at any moment.
+ * These processes should be ready to get {@link ProcessCanceledException} at any moment.
  * Processes may want to react on cancellation event by restarting the activity, see
- * {@link com.intellij.openapi.progress.util.ReadTask#onCanceled(com.intellij.openapi.progress.ProgressIndicator)} for that.
+ * {@link ReadTask#onCanceled(ProgressIndicator)} for that.
  *
  * @author gregsh
  */
@@ -47,7 +49,7 @@ public class ProgressIndicatorUtils {
   public static ProgressIndicator forceWriteActionPriority(@NotNull final ProgressIndicator progress, @NotNull final Disposable builder) {
     ApplicationManager.getApplication().addApplicationListener(new ApplicationAdapter() {
         @Override
-        public void beforeWriteActionStart(Object action) {
+        public void beforeWriteActionStart(@NotNull Object action) {
           if (progress.isRunning()) {
             progress.cancel();
           }
@@ -64,8 +66,39 @@ public class ProgressIndicatorUtils {
     scheduleWithWriteActionPriority(progressIndicator, PooledThreadExecutor.INSTANCE, readTask);
   }
 
-  public static boolean runWithWriteActionPriority(@NotNull final Runnable action) {
-    return runWithWriteActionPriority(action, new ProgressIndicatorBase());
+  public static void scheduleWithWriteActionPriority(@NotNull Executor executor, @NotNull ReadTask task) {
+    scheduleWithWriteActionPriority(new ProgressIndicatorBase(), executor, task);
+  }
+
+  /**
+   * Same as {@link #runInReadActionWithWriteActionPriority(Runnable)}, optionally allowing to pass a {@link ProgressIndicatorUtils}
+   * instance, which can be used to cancel action externally.
+   */
+  public static boolean runInReadActionWithWriteActionPriority(@NotNull final Runnable action, 
+                                                               @Nullable ProgressIndicator progressIndicator) {
+    final Ref<Boolean> result = new Ref<>(Boolean.FALSE);
+    runWithWriteActionPriority(() -> result.set(ApplicationManagerEx.getApplicationEx().tryRunReadAction(action)),
+                               progressIndicator == null ? new ProgressIndicatorBase() : progressIndicator);
+    return result.get();
+  }
+
+  /**
+   * This method attempts to run provided action synchronously in a read action, so that, if possible, it wouldn't impact any pending, 
+   * executing or future write actions (for this to work effectively the action should invoke {@link ProgressManager#checkCanceled()} or 
+   * {@link ProgressIndicator#checkCanceled()} often enough). 
+   * It returns <code>true</code> if action was executed successfully. It returns <code>false</code> if the action was not
+   * executed successfully, i.e. if:
+   * <ul>
+   * <li>write action was in progress when the method was called</li>
+   * <li>write action was pending when the method was called</li>
+   * <li>action started to execute, but was aborted using {@link ProcessCanceledException} when some other thread initiated 
+   * write action</li>
+   * </ul>
+   * If caller needs to retry the invocation of this method in a loop, it should consider pausing between attempts, to avoid potential
+   * 100% CPU usage.
+   */
+  public static boolean runInReadActionWithWriteActionPriority(@NotNull final Runnable action) {
+    return runInReadActionWithWriteActionPriority(action, null);
   }
 
   public static boolean runWithWriteActionPriority(@NotNull final Runnable action,
@@ -81,34 +114,28 @@ public class ProgressIndicatorUtils {
 
     final ApplicationAdapter listener = new ApplicationAdapter() {
       @Override
-      public void beforeWriteActionStart(Object action) {
+      public void beforeWriteActionStart(@NotNull Object action) {
         if (!progressIndicator.isCanceled()) progressIndicator.cancel();
       }
     };
 
-    boolean succeededWithAddingListener = application.tryRunReadAction(new Runnable() {
-      @Override
-      public void run() {
-        // Even if writeLock.lock() acquisition is in progress at this point then runProcess will block wanting read action which is
-        // also ok as last resort.
-        application.addApplicationListener(listener);
-      }
+    boolean succeededWithAddingListener = application.tryRunReadAction(() -> {
+      // Even if writeLock.lock() acquisition is in progress at this point then runProcess will block wanting read action which is
+      // also ok as last resort.
+      application.addApplicationListener(listener);
     });
     if (!succeededWithAddingListener) { // second catch: writeLock.lock() acquisition is in progress or already acquired
       if (!progressIndicator.isCanceled()) progressIndicator.cancel();
       return false;
     }
-    final Ref<Boolean> wasCancelled = new Ref<Boolean>();
+    final Ref<Boolean> wasCancelled = new Ref<>();
     try {
-      ProgressManager.getInstance().runProcess(new Runnable() {
-        @Override
-        public void run() {
-          try {
-            action.run();
-          }
-          catch (ProcessCanceledException ignore) {
-            wasCancelled.set(Boolean.TRUE);
-          }
+      ProgressManager.getInstance().runProcess(() -> {
+        try {
+          action.run();
+        }
+        catch (ProcessCanceledException ignore) {
+          wasCancelled.set(Boolean.TRUE);
         }
       }, progressIndicator);
     }
@@ -131,60 +158,62 @@ public class ProgressIndicatorUtils {
     // to tolerate any immediate modality changes (e.g. https://youtrack.jetbrains.com/issue/IDEA-135180)
 
     //noinspection SSBasedInspection
-    EdtInvocationManager.getInstance().invokeLater(new Runnable() {
-      @Override
-      public void run() {
-        if (application.isDisposed()) return;
-        application.assertIsDispatchThread();
-        final ApplicationAdapter listener = new ApplicationAdapter() {
-          @Override
-          public void beforeWriteActionStart(Object action) {
-            if (!progressIndicator.isCanceled()) {
-              progressIndicator.cancel();
-              readTask.onCanceled(progressIndicator);
-            }
+    EdtInvocationManager.getInstance().invokeLater(() -> {
+      if (application.isDisposed()) return;
+      final ApplicationAdapter listener = new ApplicationAdapter() {
+        @Override
+        public void beforeWriteActionStart(@NotNull Object action) {
+          if (!progressIndicator.isCanceled()) {
+            progressIndicator.cancel();
+            readTask.onCanceled(progressIndicator);
           }
-        };
-        application.addApplicationListener(listener);
-        try {
-          executor.execute(new Runnable() {
-            @Override
-            public void run() {
-              try {
-                runUnderProgress(progressIndicator, readTask);
+        }
+      };
+      application.addApplicationListener(listener);
+      try {
+        executor.execute(new Runnable() {
+          @Override
+          public void run() {
+            boolean continued = false;
+            try {
+              final ReadTask.Continuation continuation = runUnderProgress(progressIndicator, readTask);
+              continued = continuation != null;
+              if (continuation != null) {
+                application.invokeLater(() -> {
+                  application.removeApplicationListener(listener);
+                  if (!progressIndicator.isCanceled()) {
+                    continuation.getAction().run();
+                  }
+                }, continuation.getModalityState());
               }
-              finally {
+            }
+            finally {
+              if (!continued) {
                 application.removeApplicationListener(listener);
               }
             }
-          });
-        }
-        catch (RuntimeException e) {
-          application.removeApplicationListener(listener);
-          throw e;
-        }
-        catch (Error e) {
-          application.removeApplicationListener(listener);
-          throw e;
-        }
+          }
+
+          @Override
+          public String toString() {
+            return readTask.toString();
+          }
+        });
+      }
+      catch (RuntimeException | Error e) {
+        application.removeApplicationListener(listener);
+        throw e;
       }
     });
   }
 
-  private static void runUnderProgress(@NotNull final ProgressIndicator progressIndicator, @NotNull final ReadTask task) {
-    ProgressManager.getInstance().runProcess(new Runnable() {
-      @Override
-      public void run() {
-        try {
-          ApplicationManager.getApplication().runReadAction(new Runnable() {
-            @Override
-            public void run() {
-              task.computeInReadAction(progressIndicator);
-            }
-          });
-        }
-        catch (ProcessCanceledException ignore) {
-        }
+  private static ReadTask.Continuation runUnderProgress(@NotNull final ProgressIndicator progressIndicator, @NotNull final ReadTask task) {
+    return ProgressManager.getInstance().runProcess(() -> {
+      try {
+        return task.runBackgroundProcess(progressIndicator);
+      }
+      catch (ProcessCanceledException ignore) {
+        return null;
       }
     }, progressIndicator);
   }

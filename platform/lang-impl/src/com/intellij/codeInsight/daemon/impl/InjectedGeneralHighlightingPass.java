@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,15 +42,13 @@ import com.intellij.psi.impl.source.tree.injected.InjectedLanguageManagerImpl;
 import com.intellij.psi.impl.source.tree.injected.InjectedLanguageUtil;
 import com.intellij.psi.impl.source.tree.injected.Place;
 import com.intellij.psi.tree.IElementType;
-import com.intellij.util.CommonProcessors;
 import com.intellij.util.Processor;
+import com.intellij.util.Processors;
 import gnu.trove.THashSet;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.awt.*;
 import java.util.*;
-import java.util.List;
 
 public class InjectedGeneralHighlightingPass extends GeneralHighlightingPass implements DumbAware {
   private static final String PRESENTABLE_NAME = "Injected fragments";
@@ -84,7 +82,7 @@ public class InjectedGeneralHighlightingPass extends GeneralHighlightingPass imp
     List<ProperTextRange> outsideRanges = new ArrayList<ProperTextRange>();
     //TODO: this thing is just called TWICE with same arguments eating CPU on huge files :(
     Divider.divideInsideAndOutside(myFile, myRestrictRange.getStartOffset(), myRestrictRange.getEndOffset(), myPriorityRange, inside, insideRanges, outside,
-                                   outsideRanges, false, SHOULD_HIGHIGHT_FILTER);
+                                   outsideRanges, false, SHOULD_HIGHLIGHT_FILTER);
 
 
     // all infos for the "injected fragment for the host which is inside" are indeed inside
@@ -172,7 +170,7 @@ public class InjectedGeneralHighlightingPass extends GeneralHighlightingPass imp
       }
     }
     InjectedLanguageManagerImpl injectedLanguageManager = InjectedLanguageManagerImpl.getInstanceImpl(myProject);
-    Processor<PsiElement> collectInjectableProcessor = new CommonProcessors.CollectProcessor<PsiElement>(hosts);
+    Processor<PsiElement> collectInjectableProcessor = Processors.cancelableCollectProcessor(hosts);
     injectedLanguageManager.processInjectableElements(elements1, collectInjectableProcessor);
     injectedLanguageManager.processInjectableElements(elements2, collectInjectableProcessor);
 
@@ -185,14 +183,11 @@ public class InjectedGeneralHighlightingPass extends GeneralHighlightingPass imp
       }
     };
     if (!JobLauncher.getInstance().invokeConcurrentlyUnderProgress(new ArrayList<PsiElement>(hosts), progress, true,
-                                                                   new Processor<PsiElement>() {
-                                                                     @Override
-                                                                     public boolean process(PsiElement element) {
-                                                                       ApplicationManager.getApplication().assertReadAccessAllowed();
-                                                                       progress.checkCanceled();
-                                                                       InjectedLanguageUtil.enumerate(element, myFile, false, visitor);
-                                                                       return true;
-                                                                     }
+                                                                   element -> {
+                                                                     ApplicationManager.getApplication().assertReadAccessAllowed();
+                                                                     progress.checkCanceled();
+                                                                     InjectedLanguageUtil.enumerate(element, myFile, false, visitor);
+                                                                     return true;
                                                                    })) {
       throw new ProcessCanceledException();
     }
@@ -211,12 +206,7 @@ public class InjectedGeneralHighlightingPass extends GeneralHighlightingPass imp
 
     return JobLauncher.getInstance()
       .invokeConcurrentlyUnderProgress(new ArrayList<PsiFile>(injectedFiles), progress, isFailFastOnAcquireReadAction(),
-                                       new Processor<PsiFile>() {
-                                         @Override
-                                         public boolean process(final PsiFile injectedPsi) {
-                                           return addInjectedPsiHighlights(injectedPsi, injectedAttributes, outInfos, progress, injectedLanguageManager);
-                                         }
-                                       });
+                                       injectedPsi -> addInjectedPsiHighlights(injectedPsi, injectedAttributes, outInfos, progress, injectedLanguageManager));
   }
 
   private boolean addInjectedPsiHighlights(@NotNull PsiFile injectedPsi,
@@ -227,17 +217,20 @@ public class InjectedGeneralHighlightingPass extends GeneralHighlightingPass imp
     DocumentWindow documentWindow = (DocumentWindow)PsiDocumentManager.getInstance(myProject).getCachedDocument(injectedPsi);
     if (documentWindow == null) return true;
     Place places = InjectedLanguageUtil.getShreds(injectedPsi);
+    boolean addTooltips = places.size() < 100;
     for (PsiLanguageInjectionHost.Shred place : places) {
       PsiLanguageInjectionHost host = place.getHost();
       if (host == null) continue;
       TextRange textRange = place.getRangeInsideHost().shiftRight(host.getTextRange().getStartOffset());
       if (textRange.isEmpty()) continue;
-      String desc = injectedPsi.getLanguage().getDisplayName() + ": " + injectedPsi.getText();
       HighlightInfo.Builder builder = HighlightInfo.newHighlightInfo(HighlightInfoType.INJECTED_LANGUAGE_BACKGROUND).range(textRange);
       if (injectedAttributes != null && InjectedLanguageUtil.isHighlightInjectionBackground(host)) {
         builder.textAttributes(injectedAttributes);
       }
-      builder.unescapedToolTip(desc);
+      if (addTooltips) {
+        String desc = injectedPsi.getLanguage().getDisplayName() + ": " + injectedPsi.getText();
+        builder.unescapedToolTip(desc);
+      }
       HighlightInfo info = builder.createUnconditionally();
       info.setFromInjection(true);
       outInfos.add(info);
@@ -368,13 +361,10 @@ public class InjectedGeneralHighlightingPass extends GeneralHighlightingPass imp
     try {
       final List<PsiElement> elements = CollectHighlightsUtil.getElementsInRange(injectedPsi, 0, injectedPsi.getTextLength());
       for (final HighlightVisitor visitor : filtered) {
-        visitor.analyze(injectedPsi, true, holder, new Runnable() {
-          @Override
-          public void run() {
-            for (PsiElement element : elements) {
-              progress.checkCanceled();
-              visitor.visit(element);
-            }
+        visitor.analyze(injectedPsi, true, holder, () -> {
+          for (PsiElement element : elements) {
+            progress.checkCanceled();
+            visitor.visit(element);
           }
         });
       }
@@ -421,9 +411,8 @@ public class InjectedGeneralHighlightingPass extends GeneralHighlightingPass imp
           TextAttributes.ERASE_MARKER).createUnconditionally();
         holder.add(info);
 
-        Color back = attributes.getBackgroundColor() == null ? myGlobalScheme.getDefaultBackground() : attributes.getBackgroundColor();
-        Color fore = attributes.getForegroundColor() == null ? myGlobalScheme.getDefaultForeground() : attributes.getForegroundColor();
-        forcedAttributes = new TextAttributes(fore, back, attributes.getEffectColor(), attributes.getEffectType(), attributes.getFontType());
+        forcedAttributes = new TextAttributes(attributes.getForegroundColor(), attributes.getBackgroundColor(), 
+                                              attributes.getEffectColor(), attributes.getEffectType(), attributes.getFontType());
       }
 
       HighlightInfo info =

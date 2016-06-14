@@ -37,18 +37,18 @@ public class HgRemoveCommand {
    * Removes given files from their Mercurial repositories.
    * @param hgFiles files to be removed.
    */
-  public void execute(@NotNull HgFile... hgFiles) {
-    execute(Arrays.asList(hgFiles));
+  public void executeInCurrentThread(@NotNull HgFile... hgFiles) {
+    executeInCurrentThread(Arrays.asList(hgFiles));
   }
 
   /**
    * Removes given files from their Mercurial repositories.
    * @param hgFiles files to be removed.
    */
-  public void execute(@NotNull Collection<HgFile> hgFiles) {
+  public void executeInCurrentThread(@NotNull Collection<HgFile> hgFiles) {
     for( Map.Entry<VirtualFile, List<String>> entry : HgUtil.getRelativePathsByRepository(hgFiles).entrySet()) {
       List<String> filePaths = entry.getValue();
-      for (List<String> chunkFiles : VcsFileUtil.chunkRelativePaths(filePaths)) {
+      for (List<String> chunkFiles : VcsFileUtil.chunkArguments(filePaths)) {
         List<String> parameters = new LinkedList<String>();
         parameters.addAll(chunkFiles);
         parameters.add(0, "--after");

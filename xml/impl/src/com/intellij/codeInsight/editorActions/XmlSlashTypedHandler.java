@@ -31,6 +31,7 @@ import com.intellij.psi.templateLanguages.OuterLanguageElement;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.xml.*;
+import com.intellij.xml.util.HtmlUtil;
 import com.intellij.xml.util.XmlTagUtil;
 import com.intellij.xml.util.XmlUtil;
 import org.jetbrains.annotations.NotNull;
@@ -38,7 +39,7 @@ import org.jetbrains.annotations.NotNull;
 public class XmlSlashTypedHandler extends TypedHandlerDelegate {
   @Override
   public Result beforeCharTyped(final char c, final Project project, final Editor editor, final PsiFile editedFile, final FileType fileType) {
-    if ((editedFile.getLanguage() instanceof XMLLanguage || editedFile.getViewProvider().getBaseLanguage() instanceof XMLLanguage) && c == '/') {
+    if (c == '/' && XmlGtTypedHandler.fileContainsXmlLanguage(editedFile)) {
       PsiDocumentManager.getInstance(project).commitAllDocuments();
 
       PsiFile file = PsiDocumentManager.getInstance(project).getPsiFile(editor.getDocument());
@@ -74,7 +75,7 @@ public class XmlSlashTypedHandler extends TypedHandlerDelegate {
   @Override
   public Result charTyped(final char c, final Project project, @NotNull final Editor editor, @NotNull final PsiFile editedFile) {
     if (!WebEditorOptions.getInstance().isAutoCloseTag()) return Result.CONTINUE;
-    if ((editedFile.getLanguage() instanceof XMLLanguage || editedFile.getViewProvider().getBaseLanguage() instanceof XMLLanguage) && c == '/') {
+    if (c == '/' && XmlGtTypedHandler.fileContainsXmlLanguage(editedFile)) {
       PsiDocumentManager.getInstance(project).commitAllDocuments();
 
       PsiFile file = PsiDocumentManager.getInstance(project).getPsiFile(editor.getDocument());
@@ -91,7 +92,7 @@ public class XmlSlashTypedHandler extends TypedHandlerDelegate {
       if ("</".equals(prevLeafText) && prevLeaf.getElementType() == XmlTokenType.XML_END_TAG_START) {
         XmlTag tag = PsiTreeUtil.getParentOfType(element, XmlTag.class);
         if (tag != null && StringUtil.isNotEmpty(tag.getName()) && TreeUtil.findSibling(prevLeaf, XmlTokenType.XML_NAME) == null) {
-          if (!(file.getFileType() instanceof XmlLikeFileType)) return Result.CONTINUE;
+          if (!(file.getFileType() instanceof XmlLikeFileType) && !HtmlUtil.supportsXmlTypedHandlers(file)) return Result.CONTINUE;
 
           // check for template language like JSP
           if (provider instanceof MultiplePsiFilesPerDocumentFileViewProvider) {
@@ -99,13 +100,13 @@ public class XmlSlashTypedHandler extends TypedHandlerDelegate {
             if (element1 != null && element1.getText().startsWith("</")) {
               // case of top-level jsp tag
               XmlTag tag1 = PsiTreeUtil.getParentOfType(element1, XmlTag.class);
-              if (shouldReplace(tag, tag1)) {
+              if (shouldReplace(tag, tag1, offset)) {
                 tag = tag1;
               }
               else {
                 // if we have enclosing jsp tag, actual tag to be completed will be previous sibling
                 tag1 = PsiTreeUtil.getPrevSiblingOfType(element1.getParent(), XmlTag.class);
-                if (shouldReplace(tag, tag1)) {
+                if (shouldReplace(tag, tag1, offset)) {
                   tag = tag1;
                 }
               }
@@ -144,9 +145,12 @@ public class XmlSlashTypedHandler extends TypedHandlerDelegate {
     return Result.CONTINUE;
   }
 
-  private static boolean shouldReplace(XmlTag tag, XmlTag tag1) {
-    return tag1 != null && tag1 != tag && tag1.getTextOffset() > tag.getTextOffset() &&
-           hasUnclosedParent(tag1);
+  private static boolean shouldReplace(XmlTag tag, XmlTag tag1, int offset) {
+    if (tag1 == null || tag1 == tag || tag1.getTextOffset() <= tag.getTextOffset()) return false;
+    if (hasUnclosedParent(tag1)) return true;
+    if (XmlUtil.getTokenOfType(tag1, XmlTokenType.XML_EMPTY_ELEMENT_END) != null) return false;
+    XmlToken element = XmlTagUtil.getEndTagNameElement(tag1);
+    return element != null && element.getTextOffset() > offset;
   }
 
   private static boolean hasUnclosedParent(XmlTag tag) {

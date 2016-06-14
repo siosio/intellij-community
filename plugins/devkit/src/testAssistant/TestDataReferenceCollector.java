@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.NullableComputable;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
-import com.intellij.testFramework.UsefulTestCase;
+import com.intellij.testFramework.PlatformTestUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -119,11 +119,8 @@ public class TestDataReferenceCollector {
     final PsiExpression[] arguments = expression.getArgumentList().getExpressions();
     for (int i = 0; i < arguments.length && i < parameters.length; i++) {
       final int finalI = i;
-      result.put(parameters [i].getName(), new NullableComputable<String>() {
-        public String compute() {
-          return evaluate(arguments [finalI], Collections.<String, Computable<String>>emptyMap());
-        }
-      });
+      result.put(parameters [i].getName(),
+                 (NullableComputable<String>)() -> evaluate(arguments [finalI], Collections.<String, Computable<String>>emptyMap()));
     }
     return result;
   }
@@ -169,7 +166,7 @@ public class TestDataReferenceCollector {
         final PsiExpression[] psiExpressions = methodCall.getArgumentList().getExpressions();
         if (psiExpressions.length == 1) {
           if ("true".equals(psiExpressions[0].getText()) && !StringUtil.isEmpty(myTestName)) {
-            return UsefulTestCase.lowercaseFirstLetter(myTestName, true);
+            return PlatformTestUtil.lowercaseFirstLetter(myTestName, true);
           }
           return myTestName;
         }

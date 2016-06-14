@@ -40,15 +40,32 @@ public class PyAbstractClassInspectionTest extends PyInspectionTestCase {
 
   // PY-16035
   public void testHiddenForAbstractSubclassWithExplicitMetaclassPy3() {
-    runWithLanguageLevel(LanguageLevel.PYTHON30, new Runnable() {
-      public void run() {
-        doTest();
-      }
-    });
+    runWithLanguageLevel(LanguageLevel.PYTHON30, () -> doTest());
   }
 
   // PY-16035
   public void testHiddenForAbstractSubclassWithAbstractMethod() {
+    doTest();
+  }
+
+  // PY-16776
+  public void testNotImplementedOverriddenInParent() {
+    doTest();
+  }
+
+  public void testConditionalRaiseReturnInIfPart() {
+    doTest();
+  }
+
+  public void testConditionalRaiseReturnInElsePart() {
+    doTest();
+  }
+
+  public void testConditionalRaiseNestedIfs() {
+    doTest();
+  }
+
+  public void testConditionalRaiseReturnInElifPart() {
     doTest();
   }
 

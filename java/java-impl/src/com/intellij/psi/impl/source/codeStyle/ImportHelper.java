@@ -74,12 +74,7 @@ public class ImportHelper{
     List<PsiElement> nonImports = new ArrayList<PsiElement>();
     // Note: this array may contain "<packageOrClassName>.*" for unresolved imports!
     List<Pair<String, Boolean>> names = new ArrayList<Pair<String, Boolean>>(collectNamesToImport(file, nonImports));
-    Collections.sort(names, new Comparator<Pair<String, Boolean>>() {
-      @Override
-      public int compare(Pair<String, Boolean> o1, Pair<String, Boolean> o2) {
-        return o1.getFirst().compareTo(o2.getFirst());
-      }
-    });
+    Collections.sort(names, (o1, o2) -> o1.getFirst().compareTo(o2.getFirst()));
 
     List<Pair<String, Boolean>> resultList = sortItemsAccordingToSettings(names, mySettings);
 
@@ -577,12 +572,25 @@ public class ImportHelper{
   }
   
   public static boolean isAlreadyImported(@NotNull PsiJavaFile file, @NotNull String fullyQualifiedName) {
-    String className = ClassUtil.extractClassName(fullyQualifiedName);
+    String className = extractClassName(file, fullyQualifiedName);
+
     Project project = file.getProject();
     PsiResolveHelper resolveHelper = PsiResolveHelper.SERVICE.getInstance(project);
 
     PsiClass psiClass = resolveHelper.resolveReferencedClass(className, file);
     return psiClass != null && fullyQualifiedName.equals(psiClass.getQualifiedName());
+  }
+
+  @NotNull
+  private static String extractClassName(@NotNull PsiJavaFile file, @NotNull String fullyQualifiedName) {
+    for (PsiClass aClass : file.getClasses()) {
+      String outerClassName = aClass.getQualifiedName();
+      if (outerClassName != null && fullyQualifiedName.startsWith(outerClassName)) {
+        return fullyQualifiedName.substring(outerClassName.lastIndexOf('.') + 1);
+      }
+    }
+
+    return ClassUtil.extractClassName(fullyQualifiedName);
   }
 
   public ASTNode getDefaultAnchor(@NotNull PsiImportList list, @NotNull PsiImportStatementBase statement){

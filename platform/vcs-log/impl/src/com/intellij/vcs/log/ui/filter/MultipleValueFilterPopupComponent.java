@@ -15,7 +15,10 @@
  */
 package com.intellij.vcs.log.ui.filter;
 
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ActionGroup;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.DefaultActionGroup;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.JBPopup;
@@ -60,11 +63,13 @@ abstract class MultipleValueFilterPopupComponent<Filter extends VcsLogFilter> ex
   @NotNull
   protected ActionGroup createRecentItemsActionGroup() {
     DefaultActionGroup group = new DefaultActionGroup();
-    List<List<String>> recentlyFilteredUsers = getRecentValuesFromSettings();
-    if (!recentlyFilteredUsers.isEmpty()) {
+    List<List<String>> recentlyFiltered = getRecentValuesFromSettings();
+    if (!recentlyFiltered.isEmpty()) {
       group.addSeparator("Recent");
-      for (List<String> recentGroup : recentlyFilteredUsers) {
-        group.add(new PredefinedValueAction(recentGroup));
+      for (List<String> recentGroup : recentlyFiltered) {
+        if (!recentGroup.isEmpty()) {
+          group.add(new PredefinedValueAction(recentGroup));
+        }
       }
       group.addSeparator();
     }
@@ -101,9 +106,9 @@ abstract class MultipleValueFilterPopupComponent<Filter extends VcsLogFilter> ex
     return false;
   }
 
-  private class PredefinedValueAction extends DumbAwareAction {
+  protected class PredefinedValueAction extends DumbAwareAction {
 
-    @NotNull private final Collection<String> myValues;
+    @NotNull protected final Collection<String> myValues;
 
     public PredefinedValueAction(@NotNull Collection<String> values) {
       super(null, tooltip(values), null);
@@ -155,10 +160,10 @@ abstract class MultipleValueFilterPopupComponent<Filter extends VcsLogFilter> ex
       });
       popup.showUnderneathOf(MultipleValueFilterPopupComponent.this);
     }
+
     @NotNull
     private String getPopupText(@Nullable Collection<String> selectedValues) {
       return selectedValues == null || selectedValues.isEmpty() ? "" : StringUtil.join(selectedValues, "\n");
     }
   }
-
 }

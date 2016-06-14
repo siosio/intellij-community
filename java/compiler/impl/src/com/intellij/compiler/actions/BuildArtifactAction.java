@@ -200,7 +200,7 @@ public class BuildArtifactAction extends DumbAwareAction {
         }
       }
 
-      new Task.Backgroundable(myProject, "Cleaning artifacts...", true) {
+      new Task.Backgroundable(myProject, "Cleaning Artifacts", true) {
         @Override
         public void run(@NotNull ProgressIndicator indicator) {
           List<File> deleted = new ArrayList<File>();
@@ -334,12 +334,7 @@ public class BuildArtifactAction extends DumbAwareAction {
     @Override
     public PopupStep<?> onChosen(final List<ArtifactPopupItem> selectedValues, boolean finalChoice) {
       if (finalChoice) {
-        return doFinalStep(new Runnable() {
-          @Override
-          public void run() {
-            doBuild(myProject, selectedValues, false);
-          }
-        });
+        return doFinalStep(() -> doBuild(myProject, selectedValues, false));
       }
       final List<ArtifactActionItem> actions = new ArrayList<ArtifactActionItem>();
       actions.add(new BuildArtifactItem(selectedValues, myProject));

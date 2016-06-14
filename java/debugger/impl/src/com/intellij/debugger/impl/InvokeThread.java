@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ import java.util.concurrent.*;
 public abstract class InvokeThread<E extends PrioritizedTask> {
   private static final Logger LOG = Logger.getInstance("#com.intellij.debugger.impl.InvokeThread");
 
-  private static final ThreadLocal<WorkerThreadRequest> ourWorkerRequest = new ThreadLocal<WorkerThreadRequest>();
+  private static final ThreadLocal<WorkerThreadRequest> ourWorkerRequest = new ThreadLocal<>();
 
   protected final Project myProject;
 
@@ -121,14 +121,14 @@ public abstract class InvokeThread<E extends PrioritizedTask> {
 
   public InvokeThread(Project project) {
     myProject = project;
-    myEvents = new EventQueue<E>(PrioritizedTask.Priority.values().length);
+    myEvents = new EventQueue<>(PrioritizedTask.Priority.values().length);
     startNewWorkerThread();
   }
 
   protected abstract void processEvent(E e);
 
   protected void startNewWorkerThread() {
-    final WorkerThreadRequest workerRequest = new WorkerThreadRequest<E>(this);
+    final WorkerThreadRequest workerRequest = new WorkerThreadRequest<>(this);
     myCurrentRequest = workerRequest;
     workerRequest.setRequestFuture( ApplicationManager.getApplication().executeOnPooledThread(workerRequest) );
   }
@@ -182,9 +182,7 @@ public abstract class InvokeThread<E extends PrioritizedTask> {
         }
       }
 
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("Request " + toString() + " exited");
-      }
+      LOG.debug("Request " + toString() + " exited");
       DumbService.getInstance(myProject).setAlternativeResolveEnabled(false);
     }
 
@@ -230,8 +228,6 @@ public abstract class InvokeThread<E extends PrioritizedTask> {
 
   public void close() {
     myEvents.close();
-    if (LOG.isDebugEnabled()) {
-      LOG.debug("Closing evaluation");
-    }
+    LOG.debug("Closing evaluation");
   }
 }

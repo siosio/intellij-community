@@ -18,7 +18,6 @@ package org.jetbrains.plugins.groovy.lang.completion;
 import com.intellij.codeInsight.TailType;
 import com.intellij.codeInsight.completion.*;
 import com.intellij.codeInsight.lookup.LookupElement;
-import com.intellij.codeInsight.lookup.LookupItem;
 import com.intellij.codeInsight.lookup.PsiTypeLookupItem;
 import com.intellij.featureStatistics.FeatureUsageTracker;
 import com.intellij.openapi.editor.Document;
@@ -109,31 +108,28 @@ public class GroovySmartCompletionContributor extends CompletionContributor {
         if (reference == null) return;
         if (reference instanceof GrReferenceElement) {
           GroovyCompletionUtil.processVariants((GrReferenceElement)reference, result.getPrefixMatcher(), params,
-                                               new Consumer<LookupElement>() {
-                                                 @Override
-                                                 public void consume(LookupElement variant) {
-                                                   PsiType type = null;
+                                               variant -> {
+                                                 PsiType type = null;
 
-                                                   Object o = variant.getObject();
-                                                   if (o instanceof GroovyResolveResult) {
-                                                     if (!((GroovyResolveResult)o).isAccessible()) return;
-                                                     o = ((GroovyResolveResult)o).getElement();
-                                                   }
+                                                 Object o = variant.getObject();
+                                                 if (o instanceof GroovyResolveResult) {
+                                                   if (!((GroovyResolveResult)o).isAccessible()) return;
+                                                   o = ((GroovyResolveResult)o).getElement();
+                                                 }
 
-                                                   if (o instanceof PsiElement) {
-                                                     type = getTypeByElement((PsiElement)o, position);
+                                                 if (o instanceof PsiElement) {
+                                                   type = getTypeByElement((PsiElement)o, position);
+                                                 }
+                                                 else if (o instanceof String) {
+                                                   if ("true".equals(o) || "false".equals(o)) {
+                                                     type = PsiType.BOOLEAN;
                                                    }
-                                                   else if (o instanceof String) {
-                                                     if ("true".equals(o) || "false".equals(o)) {
-                                                       type = PsiType.BOOLEAN;
-                                                     }
-                                                   }
-                                                   if (type == null) return;
-                                                   for (TypeConstraint info : infos) {
-                                                     if (info.satisfied(type, position)) {
-                                                       result.addElement(variant);
-                                                       break;
-                                                     }
+                                                 }
+                                                 if (type == null) return;
+                                                 for (TypeConstraint info : infos) {
+                                                   if (info.satisfied(type, position)) {
+                                                     result.addElement(variant);
+                                                     break;
                                                    }
                                                  }
                                                });
@@ -162,10 +158,7 @@ public class GroovySmartCompletionContributor extends CompletionContributor {
         final Set<TypeConstraint> typeConstraints = getExpectedTypeInfos(parameters);
         for (TypeConstraint typeConstraint : typeConstraints) {
           final PsiType type = typeConstraint.getType();
-          final LookupItem item = PsiTypeLookupItem.createLookupItem(type, position, PsiTypeLookupItem.isDiamond(type), ChooseTypeExpression.IMPORT_FIXER);
-          if (item.getObject() instanceof PsiClass) {
-            JavaCompletionUtil.setShowFQN(item);
-          }
+          final PsiTypeLookupItem item = PsiTypeLookupItem.createLookupItem(type, position, PsiTypeLookupItem.isDiamond(type), ChooseTypeExpression.IMPORT_FIXER).setShowPackage();
           item.setInsertHandler(new InsertHandler<LookupElement>() {
             @Override
             public void handleInsert(InsertionContext context, LookupElement item) {
@@ -188,7 +181,7 @@ public class GroovySmartCompletionContributor extends CompletionContributor {
 
               editor.getCaretModel().moveToOffset(context.getTailOffset());
               editor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
-              GroovyCompletionUtil.addImportForItem(context.getFile(), context.getStartOffset(), ((LookupItem)item));
+              GroovyCompletionUtil.addImportForItem(context.getFile(), context.getStartOffset(), item);
             }
           });
           result.addElement(item);
@@ -201,12 +194,7 @@ public class GroovySmartCompletionContributor extends CompletionContributor {
       protected void addCompletions(@NotNull final CompletionParameters parameters,
                                  final ProcessingContext matchingContext,
                                  @NotNull final CompletionResultSet result) {
-        generateInheritorVariants(parameters, result.getPrefixMatcher(), new Consumer<LookupElement>() {
-          @Override
-          public void consume(LookupElement lookupElement) {
-            result.addElement(lookupElement);
-          }
-        });
+        generateInheritorVariants(parameters, result.getPrefixMatcher(), lookupElement -> result.addElement(lookupElement));
       }
     });
 
@@ -222,12 +210,9 @@ public class GroovySmartCompletionContributor extends CompletionContributor {
         final GrReferenceExpression reference = (GrReferenceExpression)position.getParent();
         if (reference == null) return;
 
-        CompleteReferenceExpression.processRefInAnnotation(reference, result.getPrefixMatcher(), new Consumer<LookupElement>() {
-          @Override
-          public void consume(@Nullable LookupElement element) {
-            if (element != null) {
-              result.addElement(element);
-            }
+        CompleteReferenceExpression.processRefInAnnotation(reference, result.getPrefixMatcher(), element -> {
+          if (element != null) {
+            result.addElement(element);
           }
         }, params);
       }
@@ -263,12 +248,7 @@ public class GroovySmartCompletionContributor extends CompletionContributor {
 
   static void addExpectedClassMembers(CompletionParameters params, final CompletionResultSet result) {
     for (final TypeConstraint info : getExpectedTypeInfos(params)) {
-      Consumer<LookupElement> consumer = new Consumer<LookupElement>() {
-        @Override
-        public void consume(LookupElement element) {
-          result.addElement(element);
-        }
-      };
+      Consumer<LookupElement> consumer = element -> result.addElement(element);
       PsiType type = info.getType();
       PsiType defType = info.getDefaultType();
       boolean searchInheritors = params.getInvocationCount() > 1;
@@ -294,12 +274,11 @@ public class GroovySmartCompletionContributor extends CompletionContributor {
     for (PsiType type : GroovyExpectedTypesProvider.getDefaultExpectedTypes(placeToInferType)) {
       if (type instanceof PsiArrayType) {
         final PsiType _type = GenericsUtil.eliminateWildcards(type);
-        final LookupItem item = PsiTypeLookupItem.createLookupItem(_type, place, PsiTypeLookupItem.isDiamond(_type), ChooseTypeExpression.IMPORT_FIXER);
+        final PsiTypeLookupItem item = PsiTypeLookupItem.createLookupItem(_type, place, PsiTypeLookupItem.isDiamond(_type), ChooseTypeExpression.IMPORT_FIXER).setShowPackage();
         if (item.getObject() instanceof PsiClass) {
-          JavaCompletionUtil.setShowFQN(item);
-          item.setInsertHandler(new InsertHandler<LookupItem>() {
+          item.setInsertHandler(new InsertHandler<LookupElement>() {
             @Override
-            public void handleInsert(InsertionContext context, LookupItem item) {
+            public void handleInsert(InsertionContext context, LookupElement item) {
               GroovyCompletionUtil.addImportForItem(context.getFile(), context.getStartOffset(), item);
             }
           });
@@ -323,13 +302,10 @@ public class GroovySmartCompletionContributor extends CompletionContributor {
 
     final PsiType diamond = inferDiamond(place);
 
-    JavaInheritorsGetter.processInheritors(parameters, expectedClassTypes, matcher, new Consumer<PsiType>() {
-      @Override
-      public void consume(final PsiType type) {
-        final LookupElement element = addExpectedType(type, place, parameters, diamond);
-        if (element != null) {
-          consumer.consume(element);
-        }
+    JavaInheritorsGetter.processInheritors(parameters, expectedClassTypes, matcher, type -> {
+      final LookupElement element = addExpectedType(type, place, parameters, diamond);
+      if (element != null) {
+        consumer.consume(element);
       }
     });
   }
@@ -415,13 +391,10 @@ public class GroovySmartCompletionContributor extends CompletionContributor {
       }
     }
 
-    final PsiTypeLookupItem item = PsiTypeLookupItem.createLookupItem(GenericsUtil.eliminateWildcards(type), place, isDiamond, ChooseTypeExpression.IMPORT_FIXER);
+    final PsiTypeLookupItem item = PsiTypeLookupItem.createLookupItem(GenericsUtil.eliminateWildcards(type), place, isDiamond, ChooseTypeExpression.IMPORT_FIXER).setShowPackage();
     Object object = item.getObject();
-    if (object instanceof PsiClass) {
-      JavaCompletionUtil.setShowFQN(item);
-      if (((PsiClass)object).hasModifierProperty(PsiModifier.ABSTRACT)) {
-        item.setIndicateAnonymous(true);
-      }
+    if (object instanceof PsiClass && ((PsiClass)object).hasModifierProperty(PsiModifier.ABSTRACT)) {
+      item.setIndicateAnonymous(true);
     }
     item.setInsertHandler(new AfterNewClassInsertHandler((PsiClassType)type, true));
     return item;

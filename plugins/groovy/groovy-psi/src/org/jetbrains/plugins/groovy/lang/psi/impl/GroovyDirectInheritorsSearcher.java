@@ -20,6 +20,7 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.util.Computable;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiElement;
+import com.intellij.psi.impl.search.StubHierarchyInheritorSearcher;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.SearchScope;
 import com.intellij.psi.search.searches.DirectClassInheritorsSearch;
@@ -43,11 +44,8 @@ import java.util.List;
  */
 public class GroovyDirectInheritorsSearcher implements QueryExecutor<PsiClass, DirectClassInheritorsSearch.SearchParameters> {
 
-  public GroovyDirectInheritorsSearcher() {
-  }
-
   @NotNull
-  private static List<PsiClass> getDerivingClassCandidates(PsiClass clazz, GlobalSearchScope scope) {
+  private static List<PsiClass> getDerivingClassCandidates(PsiClass clazz, GlobalSearchScope scope, boolean includeAnonymous) {
     final String name = clazz.getName();
     if (name == null) return Collections.emptyList();
     final ArrayList<PsiClass> inheritors = new ArrayList<PsiClass>();
@@ -58,16 +56,18 @@ public class GroovyDirectInheritorsSearcher implements QueryExecutor<PsiClass, D
         inheritors.add((PsiClass)parent);
       }
     }
-    final Collection<GrAnonymousClassDefinition> classes =
-      StubIndex.getElements(GrAnonymousClassIndex.KEY, name, clazz.getProject(), scope, GrAnonymousClassDefinition.class);
-    for (GrAnonymousClassDefinition aClass : classes) {
-      inheritors.add(aClass);
+    if (includeAnonymous) {
+      final Collection<GrAnonymousClassDefinition> classes =
+        StubIndex.getElements(GrAnonymousClassIndex.KEY, name, clazz.getProject(), scope, GrAnonymousClassDefinition.class);
+      for (GrAnonymousClassDefinition aClass : classes) {
+        inheritors.add(aClass);
+      }
     }
     return inheritors;
   }
 
   @Override
-  public boolean execute(@NotNull DirectClassInheritorsSearch.SearchParameters queryParameters, @NotNull final Processor<PsiClass> consumer) {
+  public boolean execute(@NotNull final DirectClassInheritorsSearch.SearchParameters queryParameters, @NotNull final Processor<PsiClass> consumer) {
     final PsiClass clazz = queryParameters.getClassToProcess();
     final SearchScope scope = queryParameters.getScope();
     if (scope instanceof GlobalSearchScope) {
@@ -75,21 +75,12 @@ public class GroovyDirectInheritorsSearcher implements QueryExecutor<PsiClass, D
         @Override
         public List<PsiClass> compute() {
           if (!clazz.isValid()) return Collections.emptyList();
-          return getDerivingClassCandidates(clazz, (GlobalSearchScope)scope);
+          GlobalSearchScope restrictedScope = StubHierarchyInheritorSearcher.restrictScope((GlobalSearchScope)scope);
+          return getDerivingClassCandidates(clazz, restrictedScope, queryParameters.includeAnonymous());
         }
       });
       for (final PsiClass candidate : candidates) {
-        final boolean isInheritor;
-        AccessToken accessToken = ApplicationManager.getApplication().acquireReadActionLock();
-
-        try {
-          isInheritor = candidate.isValid() && candidate.isInheritor(clazz, false);
-        }
-        finally {
-          accessToken.finish();
-        }
-
-        if (isInheritor) {
+        if (!queryParameters.isCheckInheritance() || isInheritor(clazz, candidate)) {
           if (!consumer.process(candidate)) {
             return false;
           }
@@ -100,5 +91,15 @@ public class GroovyDirectInheritorsSearcher implements QueryExecutor<PsiClass, D
     }
 
     return true;
+  }
+
+  private static boolean isInheritor(PsiClass clazz, PsiClass candidate) {
+    AccessToken accessToken = ApplicationManager.getApplication().acquireReadActionLock();
+    try {
+      return candidate.isValid() && candidate.isInheritor(clazz, false);
+    }
+    finally {
+      accessToken.finish();
+    }
   }
 }

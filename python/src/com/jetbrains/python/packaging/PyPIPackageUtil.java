@@ -17,6 +17,7 @@ package com.jetbrains.python.packaging;
 
 import com.google.common.collect.Lists;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.io.HttpRequests;
@@ -54,8 +55,9 @@ import java.util.regex.Pattern;
 @SuppressWarnings("UseOfObsoleteCollectionType")
 public class PyPIPackageUtil {
   public static final Logger LOG = Logger.getInstance(PyPIPackageUtil.class.getName());
-  @NonNls public static final String PYPI_URL = "https://pypi.python.org/pypi";
-  @NonNls public static final String PYPI_LIST_URL = "https://pypi.python.org/pypi?%3Aaction=index";
+  public static final String PYPI_HOST = "https://pypi.python.org";
+  @NonNls public static final String PYPI_URL = PYPI_HOST + "/pypi";
+  @NonNls public static final String PYPI_LIST_URL = PYPI_HOST + "/pypi?%3Aaction=index";
 
   public static Map<String, String> PACKAGES_TOPLEVEL = new HashMap<String, String>();
 
@@ -63,9 +65,9 @@ public class PyPIPackageUtil {
 
   private XmlRpcClient myXmlRpcClient;
   private Map<String, Hashtable> packageToDetails = new HashMap<String, Hashtable>();
-  private Map<String, List<String>> packageToReleases = new HashMap<String, List<String>>();
+  private static Map<String, List<String>> packageToReleases = new HashMap<String, List<String>>();
   private Pattern PYPI_PATTERN = Pattern.compile("/pypi/([^/]*)/(.*)");
-  private Set<RepoPackage> myAdditionalPackageNames;
+  private static Set<RepoPackage> ourAdditionalPackageNames = new TreeSet<RepoPackage>();
   @Nullable private volatile Set<String> myPackageNames = null;
 
 
@@ -93,62 +95,63 @@ public class PyPIPackageUtil {
     }
   }
 
-  public static Set<String> getPackageNames(final String url) throws IOException {
-    final TreeSet<String> names = new TreeSet<String>();
-    final HTMLEditorKit.ParserCallback callback =
-        new HTMLEditorKit.ParserCallback() {
-          HTML.Tag myTag;
-          @Override
-          public void handleStartTag(HTML.Tag tag,
-                                     MutableAttributeSet set,
-                                     int i) {
-            myTag = tag;
-          }
-
-          public void handleText(char[] data, int pos) {
-            if (myTag != null && "a".equals(myTag.toString())) {
-              names.add(String.valueOf(data));
-            }
-          }
-        };
-
-    try {
-      final URL repositoryUrl = new URL(url);
-      final InputStream is = repositoryUrl.openStream();
-      final Reader reader = new InputStreamReader(is);
-      try{
-        new ParserDelegator().parse(reader, callback, true);
+  @NotNull
+  private static Pair<String, String> splitNameVersion(@NotNull final String pyPackage) {
+    int dashInd = pyPackage.lastIndexOf("-");
+    if (dashInd >= 0 && dashInd+1 < pyPackage.length()) {
+      final String name = pyPackage.substring(0, dashInd);
+      final String version = pyPackage.substring(dashInd+1);
+      if (StringUtil.containsAlphaCharacters(version)) {
+        return Pair.create(pyPackage, null);
       }
-      catch (IOException e) {
-        LOG.warn(e);
+      return Pair.create(name, version);
+    }
+    return Pair.create(pyPackage, null);
+  }
+
+  public static boolean isPyPIRepository(@Nullable final String repository) {
+    return repository != null && repository.startsWith(PYPI_HOST);
+  }
+
+  public void fillAdditionalPackages(@NotNull final String url) {
+    final boolean simpleIndex = url.endsWith("simple/");
+    final List<String> packagesList = parsePyPIListFromWeb(url, simpleIndex);
+
+    for (String pyPackage : packagesList) {
+      if (simpleIndex) {
+        final Pair<String, String> nameVersion = splitNameVersion(pyPackage);
+        ourAdditionalPackageNames.add(new RepoPackage(nameVersion.getFirst(), url, nameVersion.getSecond()));
       }
-      finally {
-        reader.close();
+      else {
+        try {
+          Pattern repositoryPattern = Pattern.compile(url + "([^/]*)/([^/]*)$");
+          final Matcher matcher = repositoryPattern.matcher(URLDecoder.decode(pyPackage, "UTF-8"));
+          if (matcher.find()) {
+            final String packageName = matcher.group(1);
+            final String packageVersion = matcher.group(2);
+            if (!packageName.contains(" "))
+              ourAdditionalPackageNames.add(new RepoPackage(packageName, url, packageVersion));
+          }
+        }
+        catch (UnsupportedEncodingException e) {
+          LOG.warn(e.getMessage());
+        }
       }
     }
-    catch (MalformedURLException e) {
-      LOG.warn(e);
-    }
-
-    return names;
   }
 
   public Set<RepoPackage> getAdditionalPackageNames() {
-    if (myAdditionalPackageNames == null) {
-      myAdditionalPackageNames = new TreeSet<RepoPackage>();
+    if (ourAdditionalPackageNames.isEmpty()) {
       for (String url : PyPackageService.getInstance().additionalRepositories) {
-        try {
-          for (String pyPackage : getPackageNames(url)) {
-            if (!pyPackage.contains(" "))
-              myAdditionalPackageNames.add(new RepoPackage(pyPackage, url));
-          }
-        }
-        catch (IOException e) {
-          LOG.warn(e);
-        }
+        fillAdditionalPackages(url);
       }
     }
-    return myAdditionalPackageNames;
+    return ourAdditionalPackageNames;
+  }
+
+  public void clearPackagesCache() {
+    PyPackageService.getInstance().PY_PACKAGES.clear();
+    ourAdditionalPackageNames.clear();
   }
 
   public void addPackageDetails(@NonNls String packageName, Hashtable details) {
@@ -167,7 +170,14 @@ public class PyPIPackageUtil {
       final Vector<String> params = new Vector<String>();
       params.add(packageName);
       try {
-        params.add(getPyPIPackages().get(packageName));
+        String version = getPyPIPackages().get(packageName);
+        if (version == null) {
+          final List<String> releases = getPackageReleases(packageName);
+          if (releases != null && !releases.isEmpty()) {
+            version = releases.get(0);
+          }
+        }
+        params.add(version);
         myXmlRpcClient.executeAsync("release_data", params, callback);
       }
       catch (Exception ignored) {
@@ -187,6 +197,7 @@ public class PyPIPackageUtil {
     if (releases == null) {
       final Vector<String> params = new Vector<String>();
       params.add(packageName);
+      params.add("show_hidden=True");
       myXmlRpcClient.executeAsync("package_releases", params, callback);
     }
     else {
@@ -195,9 +206,63 @@ public class PyPIPackageUtil {
   }
 
   @Nullable
-  public List<String> getPackageReleases(@NonNls String packageName) {
+  public static List<String> getPackageReleases(@NonNls String packageName) {
     if (packageToReleases.containsKey(packageName)) return packageToReleases.get(packageName);
+    final List<String> repositories = PyPackageService.getInstance().additionalRepositories;
+    if (!repositories.isEmpty()) {
+      for (String repository : repositories) {
+        repository = composeSimpleUrl(packageName, repository);
+
+        final List<String> versions = parsePackageVersions(repository);
+        if (!versions.isEmpty()) {
+          packageToReleases.put(packageName, versions);
+          return versions;
+        }
+      }
+    }
     return null;
+  }
+
+  private static List<String> parsePackageVersions(@NotNull final String repository) {
+    return HttpRequests.request(repository).connect(new HttpRequests.RequestProcessor<List<String>>() {
+      @Override
+      public List<String> process(@NotNull HttpRequests.Request request) throws IOException {
+        final List<String> versions = new ArrayList<String>();
+        Reader reader = request.getReader();
+        new ParserDelegator().parse(reader, new HTMLEditorKit.ParserCallback() {
+          HTML.Tag myTag;
+
+          @Override
+          public void handleStartTag(HTML.Tag tag, MutableAttributeSet set, int i) {
+            myTag = tag;
+          }
+
+          @Override
+          public void handleText(char[] data, int pos) {
+            if (myTag != null && "a".equals(myTag.toString())) {
+              String packageVersion = String.valueOf(data);
+              final String suffix = ".tar.gz";
+              if (!packageVersion.endsWith(suffix)) return;
+              packageVersion = StringUtil.trimEnd(packageVersion, suffix);
+              versions.add(splitNameVersion(packageVersion).second);
+            }
+          }
+
+        }, true);
+        return versions;
+      }
+    }, Collections.emptyList(), LOG);
+  }
+
+  @NotNull
+  private static String composeSimpleUrl(@NonNls @NotNull final String packageName, @NotNull final String rep) {
+    String suffix = "";
+    final String repository = StringUtil.trimEnd(rep, "/");
+    if (!repository.endsWith("+simple")) {
+      suffix = "/+simple";
+    }
+    suffix += "/" + packageName;
+    return repository + suffix;
   }
 
   private PyPIPackageUtil() {
@@ -212,7 +277,11 @@ public class PyPIPackageUtil {
   }
 
   public void updatePyPICache(final PyPackageService service) throws IOException {
-    parsePyPIList(getPyPIListFromWeb(), service);
+    service.LAST_TIME_CHECKED = System.currentTimeMillis();
+
+    service.PY_PACKAGES.clear();
+    if (service.PYPI_REMOVED) return;
+    parsePyPIList(parsePyPIListFromWeb(PYPI_LIST_URL, false), service);
   }
 
   public void parsePyPIList(final List<String> packages, final PyPackageService service) {
@@ -233,37 +302,52 @@ public class PyPIPackageUtil {
     }
   }
 
-  @Nullable
-  public List<String> getPyPIListFromWeb() {
-    return HttpRequests.request(PYPI_LIST_URL).connect(new HttpRequests.RequestProcessor<List<String>>() {
+  @NotNull
+  public List<String> parsePyPIListFromWeb(@NotNull final String url, final boolean isSimpleIndex) {
+    return HttpRequests.request(url).connect(new HttpRequests.RequestProcessor<List<String>>() {
       @Override
       public List<String> process(@NotNull HttpRequests.Request request) throws IOException {
         final List<String> packages = new ArrayList<String>();
         Reader reader = request.getReader();
         new ParserDelegator().parse(reader, new HTMLEditorKit.ParserCallback() {
           boolean inTable = false;
+          HTML.Tag myTag;
 
           @Override
           public void handleStartTag(HTML.Tag tag, MutableAttributeSet set, int i) {
-            if ("table".equals(tag.toString())) {
-              inTable = !inTable;
-            }
+            myTag = tag;
+            if (!isSimpleIndex) {
+              if ("table".equals(tag.toString())) {
+                inTable = !inTable;
+              }
 
-            if (inTable && "a".equals(tag.toString())) {
-              packages.add(String.valueOf(set.getAttribute(HTML.Attribute.HREF)));
+              if (inTable && "a".equals(tag.toString())) {
+                packages.add(String.valueOf(set.getAttribute(HTML.Attribute.HREF)));
+              }
+            }
+          }
+
+          @Override
+          public void handleText(char[] data, int pos) {
+            if (isSimpleIndex) {
+              if (myTag != null && "a".equals(myTag.toString())) {
+                packages.add(String.valueOf(data));
+              }
             }
           }
 
           @Override
           public void handleEndTag(HTML.Tag tag, int i) {
-            if ("table".equals(tag.toString())) {
-              inTable = !inTable;
+            if (!isSimpleIndex) {
+              if ("table".equals(tag.toString())) {
+                inTable = !inTable;
+              }
             }
           }
         }, true);
         return packages;
       }
-    }, Collections.<String>emptyList(), LOG);
+    }, Collections.emptyList(), LOG);
   }
 
   public Collection<String> getPackageNames() {

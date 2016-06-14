@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -104,7 +104,10 @@ public class EncodingUtil {
     }
   }
 
-  public static void saveIn(@NotNull final Document document, final Editor editor, @NotNull final VirtualFile virtualFile, @NotNull final Charset charset) {
+  static void saveIn(@NotNull final Document document,
+                     final Editor editor,
+                     @NotNull final VirtualFile virtualFile,
+                     @NotNull final Charset charset) {
     FileDocumentManager documentManager = FileDocumentManager.getInstance();
     documentManager.saveDocument(document);
     final Project project = ProjectLocator.getInstance().guessProjectForFile(virtualFile);
@@ -129,12 +132,7 @@ public class EncodingUtil {
       Messages.showErrorDialog(project, io.getMessage(), "Error Writing File");
     }
 
-    EncodingProjectManagerImpl.suppressReloadDuring(new Runnable() {
-      @Override
-      public void run() {
-        EncodingManager.getInstance().setEncoding(virtualFile, charset);
-      }
-    });
+    EncodingProjectManagerImpl.suppressReloadDuring(() -> EncodingManager.getInstance().setEncoding(virtualFile, charset));
   }
 
   static void reloadIn(@NotNull final VirtualFile virtualFile, @NotNull final Charset charset) {
@@ -167,13 +165,8 @@ public class EncodingUtil {
 
     // if file was modified, the user will be asked here
     try {
-      EncodingProjectManagerImpl.suppressReloadDuring(new Runnable() {
-        @Override
-        public void run() {
-          ((VirtualFileListener)documentManager).contentsChanged(
-            new VirtualFileEvent(null, virtualFile, virtualFile.getName(), virtualFile.getParent()));
-        }
-      });
+      EncodingProjectManagerImpl.suppressReloadDuring(() -> ((VirtualFileListener)documentManager).contentsChanged(
+        new VirtualFileEvent(null, virtualFile, virtualFile.getName(), virtualFile.getParent())));
     }
     finally {
       Disposer.dispose(disposable);
@@ -182,7 +175,7 @@ public class EncodingUtil {
 
   // returns (hardcoded charset from the file type, explanation) or (null, null) if file type does not restrict encoding
   @NotNull
-  static Pair<Charset, String> checkHardcodedCharsetFileType(@NotNull VirtualFile virtualFile) {
+  private static Pair<Charset, String> checkHardcodedCharsetFileType(@NotNull VirtualFile virtualFile) {
     FileType fileType = virtualFile.getFileType();
     if (fileType.isBinary()) return Pair.create(null, "binary file");
     // in lesser IDEs all special file types are plain text so check for that first
@@ -201,7 +194,7 @@ public class EncodingUtil {
   }
 
   @NotNull
-  // returns existing charset (null means N/A), failReason: null means enabled, notnull means disabled and contains error message
+  // returns pair (existing charset (null means N/A); failReason: null means enabled, notnull means disabled and contains error message)
   public static Pair<Charset, String> checkCanReload(@NotNull VirtualFile virtualFile) {
     if (virtualFile.isDirectory()) {
       return Pair.create(null, "file is a directory");
@@ -233,7 +226,7 @@ public class EncodingUtil {
   }
 
   @Nullable("null means enabled, notnull means disabled and contains error message")
-  public static String checkCanConvert(@NotNull VirtualFile virtualFile) {
+  static String checkCanConvert(@NotNull VirtualFile virtualFile) {
     if (virtualFile.isDirectory()) {
       return "file is a directory";
     }

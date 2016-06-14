@@ -24,7 +24,6 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.*;
 import com.intellij.openapi.roots.impl.libraries.LibraryEx;
 import com.intellij.openapi.roots.libraries.Library;
-import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VfsUtilCore;
@@ -34,6 +33,7 @@ import com.intellij.util.CollectionQuery;
 import com.intellij.util.Query;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.MultiMap;
+import com.intellij.util.containers.SLRUMap;
 import gnu.trove.TObjectIntHashMap;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -42,15 +42,14 @@ import org.jetbrains.jps.model.module.JpsModuleSourceRootType;
 import java.util.*;
 
 public class RootIndex {
-  public static final Comparator<OrderEntry> BY_OWNER_MODULE = new Comparator<OrderEntry>() {
-    @Override
-    public int compare(OrderEntry o1, OrderEntry o2) {
-      String name1 = o1.getOwnerModule().getName();
-      String name2 = o2.getOwnerModule().getName();
-      return name1.compareTo(name2);
-    }
+  public static final Comparator<OrderEntry> BY_OWNER_MODULE = (o1, o2) -> {
+    String name1 = o1.getOwnerModule().getName();
+    String name2 = o2.getOwnerModule().getName();
+    return name1.compareTo(name2);
   };
+
   private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.roots.impl.RootIndex");
+  private static final FileTypeRegistry ourFileTypes = FileTypeRegistry.getInstance();
 
   private final Map<VirtualFile, String> myPackagePrefixByRoot = ContainerUtil.newHashMap();
 
@@ -59,7 +58,7 @@ public class RootIndex {
   private final TObjectIntHashMap<JpsModuleSourceRootType<?>> myRootTypeId = new TObjectIntHashMap<JpsModuleSourceRootType<?>>();
   @NotNull private final Project myProject;
   private final PackageDirectoryCache myPackageDirectoryCache;
-  private volatile Map<VirtualFile, OrderEntry[]> myOrderEntries;
+  private OrderEntryGraph myOrderEntryGraph;
 
   // made public for Upsource
   public RootIndex(@NotNull Project project, @NotNull InfoCache cache) {
@@ -162,79 +161,193 @@ public class RootIndex {
   }
 
   @NotNull
-  private Map<VirtualFile, OrderEntry[]> getOrderEntries() {
-    Map<VirtualFile, OrderEntry[]> result = myOrderEntries;
-    if (result != null) return result;
+  private synchronized OrderEntryGraph getOrderEntryGraph() {
+    if (myOrderEntryGraph == null) {
+      RootInfo rootInfo = buildRootInfo(myProject);
+      myOrderEntryGraph = new OrderEntryGraph(myProject, rootInfo);
+    }
+    return myOrderEntryGraph;
+  }
 
-    MultiMap<VirtualFile, OrderEntry> libClassRootEntries = MultiMap.createSmart();
-    MultiMap<VirtualFile, OrderEntry> libSourceRootEntries = MultiMap.createSmart();
-    MultiMap<VirtualFile, OrderEntry> depEntries = MultiMap.createSmart();
+  /**
+   * A reverse dependency graph of (library, jdk, module, module source) -> (module).
+   *
+   * <p>Each edge carries with it the associated OrderEntry that caused the dependency.
+   */
+  private static class OrderEntryGraph {
 
-    for (final Module module : ModuleManager.getInstance(myProject).getModules()) {
-      final ModuleRootManager moduleRootManager = ModuleRootManager.getInstance(module);
-      for (OrderEntry orderEntry : moduleRootManager.getOrderEntries()) {
-        if (orderEntry instanceof ModuleOrderEntry) {
-          final Module depModule = ((ModuleOrderEntry)orderEntry).getModule();
-          if (depModule != null) {
-            VirtualFile[] importedClassRoots =
-              OrderEnumerator.orderEntries(depModule).exportedOnly().recursively().classes().usingCache().getRoots();
-            for (VirtualFile importedClassRoot : importedClassRoots) {
-              depEntries.putValue(importedClassRoot, orderEntry);
-            }
-          }
-          for (VirtualFile sourceRoot : orderEntry.getFiles(OrderRootType.SOURCES)) {
-            depEntries.putValue(sourceRoot, orderEntry);
-          }
-        }
-        else if (orderEntry instanceof LibraryOrSdkOrderEntry) {
-          final LibraryOrSdkOrderEntry entry = (LibraryOrSdkOrderEntry)orderEntry;
-          for (final VirtualFile sourceRoot : entry.getRootFiles(OrderRootType.SOURCES)) {
-            libSourceRootEntries.putValue(sourceRoot, orderEntry);
-          }
-          for (final VirtualFile classRoot : entry.getRootFiles(OrderRootType.CLASSES)) {
-            libClassRootEntries.putValue(classRoot, orderEntry);
-          }
-        }
+    private static class Edge {
+      Module myKey;
+      ModuleOrderEntry myOrderEntry; // Order entry from myKey -> the node containing the edge
+      boolean myRecursive; // Whether this edge should be descended into during graph walk
+
+      public Edge(Module key, ModuleOrderEntry orderEntry, boolean recursive) {
+        myKey = key;
+        myOrderEntry = orderEntry;
+        myRecursive = recursive;
+      }
+
+      @Override
+      public String toString() {
+        return myOrderEntry.toString();
       }
     }
 
-    RootInfo rootInfo = buildRootInfo(myProject);
-    result = ContainerUtil.newHashMap();
-    Set<VirtualFile> allRoots = rootInfo.getAllRoots();
-    for (VirtualFile file : allRoots) {
-      List<VirtualFile> hierarchy = getHierarchy(file, allRoots, rootInfo);
-      result.put(file, hierarchy == null
-                       ? OrderEntry.EMPTY_ARRAY
-                       : calcOrderEntries(rootInfo, depEntries, libClassRootEntries, libSourceRootEntries, hierarchy));
-    }
-    myOrderEntries = result;
-    return result;
-  }
+    private static class Node {
+      Module myKey;
+      List<Edge> myEdges = new ArrayList<Edge>();
 
-  private static OrderEntry[] calcOrderEntries(@NotNull RootInfo info,
-                                               @NotNull MultiMap<VirtualFile, OrderEntry> depEntries,
-                                               @NotNull MultiMap<VirtualFile, OrderEntry> libClassRootEntries,
-                                               @NotNull MultiMap<VirtualFile, OrderEntry> libSourceRootEntries,
-                                               @NotNull List<VirtualFile> hierarchy) {
-    @Nullable VirtualFile libraryClassRoot = info.findLibraryRootInfo(hierarchy, false);
-    @Nullable VirtualFile librarySourceRoot = info.findLibraryRootInfo(hierarchy, true);
-    Set<OrderEntry> orderEntries = ContainerUtil.newLinkedHashSet();
-    orderEntries
-      .addAll(info.getLibraryOrderEntries(hierarchy, libraryClassRoot, librarySourceRoot, libClassRootEntries, libSourceRootEntries));
-    for (VirtualFile root : hierarchy) {
-      orderEntries.addAll(depEntries.get(root));
-    }
-    VirtualFile moduleContentRoot = info.findModuleRootInfo(hierarchy);
-    if (moduleContentRoot != null) {
-      ContainerUtil.addIfNotNull(orderEntries, info.getModuleSourceEntry(hierarchy, moduleContentRoot, libClassRootEntries));
-    }
-    if (orderEntries.isEmpty()) {
-      return null;
+      @Override
+      public String toString() {
+        return myKey.toString();
+      }
     }
 
-    OrderEntry[] array = orderEntries.toArray(new OrderEntry[orderEntries.size()]);
-    Arrays.sort(array, BY_OWNER_MODULE);
-    return array;
+    private static class Graph {
+      Map<Module, Node> myNodes = new HashMap<Module, Node>();
+    }
+
+    final Project myProject;
+    final RootInfo myRootInfo;
+    final Set<VirtualFile> myAllRoots;
+    Graph myGraph;
+    MultiMap<VirtualFile, Node> myRoots; // Map of roots to their root nodes, eg. library jar -> library node
+    final SynchronizedSLRUCache<VirtualFile, List<OrderEntry>> myCache;
+    private MultiMap<VirtualFile, OrderEntry> myLibClassRootEntries;
+    private MultiMap<VirtualFile, OrderEntry> myLibSourceRootEntries;
+
+    public OrderEntryGraph(Project project, RootInfo rootInfo) {
+      myProject = project;
+      myRootInfo = rootInfo;
+      myAllRoots = myRootInfo.getAllRoots();
+      int cacheSize = Math.max(25, (myAllRoots.size() / 100) * 2);
+      myCache = new SynchronizedSLRUCache<VirtualFile, List<OrderEntry>>(cacheSize, cacheSize) {
+        @NotNull
+        @Override
+        public List<OrderEntry> createValue(VirtualFile key) {
+          return collectOrderEntries(key);
+        }
+      };
+      initGraph();
+      initLibraryRoots();
+    }
+
+    private void initGraph() {
+      Graph graph = new Graph();
+
+      MultiMap<VirtualFile, Node> roots = MultiMap.createSmart();
+
+      for (final Module module : ModuleManager.getInstance(myProject).getModules()) {
+        final ModuleRootManager moduleRootManager = ModuleRootManager.getInstance(module);
+        List<OrderEnumerationHandler> handlers = OrderEnumeratorBase.getCustomHandlers(module);
+        for (OrderEntry orderEntry : moduleRootManager.getOrderEntries()) {
+          if (orderEntry instanceof ModuleOrderEntry) {
+            ModuleOrderEntry moduleOrderEntry = (ModuleOrderEntry)orderEntry;
+            final Module depModule = moduleOrderEntry.getModule();
+            if (depModule != null) {
+              Node node = graph.myNodes.get(depModule);
+              OrderEnumerator en = OrderEnumerator.orderEntries(depModule).exportedOnly();
+              if (node == null) {
+                node = new Node();
+                node.myKey = depModule;
+                graph.myNodes.put(depModule, node);
+
+                VirtualFile[] importedClassRoots = en.classes().usingCache().getRoots();
+                for (VirtualFile importedClassRoot : importedClassRoots) {
+                  roots.putValue(importedClassRoot, node);
+                }
+
+                VirtualFile[] importedSourceRoots = en.sources().usingCache().getRoots();
+                for (VirtualFile sourceRoot : importedSourceRoots) {
+                  roots.putValue(sourceRoot, node);
+                }
+              }
+              boolean shouldRecurse = en.recursively().shouldRecurse(moduleOrderEntry, handlers);
+              node.myEdges.add(new Edge(module, moduleOrderEntry, shouldRecurse));
+            }
+          }
+        }
+      }
+
+      myGraph = graph;
+      myRoots = roots;
+    }
+
+    private void initLibraryRoots() {
+      MultiMap<VirtualFile, OrderEntry> libClassRootEntries = MultiMap.createSmart();
+      MultiMap<VirtualFile, OrderEntry> libSourceRootEntries = MultiMap.createSmart();
+
+      for (final Module module : ModuleManager.getInstance(myProject).getModules()) {
+        final ModuleRootManager moduleRootManager = ModuleRootManager.getInstance(module);
+        for (OrderEntry orderEntry : moduleRootManager.getOrderEntries()) {
+          if (orderEntry instanceof LibraryOrSdkOrderEntry) {
+            final LibraryOrSdkOrderEntry entry = (LibraryOrSdkOrderEntry)orderEntry;
+            for (final VirtualFile sourceRoot : entry.getRootFiles(OrderRootType.SOURCES)) {
+              libSourceRootEntries.putValue(sourceRoot, orderEntry);
+            }
+            for (final VirtualFile classRoot : entry.getRootFiles(OrderRootType.CLASSES)) {
+              libClassRootEntries.putValue(classRoot, orderEntry);
+            }
+          }
+        }
+      }
+
+      myLibClassRootEntries = libClassRootEntries;
+      myLibSourceRootEntries = libSourceRootEntries;
+    }
+
+    private List<OrderEntry> getOrderEntries(@NotNull VirtualFile file) {
+      return myCache.get(file);
+    }
+
+    /**
+     * Traverses the graph from the given file, collecting all encountered order entries.
+     */
+    private List<OrderEntry> collectOrderEntries(@NotNull VirtualFile file) {
+      List<VirtualFile> roots = getHierarchy(file, myAllRoots, myRootInfo);
+      if (roots == null) {
+        return Collections.emptyList();
+      }
+      List<OrderEntry> result = new ArrayList<OrderEntry>();
+      Stack<Node> stack = new Stack<Node>();
+      for (VirtualFile root : roots) {
+        Collection<Node> nodes = myRoots.get(root);
+        for (Node node : nodes) {
+          stack.push(node);
+        }
+      }
+
+      Set<Node> seen = new HashSet<Node>();
+      while (!stack.isEmpty()) {
+        Node node = stack.pop();
+        if (seen.contains(node)) {
+          continue;
+        }
+        seen.add(node);
+
+        for (Edge edge : node.myEdges) {
+          result.add(edge.myOrderEntry);
+
+          if (edge.myRecursive) {
+            Node targetNode = myGraph.myNodes.get(edge.myKey);
+            if (targetNode != null) {
+              stack.push(targetNode);
+            }
+          }
+        }
+      }
+
+      @Nullable VirtualFile libraryClassRoot = myRootInfo.findLibraryRootInfo(roots, false);
+      @Nullable VirtualFile librarySourceRoot = myRootInfo.findLibraryRootInfo(roots, true);
+      result.addAll(myRootInfo.getLibraryOrderEntries(roots, libraryClassRoot, librarySourceRoot, myLibClassRootEntries, myLibSourceRootEntries));
+
+      VirtualFile moduleContentRoot = myRootInfo.findModuleRootInfo(roots);
+      if (moduleContentRoot != null) {
+        ContainerUtil.addIfNotNull(result, myRootInfo.getModuleSourceEntry(roots, moduleContentRoot, myLibClassRootEntries));
+      }
+      Collections.sort(result, BY_OWNER_MODULE);
+      return result;
+    }
   }
 
   private int getRootTypeId(@NotNull JpsModuleSourceRootType<?> rootType) {
@@ -262,7 +375,7 @@ public class RootIndex {
       if (info != null) {
         return info;
       }
-      if (isIgnored(file)) {
+      if (ourFileTypes.isFileIgnored(file)) {
         return NonProjectDirectoryInfo.IGNORED;
       }
       dir = file.getParent();
@@ -284,7 +397,7 @@ public class RootIndex {
         return info;
       }
 
-      if (isIgnored(root)) {
+      if (ourFileTypes.isFileIgnored(root)) {
         return cacheInfos(dir, root, NonProjectDirectoryInfo.IGNORED);
       }
     }
@@ -309,12 +422,9 @@ public class RootIndex {
     // Note that this method is used in upsource as well, hence, don't reduce this method's visibility.
     List<VirtualFile> result = myPackageDirectoryCache.getDirectoriesByPackageName(packageName);
     if (!includeLibrarySources) {
-      result = ContainerUtil.filter(result, new Condition<VirtualFile>() {
-        @Override
-        public boolean value(VirtualFile file) {
-          DirectoryInfo info = getInfoForFile(file);
-          return info.isInProject() && (!info.isInLibrarySource() || info.isInModuleSource() || info.hasLibraryClassRoot());
-        }
+      result = ContainerUtil.filter(result, file -> {
+        DirectoryInfo info = getInfoForFile(file);
+        return info.isInProject() && (!info.isInLibrarySource() || info.isInModuleSource() || info.hasLibraryClassRoot());
       });
     }
     return new CollectionQuery<VirtualFile>(result);
@@ -323,7 +433,7 @@ public class RootIndex {
   @Nullable
   public String getPackageName(@NotNull final VirtualFile dir) {
     if (dir.isDirectory()) {
-      if (isIgnored(dir)) {
+      if (ourFileTypes.isFileIgnored(dir)) {
         return null;
       }
 
@@ -367,7 +477,7 @@ public class RootIndex {
     boolean hasContentRoots = false;
     while (dir != null) {
       hasContentRoots |= info.contentRootOf.get(dir) != null;
-      if (!hasContentRoots && isIgnored(dir)) {
+      if (!hasContentRoots && ourFileTypes.isFileIgnored(dir)) {
         return null;
       }
       if (allRoots.contains(dir)) {
@@ -376,10 +486,6 @@ public class RootIndex {
       dir = dir.getParent();
     }
     return hierarchy;
-  }
-
-  private static boolean isIgnored(@NotNull VirtualFile dir) {
-    return FileTypeRegistry.getInstance().isFileIgnored(dir);
   }
 
   private static class RootInfo {
@@ -508,6 +614,7 @@ public class RootIndex {
       return orderEntries;
     }
 
+
     @Nullable
     private ModuleSourceOrderEntry getModuleSourceEntry(@NotNull List<VirtualFile> hierarchy,
                                                         @NotNull VirtualFile moduleContentRoot,
@@ -524,7 +631,6 @@ public class RootIndex {
       return null;
     }
   }
-
 
   @NotNull
   private static Pair<DirectoryInfo, String> calcDirectoryInfo(@NotNull final VirtualFile root,
@@ -562,10 +668,9 @@ public class RootIndex {
   }
 
   @NotNull
-  public OrderEntry[] getOrderEntries(@NotNull DirectoryInfo info) {
-    if (!(info instanceof DirectoryInfoImpl)) return OrderEntry.EMPTY_ARRAY;
-    OrderEntry[] entries = this.getOrderEntries().get(((DirectoryInfoImpl)info).getRoot());
-    return entries == null ? OrderEntry.EMPTY_ARRAY : entries;
+  public List<OrderEntry> getOrderEntries(@NotNull DirectoryInfo info) {
+    if (!(info instanceof DirectoryInfoImpl)) return Collections.emptyList();
+    return getOrderEntryGraph().getOrderEntries(((DirectoryInfoImpl)info).getRoot());
   }
 
   public interface InfoCache {
@@ -573,5 +678,37 @@ public class RootIndex {
     DirectoryInfo getCachedInfo(@NotNull VirtualFile dir);
 
     void cacheInfo(@NotNull VirtualFile dir, @NotNull DirectoryInfo info);
+  }
+
+  /**
+   * An LRU cache with synchronization around the primary cache operations (get() and insertion
+   * of a newly created value). Other map operations are not synchronized.
+   */
+  abstract static class SynchronizedSLRUCache<K, V> extends SLRUMap<K,V> {
+    protected final Object myLock = new Object();
+
+    protected SynchronizedSLRUCache(final int protectedQueueSize, final int probationalQueueSize) {
+      super(protectedQueueSize, probationalQueueSize);
+    }
+
+    @NotNull
+    public abstract V createValue(K key);
+
+    @Override
+    @NotNull
+    public V get(K key) {
+      V value;
+      synchronized (myLock) {
+        value = super.get(key);
+        if (value != null) {
+          return value;
+        }
+      }
+      value = createValue(key);
+      synchronized (myLock) {
+        put(key, value);
+      }
+      return value;
+    }
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,12 +30,16 @@ import com.intellij.debugger.ui.impl.watch.DebuggerTree;
 import com.intellij.debugger.ui.impl.watch.DebuggerTreeNodeImpl;
 import com.intellij.ide.DataManager;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.project.Project;
 import com.intellij.ui.DoubleClickListener;
 import com.intellij.xdebugger.XDebugProcess;
 import com.intellij.xdebugger.XDebugSession;
 import com.intellij.xdebugger.impl.frame.XDebugView;
+import com.intellij.xdebugger.impl.ui.DebuggerUIUtil;
 import com.intellij.xdebugger.impl.ui.tree.XDebuggerTree;
 import com.intellij.xdebugger.impl.ui.tree.nodes.XValueNodeImpl;
 import org.jetbrains.annotations.NotNull;
@@ -87,7 +91,7 @@ public abstract class DebuggerAction extends AnAction {
     if (paths == null || paths.length == 0) {
       return EMPTY_TREE_NODE_ARRAY;
     }
-    List<DebuggerTreeNodeImpl> nodes = new ArrayList<DebuggerTreeNodeImpl>(paths.length);
+    List<DebuggerTreeNodeImpl> nodes = new ArrayList<>(paths.length);
     for (TreePath path : paths) {
       Object component = path.getLastPathComponent();
       if (component instanceof DebuggerTreeNodeImpl) {
@@ -97,6 +101,7 @@ public abstract class DebuggerAction extends AnAction {
     return nodes.toArray(new DebuggerTreeNodeImpl[nodes.size()]);
   }
 
+  @NotNull
   public static DebuggerContextImpl getDebuggerContext(DataContext dataContext) {
     DebuggerTreePanel panel = getPanel(dataContext);
     if(panel != null) {
@@ -132,15 +137,10 @@ public abstract class DebuggerAction extends AnAction {
     };
     listener.installOn(tree);
 
-    final AnAction action = ActionManager.getInstance().getAction(actionName);
-    action.registerCustomShortcutSet(CommonShortcuts.getEditSource(), tree);
+    Disposable disposable = () -> listener.uninstall(tree);
+    DebuggerUIUtil.registerActionOnComponent(actionName, tree, disposable);
 
-    return new Disposable() {
-      public void dispose() {
-        listener.uninstall(tree);
-        action.unregisterCustomShortcutSet(tree);
-      }
-    };
+    return disposable;
   }
 
   public static boolean isFirstStart(final AnActionEvent event) {
@@ -153,11 +153,9 @@ public abstract class DebuggerAction extends AnAction {
   }
 
   public static void enableAction(final AnActionEvent event, final boolean enable) {
-    SwingUtilities.invokeLater(new Runnable() {
-      public void run() {
-        event.getPresentation().setEnabled(enable);
-        event.getPresentation().setVisible(true);
-      }
+    SwingUtilities.invokeLater(() -> {
+      event.getPresentation().setEnabled(enable);
+      event.getPresentation().setVisible(true);
     });
   }
 

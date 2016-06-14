@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,17 +19,14 @@ import com.intellij.ProjectTopics;
 import com.intellij.notification.Notification;
 import com.intellij.notification.NotificationType;
 import com.intellij.notification.Notifications;
-import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.TransactionGuard;
 import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
-import com.intellij.openapi.components.StoragePathMacros;
-import com.intellij.openapi.components.StorageScheme;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleType;
 import com.intellij.openapi.module.UnknownModuleType;
-import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectBundle;
@@ -39,20 +36,13 @@ import com.intellij.util.messages.MessageBusConnection;
 import com.intellij.util.messages.MessageHandler;
 import org.jetbrains.annotations.NotNull;
 
-import java.io.IOException;
 import java.lang.reflect.Method;
 import java.util.List;
 
 /**
  * @author yole
  */
-@State(
-  name = ModuleManagerImpl.COMPONENT_NAME,
-  storages = {
-    @Storage(file = StoragePathMacros.PROJECT_FILE),
-    @Storage(file = StoragePathMacros.PROJECT_CONFIG_DIR + "/modules.xml", scheme = StorageScheme.DIRECTORY_BASED)
-  }
-)
+@State(name = ModuleManagerImpl.COMPONENT_NAME, storages = @Storage("modules.xml"))
 public class ModuleManagerComponent extends ModuleManagerImpl {
   private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.module.impl.ModuleManagerComponent");
   private final ProgressManager myProgressManager;
@@ -72,7 +62,9 @@ public class ModuleManagerComponent extends ModuleManagerImpl {
     myConnection.subscribe(ProjectTopics.PROJECT_ROOTS);
     myConnection.subscribe(ProjectLifecycleListener.TOPIC, new ProjectLifecycleListener.Adapter() {
       @Override
-      public void projectComponentsInitialized(final Project project) {
+      public void projectComponentsInitialized(@NotNull final Project project) {
+        if (project != myProject) return;
+
         long t = System.currentTimeMillis();
         loadModules(myModuleModel);
         t = System.currentTimeMillis() - t;
@@ -118,10 +110,8 @@ public class ModuleManagerComponent extends ModuleManagerImpl {
 
   @NotNull
   @Override
-  protected ModuleEx createAndLoadModule(@NotNull String filePath) throws IOException {
-    ModuleImpl module = new ModuleImpl(filePath, myProject);
-    module.getStateStore().load();
-    return module;
+  protected ModuleEx createAndLoadModule(@NotNull String filePath) {
+    return new ModuleImpl(filePath, myProject);
   }
 
   @Override
@@ -131,34 +121,8 @@ public class ModuleManagerComponent extends ModuleManagerImpl {
 
   @Override
   protected void fireModulesAdded() {
-    Runnable runnableWithProgress = new Runnable() {
-      @Override
-      public void run() {
-        for (final Module module : myModuleModel.myPathToModule.values()) {
-          final Application app = ApplicationManager.getApplication();
-          final Runnable swingRunnable = new Runnable() {
-            @Override
-            public void run() {
-              fireModuleAddedInWriteAction(module);
-            }
-          };
-          if (app.isDispatchThread()) {
-            swingRunnable.run();
-          }
-          else {
-            ProgressIndicator pi = ProgressManager.getInstance().getProgressIndicator();
-            app.invokeAndWait(swingRunnable, pi.getModalityState());
-          }
-        }
-      }
-    };
-
-    ProgressIndicator progressIndicator = myProgressManager.getProgressIndicator();
-    if (progressIndicator == null) {
-      myProgressManager.runProcessWithProgressSynchronously(runnableWithProgress, "Initializing modules...", false, myProject);
-    }
-    else {
-      runnableWithProgress.run();
+    for (final Module module : myModuleModel.myModules.values()) {
+      TransactionGuard.getInstance().submitTransactionAndWait(() -> fireModuleAddedInWriteAction(module));
     }
   }
 

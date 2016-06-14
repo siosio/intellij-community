@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@
 package com.intellij.openapi.ui;
 
 import com.intellij.openapi.components.*;
-import com.intellij.openapi.components.StoragePathMacros;
 import com.intellij.openapi.project.Project;
 import com.intellij.util.xmlb.SkipDefaultValuesSerializationFilters;
 import com.intellij.util.xmlb.XmlSerializer;
@@ -35,13 +34,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 
-@State(
-  name="masterDetails",
-  storages= {
-    @Storage(
-      file = StoragePathMacros.WORKSPACE_FILE
-    )}
-)
+@State(name = "masterDetails", storages = @Storage(StoragePathMacros.WORKSPACE_FILE))
 public class MasterDetailsStateService implements PersistentStateComponent<MasterDetailsStateService.States>{
   private final SkipDefaultValuesSerializationFilters mySerializationFilter = new SkipDefaultValuesSerializationFilters();
   private final Map<String, ComponentState> myStates = new HashMap<String, ComponentState>();
@@ -80,12 +73,7 @@ public class MasterDetailsStateService implements PersistentStateComponent<Maste
   public States getState() {
     States states = new States();
     states.myStates.addAll(myStates.values());
-    Collections.sort(states.getStates(), new Comparator<ComponentState>() {
-      @Override
-      public int compare(ComponentState o1, ComponentState o2) {
-        return o1.myKey.compareTo(o2.myKey);
-      }
-    });
+    Collections.sort(states.getStates(), (o1, o2) -> o1.myKey.compareTo(o2.myKey));
     return states;
   }
 

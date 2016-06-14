@@ -36,6 +36,7 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.IdeFocusManager;
+import com.intellij.ui.JBSplitter;
 import com.intellij.util.TimeoutUtil;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.xdebugger.impl.frame.XStandaloneVariablesView;
@@ -101,37 +102,28 @@ public class PythonConsoleView extends LanguageConsoleImpl implements Observable
 
   @Override
   public void executeCode(final @NotNull String code, @Nullable final Editor editor) {
-    showConsole(new Runnable() {
+    showConsole(() -> ProgressManager.getInstance().run(new Task.Backgroundable(null, "Executing Code in Console...", false) {
       @Override
-      public void run() {
-        ProgressManager.getInstance().run(new Task.Backgroundable(null, "Executing code in console...", false) {
-          @Override
-          public void run(@NotNull final ProgressIndicator indicator) {
-            long time = System.currentTimeMillis();
-            while (!myExecuteActionHandler.isEnabled() || !myExecuteActionHandler.canExecuteNow()) {
-              if (indicator.isCanceled()) {
-                break;
-              }
-              if (System.currentTimeMillis() - time > 1000) {
-                if (editor != null) {
-                  UIUtil.invokeLaterIfNeeded(new Runnable() {
-                    @Override
-                    public void run() {
-                      HintManager.getInstance().showErrorHint(editor, myExecuteActionHandler.getCantExecuteMessage());
-                    }
-                  });
-                }
-                return;
-              }
-              TimeoutUtil.sleep(300);
-            }
-            if (!indicator.isCanceled()) {
-              doExecute(code);
-            }
+      public void run(@NotNull final ProgressIndicator indicator) {
+        long time = System.currentTimeMillis();
+        while (!myExecuteActionHandler.isEnabled() || !myExecuteActionHandler.canExecuteNow()) {
+          if (indicator.isCanceled()) {
+            break;
           }
-        });
+          if (System.currentTimeMillis() - time > 1000) {
+            if (editor != null) {
+              UIUtil.invokeLaterIfNeeded(
+                () -> HintManager.getInstance().showErrorHint(editor, myExecuteActionHandler.getCantExecuteMessage()));
+            }
+            return;
+          }
+          TimeoutUtil.sleep(300);
+        }
+        if (!indicator.isCanceled()) {
+          doExecute(code);
+        }
       }
-    });
+    }));
   }
 
   private void showConsole(@NotNull Runnable runnable) {
@@ -151,17 +143,14 @@ public class PythonConsoleView extends LanguageConsoleImpl implements Observable
   }
 
   public void executeInConsole(final String code) {
-    UIUtil.invokeLaterIfNeeded(new Runnable() {
-      @Override
-      public void run() {
-        String text = getConsoleEditor().getDocument().getText();
+    UIUtil.invokeLaterIfNeeded(() -> {
+      String text = getConsoleEditor().getDocument().getText();
 
-        setInputText(code);
-        myExecuteActionHandler.runExecuteAction(PythonConsoleView.this);
+      setInputText(code);
+      myExecuteActionHandler.runExecuteAction(PythonConsoleView.this);
 
-        if (!StringUtil.isEmpty(text)) {
-          setInputText(text);
-        }
+      if (!StringUtil.isEmpty(text)) {
+        setInputText(text);
       }
     });
   }
@@ -169,6 +158,10 @@ public class PythonConsoleView extends LanguageConsoleImpl implements Observable
   public void executeStatement(@NotNull String statement, @NotNull final Key attributes) {
     print(statement, outputTypeForAttributes(attributes));
     myExecuteActionHandler.processLine(statement, true);
+  }
+
+  public void printText(String text, final ConsoleViewContentType outputType) {
+    super.print(text, outputType);
   }
 
   public void print(String text, @NotNull final Key attributes) {
@@ -282,24 +275,25 @@ public class PythonConsoleView extends LanguageConsoleImpl implements Observable
   private void splitWindow() {
     Component console = getComponent(0);
     removeAll();
-    JSplitPane p = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT);
-    p.setBorder(BorderFactory.createEmptyBorder());
-    p.add(console, JSplitPane.LEFT);
-    p.add(mySplitView.getPanel(), JSplitPane.RIGHT);
-    p.setDividerLocation((int)getSize().getWidth() * 2 / 3);
+    JBSplitter p = new JBSplitter(false, 2f/3);
+    p.setFirstComponent((JComponent)console);
+    p.setSecondComponent(mySplitView.getPanel());
+    p.setShowDividerControls(true);
+    p.setHonorComponentsMinimumSize(true);
+
     add(p, BorderLayout.CENTER);
     validate();
     repaint();
   }
 
   public void restoreWindow() {
-    JSplitPane pane = (JSplitPane)getComponent(0);
+    JBSplitter pane = (JBSplitter)getComponent(0);
     removeAll();
     if (mySplitView != null) {
       Disposer.dispose(mySplitView);
       mySplitView = null;
     }
-    add(pane.getLeftComponent(), BorderLayout.CENTER);
+    add(pane.getFirstComponent(), BorderLayout.CENTER);
     validate();
     repaint();
   }

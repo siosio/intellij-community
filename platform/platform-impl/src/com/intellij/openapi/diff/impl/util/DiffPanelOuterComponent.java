@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -57,12 +57,7 @@ public class DiffPanelOuterComponent extends JPanel implements DataProvider {
     disableToolbar(false);
     myWrapper = new JPanel(new BorderLayout());
     add(myWrapper, BorderLayout.CENTER);
-    myDefaultHeight = new Getter<Integer>() {
-      @Override
-      public Integer get() {
-        return 400;
-      }
-    };
+    myDefaultHeight = () -> 400;
     myPreferredHeightGetter = myDefaultHeight;
     myPrefferedWidth = 600;
   }
@@ -76,11 +71,6 @@ public class DiffPanelOuterComponent extends JPanel implements DataProvider {
       myToolbar.resetToolbar(myDefaultActions);
     }
     return myToolbar.getToolbar();
-  }
-
-  public void resetDiffComponent(JComponent component, ScrollingPanel scrollingPanel) {
-    myWrapper.removeAll();
-    insertDiffComponent(component, scrollingPanel);
   }
 
   public void insertDiffComponent(JComponent component, ScrollingPanel scrollingPanel) {
@@ -203,12 +193,6 @@ public class DiffPanelOuterComponent extends JPanel implements DataProvider {
     myWrapper.remove(jComponent);
   }
 
-  public void addStatusBar() {
-    if (myStatusBar != null) {
-      myStatusBar.setVisible(true);
-    }
-  }
-
   private interface DeferScrollToFirstDiff {
     DeferScrollToFirstDiff scrollNow(ScrollingPanel panel, JComponent component);
 
@@ -237,11 +221,7 @@ public class DiffPanelOuterComponent extends JPanel implements DataProvider {
 
     public void deferScroll(final DiffPanelOuterComponent outer) {
       if (!outer.isDisplayable()) return;
-      SwingUtilities.invokeLater(new Runnable() {
-        public void run() {
-          outer.performScroll();
-        }
-      });
+      SwingUtilities.invokeLater(() -> outer.performScroll());
     }
   };
 

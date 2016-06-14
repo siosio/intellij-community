@@ -40,6 +40,7 @@ import java.util.*;
 public class CommonActionsPanel extends JPanel {
   private final boolean myDecorateButtons;
   private final ActionToolbarPosition myPosition;
+  private final ActionToolbar myToolbar;
 
   public enum Buttons {
     ADD, REMOVE, EDIT,  UP, DOWN;
@@ -49,7 +50,7 @@ public class CommonActionsPanel extends JPanel {
     public Icon getIcon() {
       switch (this) {
         case ADD:    return IconUtil.getAddIcon();
-        case EDIT:    return IconUtil.getEditIcon();
+        case EDIT:   return IconUtil.getEditIcon();
         case REMOVE: return IconUtil.getRemoveIcon();
         case UP:     return IconUtil.getMoveUpIcon();
         case DOWN:   return IconUtil.getMoveDownIcon();
@@ -143,21 +144,35 @@ public class CommonActionsPanel extends JPanel {
     myDecorateButtons = UIUtil.isUnderAquaLookAndFeel() && position == ActionToolbarPosition.BOTTOM;
 
     final ActionManagerEx mgr = (ActionManagerEx)ActionManager.getInstance();
-    final ActionToolbar toolbar = mgr.createActionToolbar(ActionPlaces.UNKNOWN,
-                                                          new DefaultActionGroup(toolbarActions.toArray(new AnAction[toolbarActions.size()])),
-                                                          position == ActionToolbarPosition.BOTTOM || position == ActionToolbarPosition.TOP,
-                                                          myDecorateButtons);
-    toolbar.getComponent().setOpaque(false);
-    toolbar.getComponent().setBorder(null);
-    add(toolbar.getComponent(), BorderLayout.CENTER);
+    myToolbar = mgr.createActionToolbar(ActionPlaces.UNKNOWN,
+                                        new DefaultActionGroup(toolbarActions.toArray(new AnAction[toolbarActions.size()])),
+                                        position == ActionToolbarPosition.BOTTOM || position == ActionToolbarPosition.TOP,
+                                        myDecorateButtons);
+    myToolbar.getComponent().setBorder(null);
+    add(myToolbar.getComponent(), BorderLayout.CENTER);
+  }
+
+  @NotNull
+  public ActionToolbar getToolbar() {
+    return myToolbar;
+  }
+
+  public void setToolbarLabel(JComponent label, ActionToolbarPosition position) {
+    removeAll();
+    add(label, ToolbarDecorator.getPlacement(position));
+    if (position == ActionToolbarPosition.LEFT) add(myToolbar.getComponent(), BorderLayout.EAST);
+    else if (position == ActionToolbarPosition.RIGHT) add(myToolbar.getComponent(), BorderLayout.WEST);
+    else add(myToolbar.getComponent(), BorderLayout.CENTER);
   }
 
   @Override
   protected void paintComponent(Graphics g2) {
     final Graphics2D g = (Graphics2D)g2;
     if (myDecorateButtons) {
+      myToolbar.getComponent().setOpaque(false);
       MacUIUtil.drawToolbarDecoratorBackground(g, getWidth(), getHeight());
-    } else {
+    }
+    else {
       super.paintComponent(g);
     }
   }

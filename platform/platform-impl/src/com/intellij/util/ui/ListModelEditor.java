@@ -43,14 +43,14 @@ public class ListModelEditor<T> extends ListModelEditorBase<T> {
           if (!model.isEmpty()) {
             T lastItem = model.getElementAt(model.getSize() - 1);
             if (ListModelEditor.this.itemEditor.isEmpty(lastItem)) {
-              ListScrollingUtil.selectItem(list, ContainerUtil.indexOfIdentity(model.getItems(), lastItem));
+              ScrollingUtil.selectItem(list, ContainerUtil.indexOfIdentity(model.getItems(), lastItem));
               return;
             }
           }
 
           T item = createElement();
           model.add(item);
-          ListScrollingUtil.selectItem(list, ContainerUtil.indexOfIdentity(model.getItems(), item));
+          ScrollingUtil.selectItem(list, ContainerUtil.indexOfIdentity(model.getItems(), item));
         }
       })
     .setRemoveActionUpdater(new AnActionButtonUpdater() {
@@ -88,19 +88,16 @@ public class ListModelEditor<T> extends ListModelEditorBase<T> {
 
     // todo should we really do this?
     //noinspection SSBasedInspection
-    SwingUtilities.invokeLater(new Runnable() {
-      @Override
-      public void run() {
-        if (!model.isEmpty()) {
-          list.setSelectedIndex(0);
-        }
+    SwingUtilities.invokeLater(() -> {
+      if (!model.isEmpty()) {
+        list.setSelectedIndex(0);
       }
     });
   }
 
   private class MyListCellRenderer extends ColoredListCellRenderer {
     @Override
-    protected void customizeCellRenderer(JList list, Object value, int index, boolean selected, boolean hasFocus) {
+    protected void customizeCellRenderer(@NotNull JList list, Object value, int index, boolean selected, boolean hasFocus) {
       setBackground(UIUtil.getListBackground(selected));
       if (value != null) {
         //noinspection unchecked

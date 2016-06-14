@@ -71,12 +71,9 @@ public class DetectedIndentOptionsNotificationProvider extends EditorNotificatio
           CommonCodeStyleSettings.IndentOptions userOptions = settings.getIndentOptions(psiFile.getFileType());
           CommonCodeStyleSettings.IndentOptions detectedOptions = CodeStyleSettingsManager.getSettings(project).getIndentOptionsByFile(
             psiFile, null, false,
-            new Processor<FileIndentOptionsProvider>() {
-              @Override
-              public boolean process(FileIndentOptionsProvider provider) {
-                indentOptionsProviderRef.set(provider);
-                return false;
-              }
+            provider -> {
+              indentOptionsProviderRef.set(provider);
+              return false;
             });
           final FileIndentOptionsProvider provider = indentOptionsProviderRef.get();
           EditorNotificationInfo info = provider != null && !provider.isAcceptedWithoutWarning(project, file) && !userOptions.equals(detectedOptions)
@@ -89,12 +86,9 @@ public class DetectedIndentOptionsNotificationProvider extends EditorNotificatio
               panel.icon(info.getIcon());
             }
             for (final ActionLabelData actionLabelData : info.getLabelAndActions()) {
-              Runnable onClickAction = new Runnable() {
-                @Override
-                public void run() {
-                  actionLabelData.action.run();
-                  EditorNotifications.getInstance(project).updateAllNotifications();
-                }
+              Runnable onClickAction = () -> {
+                actionLabelData.action.run();
+                EditorNotifications.getInstance(project).updateAllNotifications();
               };
               panel.createActionLabel(actionLabelData.label, onClickAction);
             }
@@ -116,12 +110,15 @@ public class DetectedIndentOptionsNotificationProvider extends EditorNotificatio
     if (!ApplicationManager.getApplication().isHeadlessEnvironment()
         || ApplicationManager.getApplication().isUnitTestMode() && myShowNotificationInTest)
     {
-      FileEditor fileEditor = FileEditorManager.getInstance(file.getProject()).getSelectedEditor(vFile);
+      Project project = file.getProject();
+      FileEditorManager fileEditorManager = FileEditorManager.getInstance(project);
+      if (fileEditorManager == null) return;
+      FileEditor fileEditor = fileEditorManager.getSelectedEditor(vFile);
       if (fileEditor != null) {
         Boolean notifiedFlag = fileEditor.getUserData(NOTIFIED_FLAG);
         if (notifiedFlag == null || enforce) {
           fileEditor.putUserData(NOTIFIED_FLAG, Boolean.TRUE);
-          EditorNotifications.getInstance(file.getProject()).updateNotifications(vFile);
+          EditorNotifications.getInstance(project).updateNotifications(vFile);
         }
       }
     }

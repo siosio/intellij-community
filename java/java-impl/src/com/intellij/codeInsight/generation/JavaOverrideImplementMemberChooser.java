@@ -25,6 +25,7 @@ import com.intellij.openapi.keymap.KeymapManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.util.NotNullLazyValue;
+import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.infos.CandidateInfo;
 import com.intellij.psi.util.PsiUtil;
@@ -83,10 +84,15 @@ public class JavaOverrideImplementMemberChooser extends MemberChooser<PsiMethodM
         }
       };
     final boolean merge = PropertiesComponent.getInstance(project).getBoolean(PROP_COMBINED_OVERRIDE_IMPLEMENT, true);
+
+    final LanguageLevel languageLevel = PsiUtil.getLanguageLevel(aClass);
+    //hide option if implement interface for 1.5 language level
+    final boolean overrideVisible = languageLevel.isAtLeast(LanguageLevel.JDK_1_6) || languageLevel.equals(LanguageLevel.JDK_1_5) && !toImplement;
+
     final JavaOverrideImplementMemberChooser javaOverrideImplementMemberChooser =
-      new JavaOverrideImplementMemberChooser(all, onlyPrimary, lazyElementsWithPercent, project, PsiUtil.isLanguageLevel5OrHigher(aClass),
+      new JavaOverrideImplementMemberChooser(all, onlyPrimary, lazyElementsWithPercent, project, overrideVisible,
                                              merge, toImplement, PropertiesComponent.getInstance(project)
-        .getBoolean(PROP_OVERRIDING_SORTED_OVERRIDE_IMPLEMENT, false));
+        .getBoolean(PROP_OVERRIDING_SORTED_OVERRIDE_IMPLEMENT));
     javaOverrideImplementMemberChooser.setTitle(getChooserTitle(toImplement, merge));
 
     javaOverrideImplementMemberChooser.setCopyJavadocVisible(true);
@@ -151,8 +157,8 @@ public class JavaOverrideImplementMemberChooser extends MemberChooser<PsiMethodM
   @Override
   protected void doOKAction() {
     super.doOKAction();
-    PropertiesComponent.getInstance(myProject).setValue(PROP_COMBINED_OVERRIDE_IMPLEMENT, String.valueOf(myMerge));
-    PropertiesComponent.getInstance(myProject).setValue(PROP_OVERRIDING_SORTED_OVERRIDE_IMPLEMENT, String.valueOf(mySortedByOverriding));
+    PropertiesComponent.getInstance(myProject).setValue(PROP_COMBINED_OVERRIDE_IMPLEMENT, myMerge, true);
+    PropertiesComponent.getInstance(myProject).setValue(PROP_OVERRIDING_SORTED_OVERRIDE_IMPLEMENT, mySortedByOverriding);
   }
 
   @Override
@@ -179,12 +185,7 @@ public class JavaOverrideImplementMemberChooser extends MemberChooser<PsiMethodM
   }
 
   private static PsiMethodMember[] convertToMethodMembers(Collection<CandidateInfo> candidates) {
-    return ContainerUtil.map2Array(candidates, PsiMethodMember.class, new Function<CandidateInfo, PsiMethodMember>() {
-      @Override
-      public PsiMethodMember fun(final CandidateInfo s) {
-        return new PsiMethodMember(s);
-      }
-    });
+    return ContainerUtil.map2Array(candidates, PsiMethodMember.class, s -> new PsiMethodMember(s));
   }
 
   private class MySortByOverridingAction extends ToggleAction {

@@ -27,6 +27,7 @@ import com.intellij.debugger.requests.ClassPrepareRequestor;
 import com.intellij.openapi.application.AccessToken;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.impl.scopes.ModuleWithDependenciesScope;
 import com.intellij.openapi.progress.ProcessCanceledException;
@@ -45,6 +46,7 @@ import com.sun.jdi.ReferenceType;
 import com.sun.jdi.request.ClassPrepareRequest;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.plugins.groovy.GroovyFileType;
 import org.jetbrains.plugins.groovy.extensions.debugger.ScriptPositionManagerHelper;
 import org.jetbrains.plugins.groovy.lang.psi.GroovyFile;
 import org.jetbrains.plugins.groovy.lang.psi.GroovyFileBase;
@@ -54,12 +56,15 @@ import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.GrTypeDefini
 import org.jetbrains.plugins.groovy.lang.stubs.GroovyShortNamesCache;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 public class GroovyPositionManager implements PositionManager {
   private static final Logger LOG = Logger.getInstance("#com.intellij.debugger.engine.PositionManagerImpl");
 
   private final DebugProcess myDebugProcess;
+  private static final Set<FileType> ourFileTypes = Collections.singleton(GroovyFileType.GROOVY_FILE_TYPE);
 
   public GroovyPositionManager(DebugProcess debugProcess) {
     myDebugProcess = debugProcess;
@@ -72,6 +77,7 @@ public class GroovyPositionManager implements PositionManager {
   @Override
   @NotNull
   public List<Location> locationsOfLine(@NotNull ReferenceType type, @NotNull SourcePosition position) throws NoDataException {
+    checkGroovyFile(position);
     try {
       if (LOG.isDebugEnabled()) {
         LOG.debug("locationsOfLine: " + type + "; " + position);
@@ -250,8 +256,15 @@ public class GroovyPositionManager implements PositionManager {
     String qName = getOriginalQualifiedName(refType, runtimeName);
 
     GlobalSearchScope searchScope = addModuleContent(myDebugProcess.getSearchScope());
+    GroovyShortNamesCache cache = GroovyShortNamesCache.getGroovyShortNamesCache(project);
     try {
-      final List<PsiClass> classes = GroovyShortNamesCache.getGroovyShortNamesCache(project).getClassesByFQName(qName, searchScope);
+      List<PsiClass> classes = cache.getClassesByFQName(qName, searchScope, true);
+      if (classes.isEmpty()) {
+        classes = cache.getClassesByFQName(qName, searchScope, false);
+      }
+      if (classes.isEmpty()) {
+        classes = cache.getClassesByFQName(qName, GlobalSearchScope.projectScope(project), false);
+      }
       PsiClass clazz = classes.size() == 1 ? classes.get(0) : null;
       if (clazz != null) return clazz.getContainingFile();
     }
@@ -399,4 +412,9 @@ public class GroovyPositionManager implements PositionManager {
     return null;
   }
 
+  @NotNull
+  @Override
+  public Set<? extends FileType> getAcceptedFileTypes() {
+    return ourFileTypes;
+  }
 }

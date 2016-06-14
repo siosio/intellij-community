@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,16 +49,12 @@ public class RunHotswapDialog extends OptionsDialog {
     super(project);
     myDisplayHangWarning = displayHangWarning;
     myPanel = new JPanel(new BorderLayout());
-    final List<SessionItem> items = new ArrayList<SessionItem>(sessions.size());
+    final List<SessionItem> items = new ArrayList<>(sessions.size());
     for (DebuggerSession session : sessions) {
       items.add(new SessionItem(session));
     }
-    Collections.sort(items, new Comparator<SessionItem>() {
-      public int compare(SessionItem debuggerSession, SessionItem debuggerSession1) {
-        return debuggerSession.getSession().getSessionName().compareTo(debuggerSession1.getSession().getSessionName());
-      }
-    });
-    myElementsChooser = new ElementsChooser<SessionItem>(items, true);
+    Collections.sort(items, (debuggerSession, debuggerSession1) -> debuggerSession.getSession().getSessionName().compareTo(debuggerSession1.getSession().getSessionName()));
+    myElementsChooser = new ElementsChooser<>(items, true);
     myPanel.setBorder(IdeBorderFactory.createEmptyBorder(10, 0, 5, 0));
     //myElementsChooser.setBorder(IdeBorderFactory.createEmptyBorder(5, 0, 0, 0));
     if (sessions.size() > 0) {
@@ -73,7 +69,7 @@ public class RunHotswapDialog extends OptionsDialog {
     else {
       setTitle(DebuggerBundle.message("hotswap.dialog.title"));
     }
-    setButtonsAlignment(SwingUtilities.CENTER);
+    setButtonsAlignment(SwingConstants.CENTER);
     this.init();
   }
 
@@ -111,10 +107,8 @@ public class RunHotswapDialog extends OptionsDialog {
     JPanel panel = new JPanel(new BorderLayout());
     panel.add(label, BorderLayout.CENTER);
     Icon icon = UIUtil.getQuestionIcon();
-    if (icon != null) {
-      label.setIcon(icon);
-      label.setIconTextGap(7);
-    }
+    label.setIcon(icon);
+    label.setIconTextGap(7);
     if (myDisplayHangWarning) {
       final JLabel warningLabel = new JLabel("WARNING! " + DebuggerBundle.message("hotswap.dialog.hang.warning"));
       warningLabel.setUI(new MultiLineLabelUI());
@@ -129,7 +123,7 @@ public class RunHotswapDialog extends OptionsDialog {
 
   public Collection<DebuggerSession> getSessionsToReload() {
     final List<SessionItem> markedElements = myElementsChooser.getMarkedElements();
-    final List<DebuggerSession>  sessions = new ArrayList<DebuggerSession>(markedElements.size());
+    final List<DebuggerSession>  sessions = new ArrayList<>(markedElements.size());
     for (SessionItem item : markedElements) {
       sessions.add(item.getSession());
     }

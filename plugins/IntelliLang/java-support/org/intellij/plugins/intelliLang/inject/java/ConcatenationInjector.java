@@ -25,7 +25,6 @@ import com.intellij.openapi.util.Trinity;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.source.tree.injected.InjectedLanguageUtil;
-import com.intellij.psi.injection.ReferenceInjector;
 import com.intellij.psi.search.LocalSearchScope;
 import com.intellij.psi.search.searches.ReferencesSearch;
 import com.intellij.psi.tree.IElementType;
@@ -174,7 +173,7 @@ public class ConcatenationInjector implements ConcatenationAwareInjector {
           return false;
         }
 
-        public boolean visitMethodReturnStatement(PsiReturnStatement parent, PsiMethod method) {
+        public boolean visitMethodReturnStatement(PsiElement source, PsiMethod method) {
           if (areThereInjectionsWithName(method.getName(), false)) {
             process(method, method, -1);
           }
@@ -184,19 +183,16 @@ public class ConcatenationInjector implements ConcatenationAwareInjector {
         private void visitVariableUsages(PsiVariable variable) {
           if (variable == null) return;
           if (myConfiguration.getAdvancedConfiguration().getDfaOption() != Configuration.DfaOption.OFF && visitedVars.add(variable)) {
-            ReferencesSearch.search(variable, searchScope).forEach(new Processor<PsiReference>() {
-              @Override
-              public boolean process(PsiReference psiReference) {
-                final PsiElement element = psiReference.getElement();
-                if (element instanceof PsiExpression) {
-                  final PsiExpression refExpression = (PsiExpression)element;
-                  places.add(refExpression);
-                  if (!myUnparsable) {
-                    myUnparsable = checkUnparsableReference(refExpression);
-                  }
+            ReferencesSearch.search(variable, searchScope).forEach(psiReference -> {
+              final PsiElement element = psiReference.getElement();
+              if (element instanceof PsiExpression) {
+                final PsiExpression refExpression = (PsiExpression)element;
+                places.add(refExpression);
+                if (!myUnparsable) {
+                  myUnparsable = checkUnparsableReference(refExpression);
                 }
-                return true;
               }
+              return true;
             });
           }
         }
@@ -334,14 +330,8 @@ public class ConcatenationInjector implements ConcatenationAwareInjector {
     }
 
     private void processInjectionWithContext(BaseInjection injection, boolean settingsAvailable) {
-      Language language = InjectedLanguage.findLanguageById(injection.getInjectedLanguageId());
-      if (language == null) {
-        ReferenceInjector injector = ReferenceInjector.findById(injection.getInjectedLanguageId());
-        if (injector != null) {
-          language = injector.toLanguage();
-        }
-        else return;
-      }
+      Language language = InjectorUtils.getLanguage(injection);
+      if (language == null) return;
 
       final boolean separateFiles = !injection.isSingleFile() && StringUtil.isNotEmpty(injection.getValuePattern());
 

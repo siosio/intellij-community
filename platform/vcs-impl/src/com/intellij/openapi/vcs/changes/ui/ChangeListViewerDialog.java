@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,6 +29,8 @@ import com.intellij.openapi.actionSystem.DefaultActionGroup;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.Splitter;
+import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.vcs.AbstractVcs;
 import com.intellij.openapi.vcs.VcsActions;
 import com.intellij.openapi.vcs.VcsBundle;
 import com.intellij.openapi.vcs.VcsDataKeys;
@@ -43,6 +45,7 @@ import com.intellij.ui.BrowserHyperlinkListener;
 import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.ui.SeparatorFactory;
 import com.intellij.util.NotNullFunction;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.xml.util.XmlStringUtil;
 import org.jetbrains.annotations.NonNls;
@@ -113,7 +116,7 @@ public class ChangeListViewerDialog extends DialogWrapper implements DataProvide
 
   private void initCommitMessageArea(final Project project, final CommittedChangeList changeList) {
     myCommitMessageArea = new JEditorPane(UIUtil.HTML_MIME, "");
-    myCommitMessageArea.setBorder(BorderFactory.createEmptyBorder(3, 3, 3, 3));
+    myCommitMessageArea.setBorder(JBUI.Borders.empty(3));
     myCommitMessageArea.setEditable(false);
     @NonNls final String text = IssueLinkHtmlRenderer.formatTextIntoHtml(project, changeList.getComment().trim());
     myCommitMessageArea.setBackground(UIUtil.getComboBoxDisabledBackground());
@@ -131,6 +134,10 @@ public class ChangeListViewerDialog extends DialogWrapper implements DataProvide
   public Object getData(@NonNls final String dataId) {
     if (VcsDataKeys.CHANGES.is(dataId)) {
       return myChanges;
+    }
+    if (VcsDataKeys.VCS.is(dataId)) {
+      AbstractVcs vcs = myChangeList.getVcs();
+      return vcs == null ? null : vcs.getKeyInstanceMethod();
     }
 
     return null;
@@ -168,6 +175,7 @@ public class ChangeListViewerDialog extends DialogWrapper implements DataProvide
         }
       }
     };
+    Disposer.register(getDisposable(), myChangesBrowser);
     myChangesBrowser.setUseCase(myInAir ? CommittedChangesBrowserUseCase.IN_AIR : null);
     splitter.setFirstComponent(myChangesBrowser);
 
@@ -189,12 +197,6 @@ public class ChangeListViewerDialog extends DialogWrapper implements DataProvide
       mainPanel.add(descPanel, BorderLayout.NORTH);
     }
     return mainPanel;
-  }
-
-  @Override
-  protected void dispose() {
-    myChangesBrowser.dispose();
-    super.dispose();
   }
 
   @NotNull

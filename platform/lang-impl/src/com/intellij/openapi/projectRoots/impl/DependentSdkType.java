@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ import com.intellij.openapi.util.Ref;
 import com.intellij.util.Consumer;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import java.util.Arrays;
@@ -42,12 +43,7 @@ public abstract class DependentSdkType extends SdkType {
    * Checks if dependencies satisfied.
    */
   protected boolean checkDependency(SdkModel sdkModel) {
-    return ContainerUtil.find(sdkModel.getSdks(), new Condition<Sdk>() {
-      @Override
-      public boolean value(Sdk sdk) {
-        return isValidDependency(sdk);
-      }
-    }) != null;
+    return ContainerUtil.find(sdkModel.getSdks(), sdk -> isValidDependency(sdk)) != null;
   }
 
   protected abstract boolean isValidDependency(Sdk sdk);
@@ -60,7 +56,7 @@ public abstract class DependentSdkType extends SdkType {
   }
 
   @Override
-  public void showCustomCreateUI(final SdkModel sdkModel, JComponent parentComponent, final Consumer<Sdk> sdkCreatedCallback) {
+  public void showCustomCreateUI(@NotNull final SdkModel sdkModel, @NotNull JComponent parentComponent, @NotNull final Consumer<Sdk> sdkCreatedCallback) {
     if (!checkDependency(sdkModel)) {
       if (Messages.showOkCancelDialog(parentComponent, getUnsatisfiedDependencyMessage(), "Cannot Create SDK", Messages.getWarningIcon()) != Messages.OK) {
         return;
@@ -83,16 +79,13 @@ public abstract class DependentSdkType extends SdkType {
                                   final SdkType sdkType,
                                   final Consumer<Sdk> sdkCreatedCallback) {
     final Ref<Sdk> result = new Ref<Sdk>(null);
-    SdkConfigurationUtil.selectSdkHome(sdkType, new Consumer<String>() {
-      @Override
-      public void consume(final String home) {
-        String newSdkName = SdkConfigurationUtil.createUniqueSdkName(sdkType, home, Arrays.asList(sdkModel.getSdks()));
-        final ProjectJdkImpl newJdk = new ProjectJdkImpl(newSdkName, sdkType);
-        newJdk.setHomePath(home);
+    SdkConfigurationUtil.selectSdkHome(sdkType, home -> {
+      String newSdkName = SdkConfigurationUtil.createUniqueSdkName(sdkType, home, Arrays.asList(sdkModel.getSdks()));
+      final ProjectJdkImpl newJdk = new ProjectJdkImpl(newSdkName, sdkType);
+      newJdk.setHomePath(home);
 
-        sdkCreatedCallback.consume(newJdk);
-        result.set(newJdk);
-      }
+      sdkCreatedCallback.consume(newJdk);
+      result.set(newJdk);
     });
     return result.get();
   }

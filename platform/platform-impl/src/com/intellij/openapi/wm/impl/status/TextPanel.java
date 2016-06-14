@@ -19,23 +19,24 @@ import com.intellij.icons.AllIcons;
 import com.intellij.ide.ui.UISettings;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.ui.Gray;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.accessibility.Accessible;
+import javax.accessibility.AccessibleContext;
+import javax.accessibility.AccessibleRole;
 import javax.swing.*;
 import java.awt.*;
 
-public class TextPanel extends JComponent {
+public class TextPanel extends JComponent implements Accessible {
   @Nullable private String  myText;
   @Nullable private Color myCustomColor;
 
   private Integer   myPrefHeight;
   private Dimension myExplicitSize;
 
-  private boolean myDecorate = true;
   private float myAlignment;
   private int myRightPadding = JBUI.scale(14);
 
@@ -48,19 +49,10 @@ public class TextPanel extends JComponent {
     return SystemInfo.isMac ? JBUI.Fonts.label(11) : JBUI.Fonts.label();
   }
 
-  protected TextPanel(final boolean decorate) {
-    this();
-    myDecorate = decorate;
-  }
-
   public void recomputeSize() {
     final JLabel label = new JLabel("XXX");
     label.setFont(getFont());
     myPrefHeight = label.getPreferredSize().height;
-  }
-
-  public void setDecorate(boolean decorate) {
-    myDecorate = decorate;
   }
 
   public void resetColor() {
@@ -109,10 +101,6 @@ public class TextPanel extends JComponent {
     }
 
     final int y = UIUtil.getStringY(s, bounds, g2);
-    if (SystemInfo.isMac && !UIUtil.isUnderDarcula() && myDecorate) {
-      g2.setColor(myCustomColor == null ? Gray._215 : myCustomColor);
-      g2.drawString(s, x, y + 1);
-    }
 
     g2.setColor(myCustomColor == null ? getForeground() : myCustomColor);
     g2.drawString(s, x, y);
@@ -150,7 +138,20 @@ public class TextPanel extends JComponent {
       return;
     }
 
+    String oldAccessibleName = null;
+    if (accessibleContext != null) {
+      oldAccessibleName = accessibleContext.getAccessibleName();
+    }
+
     myText = text;
+
+    if ((accessibleContext != null) && !StringUtil.equals(accessibleContext.getAccessibleName(), oldAccessibleName)) {
+      accessibleContext.firePropertyChange(
+        AccessibleContext.ACCESSIBLE_VISIBLE_DATA_PROPERTY,
+        oldAccessibleName,
+        accessibleContext.getAccessibleName());
+    }
+
     setPreferredSize(getPanelDimensionFromFontMetrics(myText));
     revalidate();
     repaint();
@@ -240,6 +241,26 @@ public class TextPanel extends JComponent {
     public Dimension getPreferredSize() {
       Dimension size = super.getPreferredSize();
       return new Dimension(size.width + 3, size.height);
+    }
+  }
+
+  @Override
+  public AccessibleContext getAccessibleContext() {
+    if (accessibleContext == null) {
+      accessibleContext = new AccessibleTextPanel();
+    }
+    return accessibleContext;
+  }
+
+  protected class AccessibleTextPanel extends AccessibleJComponent {
+    @Override
+    public AccessibleRole getAccessibleRole() {
+      return AccessibleRole.LABEL;
+    }
+
+    @Override
+    public String getAccessibleName() {
+      return myText;
     }
   }
 }

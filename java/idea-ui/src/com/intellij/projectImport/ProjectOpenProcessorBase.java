@@ -162,26 +162,34 @@ public abstract class ProjectOpenProcessorBase<T extends ProjectImportBuilder> e
       }
 
       boolean shouldOpenExisting = false;
-      if (!ApplicationManager.getApplication().isHeadlessEnvironment() && (projectFile.exists() || dotIdeaFile.exists())) {
-        String existingName;
-        if (dotIdeaFile.exists()) {
-          existingName = "an existing project";
-          pathToOpen = dotIdeaFile.getParent();
+      boolean importToProject = true;
+      if (projectFile.exists() || dotIdeaFile.exists()) {
+        if (ApplicationManager.getApplication().isHeadlessEnvironment()) {
+          shouldOpenExisting = true;
+          importToProject = true;
         }
         else {
-          existingName = "'" + projectFile.getName() + "'";
-          pathToOpen = projectFilePath;
+          String existingName;
+          if (dotIdeaFile.exists()) {
+            existingName = "an existing project";
+            pathToOpen = dotIdeaFile.getParent();
+          }
+          else {
+            existingName = "'" + projectFile.getName() + "'";
+            pathToOpen = projectFilePath;
+          }
+          int result = Messages.showYesNoCancelDialog(
+            projectToClose,
+            IdeBundle.message("project.import.open.existing", existingName, projectFile.getParent(), virtualFile.getName()),
+            IdeBundle.message("title.open.project"),
+            IdeBundle.message("project.import.open.existing.openExisting"),
+            IdeBundle.message("project.import.open.existing.reimport"),
+            CommonBundle.message("button.cancel"),
+            Messages.getQuestionIcon());
+          if (result == Messages.CANCEL) return null;
+          shouldOpenExisting = result == Messages.YES;
+          importToProject = !shouldOpenExisting;
         }
-        int result = Messages.showYesNoCancelDialog(
-          projectToClose,
-          IdeBundle.message("project.import.open.existing", existingName, projectFile.getParent(), virtualFile.getName()),
-          IdeBundle.message("title.open.project"),
-          IdeBundle.message("project.import.open.existing.openExisting"),
-          IdeBundle.message("project.import.open.existing.reimport"),
-          CommonBundle.message("button.cancel"),
-          Messages.getQuestionIcon());
-        if (result == Messages.CANCEL) return null;
-        shouldOpenExisting = result == Messages.YES;
       }
 
       final Project projectToOpen;
@@ -195,27 +203,27 @@ public abstract class ProjectOpenProcessorBase<T extends ProjectImportBuilder> e
       }
       else {
         projectToOpen = ProjectManagerEx.getInstanceEx().newProject(wizardContext.getProjectName(), pathToOpen, true, false);
+      }
+      if (projectToOpen == null) return null;
 
-        if (projectToOpen == null || !getBuilder().validate(projectToClose, projectToOpen)) {
+      if (importToProject) {
+        if (!getBuilder().validate(projectToClose, projectToOpen)) {
           return null;
         }
 
         projectToOpen.save();
 
-        ApplicationManager.getApplication().runWriteAction(new Runnable() {
-          @Override
-          public void run() {
-            Sdk jdk = wizardContext.getProjectJdk();
-            if (jdk != null) {
-              NewProjectUtil.applyJdkToProject(projectToOpen, jdk);
-            }
+        ApplicationManager.getApplication().runWriteAction(() -> {
+          Sdk jdk1 = wizardContext.getProjectJdk();
+          if (jdk1 != null) {
+            NewProjectUtil.applyJdkToProject(projectToOpen, jdk1);
+          }
 
-            String projectDirPath = wizardContext.getProjectFileDirectory();
-            String path = StringUtil.endsWithChar(projectDirPath, '/') ? projectDirPath + "classes" : projectDirPath + "/classes";
-            CompilerProjectExtension extension = CompilerProjectExtension.getInstance(projectToOpen);
-            if (extension != null) {
-              extension.setCompilerOutputUrl(getUrl(path));
-            }
+          String projectDirPath = wizardContext.getProjectFileDirectory();
+          String path = StringUtil.endsWithChar(projectDirPath, '/') ? projectDirPath + "classes" : projectDirPath + "/classes";
+          CompilerProjectExtension extension = CompilerProjectExtension.getInstance(projectToOpen);
+          if (extension != null) {
+            extension.setCompilerOutputUrl(getUrl(path));
           }
         });
 

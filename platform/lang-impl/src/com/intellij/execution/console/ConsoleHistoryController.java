@@ -136,7 +136,7 @@ public class ConsoleHistoryController {
   }
 
   public boolean hasHistory() {
-    return !getModel().getEntries().isEmpty();
+    return !getModel().isEmpty();
   }
 
   @NotNull
@@ -369,7 +369,7 @@ public class ConsoleHistoryController {
       String s2 = KeymapUtil.getFirstKeyboardShortcutText(myHistoryPrev);
       String title = myConsole.getTitle() + " History" +
                      (StringUtil.isNotEmpty(s1) && StringUtil.isNotEmpty(s2) ? " (" + s1 + " and " + s2 + " while in editor)" : "");
-      final ContentChooser<String> chooser = new ContentChooser<String>(myConsole.getProject(), title, true) {
+      final ContentChooser<String> chooser = new ContentChooser<String>(myConsole.getProject(), title, true, true) {
 
         @Override
         protected void removeContentAt(String content) {
@@ -555,7 +555,7 @@ public class ConsoleHistoryController {
 
     private void saveHistory() {
       try {
-        if (getModel().getEntries().isEmpty()) return;
+        if (getModel().isEmpty()) return;
         if (myRootType.isHidden()) {
           saveHistoryOld();
           return;
@@ -641,12 +641,9 @@ public class ConsoleHistoryController {
     }
     catch (final IOException e) {
       LOG.warn(e);
-      ApplicationManager.getApplication().invokeLater(new Runnable() {
-        @Override
-        public void run() {
-          String message = String.format("Unable to open '%s/%s'\nReason: %s", rootType.getId(), pathName, e.getLocalizedMessage());
-          Messages.showErrorDialog(message, "Unable to Open File");
-        }
+      ApplicationManager.getApplication().invokeLater(() -> {
+        String message = String.format("Unable to open '%s/%s'\nReason: %s", rootType.getId(), pathName, e.getLocalizedMessage());
+        Messages.showErrorDialog(message, "Unable to Open File");
       });
       return null;
     }

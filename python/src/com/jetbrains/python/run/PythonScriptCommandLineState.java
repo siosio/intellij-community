@@ -24,21 +24,20 @@ import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.execution.configurations.ParametersList;
 import com.intellij.execution.configurations.ParamsGroup;
 import com.intellij.execution.executors.DefaultDebugExecutor;
-import com.intellij.execution.process.CommandLineArgumentsProvider;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.Sdk;
-import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.ArrayUtil;
-import com.jetbrains.python.PythonHelpersLocator;
+import com.jetbrains.python.PythonHelper;
+import com.jetbrains.python.console.PyConsoleOptions;
 import com.jetbrains.python.console.PyConsoleType;
 import com.jetbrains.python.console.PydevConsoleRunner;
+import com.jetbrains.python.sdk.PythonEnvUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -53,7 +52,6 @@ public class PythonScriptCommandLineState extends PythonCommandLineState {
     myConfig = runConfiguration;
   }
 
-  @NotNull
   @Override
   public ExecutionResult execute(Executor executor, final CommandLinePatcher... patchers) throws ExecutionException {
     if (myConfig.showCommandLineAfterwards()) {
@@ -68,10 +66,14 @@ public class PythonScriptCommandLineState extends PythonCommandLineState {
 
       PydevConsoleRunner runner =
         new PythonScriptWithConsoleRunner(myConfig.getProject(), myConfig.getSdk(), PyConsoleType.PYTHON, myConfig.getWorkingDirectory(),
-                                          myConfig.getEnvs(), patchers);
+                                          myConfig.getEnvs(), patchers,
+                                          PyConsoleOptions.getInstance(myConfig.getProject()).getPythonConsoleSettings());
 
       runner.runSync();
-
+      // runner.getProcessHandler() would be null if execution error occurred
+      if (runner.getProcessHandler() == null) {
+        return null;
+      }
       List<AnAction> actions = Lists.newArrayList(createActions(runner.getConsoleView(), runner.getProcessHandler()));
 
       return new DefaultExecutionResult(runner.getConsoleView(), runner.getProcessHandler(), actions.toArray(new AnAction[actions.size()]));
@@ -115,8 +117,9 @@ public class PythonScriptCommandLineState extends PythonCommandLineState {
                                          @Nullable String workingDir,
                                          Map<String, String> environmentVariables,
                                          CommandLinePatcher[] patchers,
+                                         PyConsoleOptions.PyConsoleSettings consoleSettings,
                                          String... statementsToExecute) {
-      super(project, sdk, consoleType, workingDir, environmentVariables, statementsToExecute);
+      super(project, sdk, consoleType, workingDir, environmentVariables, consoleSettings, statementsToExecute);
       myPatchers = patchers;
     }
 
@@ -127,46 +130,22 @@ public class PythonScriptCommandLineState extends PythonCommandLineState {
     }
 
     @Override
-    protected CommandLineArgumentsProvider createCommandLineArgumentsProvider(final Sdk sdk,
-                                                                              final Map<String, String> environmentVariables,
-                                                                              int[] ports) {
-      final ArrayList<String> args = new ArrayList<String>();
-      args.add(sdk.getHomePath());
-      final String versionString = sdk.getVersionString();
-      if (versionString == null || !versionString.toLowerCase().contains("jython")) {
-        args.add("-u");
-      }
-      args.add(FileUtil.toSystemDependentName(PythonHelpersLocator.getHelperPath("pydev/pydev_run_in_console.py")));
-      for (int port : ports) {
-        args.add(String.valueOf(port));
-      }
+    protected GeneralCommandLine createCommandLine(@NotNull Sdk sdk,
+                                                   @NotNull Map<String, String> environmentVariables,
+                                                   String workingDir, int[] ports) {
+      GeneralCommandLine consoleCmdLine = doCreateConsoleCmdLine(sdk, environmentVariables, workingDir, ports, PythonHelper.RUN_IN_CONSOLE);
 
-      try {
-        final GeneralCommandLine cmd = generateCommandLine(myPatchers);
-        args.addAll(cmd.getParametersList().getList());
+      final GeneralCommandLine cmd = generateCommandLine(myPatchers);
 
-        return new CommandLineArgumentsProvider() {
-          @Override
-          public String[] getArguments() {
-            return ArrayUtil.toStringArray(args);
-          }
+      ParamsGroup group = consoleCmdLine.getParametersList().getParamsGroup(PythonCommandLineState.GROUP_SCRIPT);
+      assert group != null;
+      group.addParameters(cmd.getParametersList().getList());
 
-          @Override
-          public boolean passParentEnvs() {
-            return false;
-          }
+      PythonEnvUtil.mergePythonPath(consoleCmdLine.getEnvironment(), cmd.getEnvironment());
 
-          @Override
-          public Map<String, String> getAdditionalEnvs() {
-            Map<String, String> map = addDefaultEnvironments(sdk, environmentVariables,getProject());
-            map.putAll(cmd.getEnvironment());
-            return map;
-          }
-        };
-      }
-      catch (Exception e) {
-        throw new IllegalStateException(e);
-      }
+      consoleCmdLine.getEnvironment().putAll(cmd.getEnvironment());
+
+      return consoleCmdLine;
     }
   }
 }

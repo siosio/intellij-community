@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ import com.intellij.execution.rmi.RemoteUtil;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.externalSystem.ExternalSystemAutoImportAware;
@@ -28,32 +29,30 @@ import com.intellij.openapi.externalSystem.model.ExternalSystemException;
 import com.intellij.openapi.externalSystem.model.Key;
 import com.intellij.openapi.externalSystem.model.ProjectSystemId;
 import com.intellij.openapi.externalSystem.model.project.LibraryData;
+import com.intellij.openapi.externalSystem.model.project.ProjectData;
 import com.intellij.openapi.externalSystem.model.settings.ExternalSystemExecutionSettings;
 import com.intellij.openapi.externalSystem.service.ParametersEnhancer;
 import com.intellij.openapi.externalSystem.settings.AbstractExternalSystemLocalSettings;
 import com.intellij.openapi.externalSystem.settings.AbstractExternalSystemSettings;
+import com.intellij.openapi.externalSystem.settings.ExternalProjectSettings;
 import com.intellij.openapi.externalSystem.settings.ExternalSystemSettingsListener;
 import com.intellij.openapi.fileTypes.FileTypes;
 import com.intellij.openapi.module.Module;
+import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.project.ProjectManager;
+import com.intellij.openapi.roots.ModifiableRootModel;
 import com.intellij.openapi.roots.OrderRootType;
 import com.intellij.openapi.roots.libraries.Library;
-import com.intellij.openapi.util.Computable;
-import com.intellij.openapi.util.Conditions;
-import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.JarFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.*;
-import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.containers.ContainerUtilRt;
+import com.intellij.util.containers.*;
 import com.intellij.util.containers.Stack;
-import com.intellij.util.containers.TransferToEDTQueue;
 import com.intellij.util.lang.UrlClassLoader;
-import com.intellij.util.messages.MessageBusConnection;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
@@ -66,6 +65,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.URL;
 import java.util.*;
+import java.util.Queue;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -111,28 +111,12 @@ public class ExternalSystemApiUtil {
     }
   };
 
-  @NotNull private static final NullableFunction<DataNode<?>, Key<?>> GROUPER = new NullableFunction<DataNode<?>, Key<?>>() {
-    @Override
-    public Key<?> fun(DataNode<?> node) {
-      return node.getKey();
-    }
-  };
-
-  @NotNull private static final Comparator<Object> COMPARABLE_GLUE = new Comparator<Object>() {
-    @SuppressWarnings("unchecked")
-    @Override
-    public int compare(Object o1, Object o2) {
-      return ((Comparable)o1).compareTo(o2);
-    }
-  };
+  @NotNull private static final NullableFunction<DataNode<?>, Key<?>> GROUPER = node -> node.getKey();
 
   @NotNull private static final TransferToEDTQueue<Runnable> TRANSFER_TO_EDT_QUEUE =
-    new TransferToEDTQueue<Runnable>("External System queue", new Processor<Runnable>() {
-      @Override
-      public boolean process(Runnable runnable) {
-        runnable.run();
-        return true;
-      }
+    new TransferToEDTQueue<Runnable>("External System queue", runnable -> {
+      runnable.run();
+      return true;
     }, Conditions.alwaysFalse(), 300);
 
   private ExternalSystemApiUtil() {
@@ -245,53 +229,33 @@ public class ExternalSystemApiUtil {
     return result;
   }
 
-  @NotNull
-  public static Map<Key<?>, List<DataNode<?>>> group(@NotNull Collection<DataNode<?>> nodes) {
-    return groupBy(nodes, GROUPER);
-  }
-
-  @NotNull
-  public static <K, V> Map<DataNode<K>, List<DataNode<V>>> groupBy(@NotNull Collection<DataNode<V>> nodes, @NotNull final Key<K> key) {
-    return groupBy(nodes, new NullableFunction<DataNode<V>, DataNode<K>>() {
-      @Nullable
-      @Override
-      public DataNode<K> fun(DataNode<V> node) {
-        return node.getDataNode(key);
+  public static MultiMap<Key<?>, DataNode<?>> recursiveGroup(@NotNull Collection<DataNode<?>> nodes) {
+    MultiMap<Key<?>, DataNode<?>> result = new ContainerUtil.KeyOrderedMultiMap<Key<?>, DataNode<?>>();
+    Queue<Collection<DataNode<?>>> queue = ContainerUtil.newLinkedList();
+    queue.add(nodes);
+    while (!queue.isEmpty()) {
+      Collection<DataNode<?>> _nodes = queue.remove();
+      result.putAllValues(group(_nodes));
+      for (DataNode<?> _node : _nodes) {
+        queue.add(_node.getChildren());
       }
-    });
-  }
-
-  @NotNull
-  public static <K, V> Map<K, List<V>> groupBy(@NotNull Collection<V> nodes, @NotNull NullableFunction<V, K> grouper) {
-    Map<K, List<V>> result = ContainerUtilRt.newHashMap();
-    for (V data : nodes) {
-      K key = grouper.fun(data);
-      if (key == null) {
-        LOG.warn(String.format(
-          "Skipping entry '%s' during grouping. Reason: it's not possible to build a grouping key with grouping strategy '%s'. "
-          + "Given entries: %s",
-          data,
-          grouper.getClass(),
-          nodes));
-        continue;
-      }
-      List<V> grouped = result.get(key);
-      if (grouped == null) {
-        result.put(key, grouped = ContainerUtilRt.newArrayList());
-      }
-      grouped.add(data);
-    }
-
-    if (!result.isEmpty() && result.keySet().iterator().next() instanceof Comparable) {
-      List<K> ordered = ContainerUtilRt.newArrayList(result.keySet());
-      Collections.sort(ordered, COMPARABLE_GLUE);
-      Map<K, List<V>> orderedResult = ContainerUtilRt.newLinkedHashMap();
-      for (K k : ordered) {
-        orderedResult.put(k, result.get(k));
-      }
-      return orderedResult;
     }
     return result;
+  }
+
+  @NotNull
+  public static MultiMap<Key<?>, DataNode<?>> group(@NotNull Collection<DataNode<?>> nodes) {
+    return ContainerUtil.groupBy(nodes, GROUPER);
+  }
+
+  @NotNull
+  public static <K, V> MultiMap<DataNode<K>, DataNode<V>> groupBy(@NotNull Collection<DataNode<V>> nodes, final Class<K> moduleDataClass) {
+    return ContainerUtil.groupBy(nodes, node -> node.getParent(moduleDataClass));
+  }
+
+  @NotNull
+  public static <K, V> MultiMap<DataNode<K>, DataNode<V>> groupBy(@NotNull Collection<DataNode<V>> nodes, @NotNull final Key<K> key) {
+    return ContainerUtil.groupBy(nodes, node -> node.getDataNode(key));
   }
 
   @SuppressWarnings("unchecked")
@@ -353,20 +317,10 @@ public class ExternalSystemApiUtil {
   @SuppressWarnings("unchecked")
   @NotNull
   public static <T> Collection<DataNode<T>> findAll(@NotNull DataNode<?> parent, @NotNull Key<T> key) {
-    Collection<DataNode<T>> result = null;
-    for (DataNode<?> child : parent.getChildren()) {
-      if (!key.equals(child.getKey())) {
-        continue;
-      }
-      if (result == null) {
-        result = ContainerUtilRt.newArrayList();
-      }
-      result.add((DataNode<T>)child);
-    }
-    return result == null ? Collections.<DataNode<T>>emptyList() : result;
+    return getChildren(parent, key);
   }
 
-  public static void visit(@Nullable DataNode node, @NotNull Consumer<DataNode> consumer) {
+  public static void visit(@Nullable DataNode node, @NotNull Consumer<DataNode<?>> consumer) {
     if(node == null) return;
 
     Stack<DataNode> toProcess = ContainerUtil.newStack(node);
@@ -384,12 +338,7 @@ public class ExternalSystemApiUtil {
                                                                @NotNull final Key<T> key) {
     if (node == null) return Collections.emptyList();
 
-    final Collection<DataNode<?>> nodes = findAllRecursively(node.getChildren(), new BooleanFunction<DataNode<?>>() {
-      @Override
-      public boolean fun(DataNode<?> node) {
-        return node.getKey().equals(key);
-      }
-    });
+    final Collection<DataNode<?>> nodes = findAllRecursively(node.getChildren(), node1 -> node1.getKey().equals(key));
     //noinspection unchecked
     return new SmartList(nodes);
   }
@@ -449,52 +398,92 @@ public class ExternalSystemApiUtil {
     return null;
   }
 
+  public static void commitChangedModels(boolean synchronous, Project project, List<Library.ModifiableModel> models) {
+    final List<Library.ModifiableModel> changedModels = ContainerUtil.findAll(models, model -> model.isChanged());
+    if (!changedModels.isEmpty()) {
+      executeProjectChangeAction(synchronous, new DisposeAwareProjectChange(project) {
+        @Override
+        public void execute() {
+          for (Library.ModifiableModel modifiableModel : changedModels) {
+            modifiableModel.commit();
+          }
+        }
+      });
+    }
+  }
+
+  public static void disposeModels(@NotNull Collection<ModifiableRootModel> models) {
+    for (ModifiableRootModel model : models) {
+      if (!model.isDisposed()) {
+        model.dispose();
+      }
+    }
+  }
+
+  public static void commitModels(boolean synchronous, Project project, List<ModifiableRootModel> models) {
+    final List<ModifiableRootModel> changedModels = ContainerUtilRt.newArrayList();
+    for (ModifiableRootModel modifiableRootModel : models) {
+      if (modifiableRootModel.isDisposed()) {
+        continue;
+      }
+      if (modifiableRootModel.isChanged()) {
+        changedModels.add(modifiableRootModel);
+      } else {
+        modifiableRootModel.dispose();
+      }
+    }
+    // Commit only if there are changes. #executeProjectChangeAction acquires a write lock
+    if (!changedModels.isEmpty()) {
+      executeProjectChangeAction(synchronous, new DisposeAwareProjectChange(project) {
+        @Override
+        public void execute() {
+          for (ModifiableRootModel modifiableRootModel : changedModels) {
+            // double check
+            if (!modifiableRootModel.isDisposed()) {
+              modifiableRootModel.commit();
+            }
+          }
+        }
+      });
+    }
+  }
+
   public static void executeProjectChangeAction(@NotNull final DisposeAwareProjectChange task) {
-    executeProjectChangeAction(false, task);
+    executeProjectChangeAction(true, task);
   }
 
   public static void executeProjectChangeAction(boolean synchronous, @NotNull final DisposeAwareProjectChange task) {
-    executeOnEdt(synchronous, new Runnable() {
-      public void run() {
-        ApplicationManager.getApplication().runWriteAction(new Runnable() {
-          @Override
-          public void run() {
-            task.run();
-          }
-        });
-      }
-    });
+    executeOnEdt(synchronous, () -> ApplicationManager.getApplication().runWriteAction(() -> task.run()));
   }
 
   public static void executeOnEdt(boolean synchronous, @NotNull Runnable task) {
+    final Application app = ApplicationManager.getApplication();
+    if (app.isDispatchThread()) {
+      task.run();
+      return;
+    }
+    
     if (synchronous) {
-      if (ApplicationManager.getApplication().isDispatchThread()) {
-        task.run();
-      }
-      else {
-        UIUtil.invokeAndWaitIfNeeded(task);
-      }
+      app.invokeAndWait(task, ModalityState.defaultModalityState());
     }
     else {
-      UIUtil.invokeLaterIfNeeded(task);
+      app.invokeLater(task, ModalityState.defaultModalityState());
     }
   }
 
-  public static <T> T executeOnEdt(@NotNull Computable<T> task) {
-    if (ApplicationManager.getApplication().isDispatchThread()) {
-      return task.compute();
-    }
-    else {
-      return UIUtil.invokeAndWaitIfNeeded(task);
-    }
+  public static <T> T executeOnEdt(@NotNull final Computable<T> task) {
+    final Application app = ApplicationManager.getApplication();
+    final Ref<T> result = Ref.create();
+    app.invokeAndWait(() -> result.set(task.compute()), ModalityState.defaultModalityState());
+    return result.get();
   }
 
-  public static <T> T executeOnEdtUnderWriteAction(@NotNull final Computable<T> task) {
-    return executeOnEdt(new Computable<T>() {
-      public T compute() {
-        return ApplicationManager.getApplication().runWriteAction(task);
-      }
-    });
+  public static <T> T doWriteAction(@NotNull final Computable<T> task) {
+    return executeOnEdt(() -> ApplicationManager.getApplication().runWriteAction(task));
+  }
+
+  public static void doWriteAction(@NotNull final Runnable task) {
+    executeOnEdt(true, () -> ApplicationManager.getApplication().runWriteAction(task));
   }
 
   /**
@@ -545,26 +534,51 @@ public class ExternalSystemApiUtil {
   }
 
   /**
-   * We can divide all 'import from external system' use-cases into at least as below:
-   * <pre>
-   * <ul>
-   *   <li>this is a new project being created (import project from external model);</li>
-   *   <li>a new module is being imported from an external project into an existing ide project;</li>
-   * </ul>
-   * </pre>
-   * This method allows to differentiate between them (e.g. we don't want to change language level when new module is imported to
-   * an existing project).
+   * Allows to answer if given ide project has 1-1 mapping with the given external project, i.e. the ide project has been
+   * imported from external system and no other external projects have been added.
+   * <p/>
+   * This might be necessary in a situation when project-level setting is changed (e.g. project name). We don't want to rename
+   * ide project if it doesn't completely corresponds to the given ide project then.
    *
-   * @return    <code>true</code> if new project is being imported; <code>false</code> if new module is being imported
+   * @param ideProject       target ide project
+   * @param projectData      target external project
+   * @return                 <code>true</code> if given ide project has 1-1 mapping to the given external project;
+   *                         <code>false</code> otherwise
    */
-  public static boolean isNewProjectConstruction() {
-    return ProjectManager.getInstance().getOpenProjects().length == 0;
-  }
+  public static boolean isOneToOneMapping(@NotNull Project ideProject, @NotNull ProjectData projectData) {
+    String linkedExternalProjectPath = null;
+    for (ExternalSystemManager<?, ?, ?, ?, ?> manager : getAllManagers()) {
+      ProjectSystemId externalSystemId = manager.getSystemId();
+      AbstractExternalSystemSettings systemSettings = getSettings(ideProject, externalSystemId);
+      Collection projectsSettings = systemSettings.getLinkedProjectsSettings();
+      int linkedProjectsNumber = projectsSettings.size();
+      if (linkedProjectsNumber > 1) {
+        // More than one external project of the same external system type is linked to the given ide project.
+        return false;
+      }
+      else if (linkedProjectsNumber == 1) {
+        if (linkedExternalProjectPath == null) {
+          // More than one external project of different external system types is linked to the current ide project.
+          linkedExternalProjectPath = ((ExternalProjectSettings)projectsSettings.iterator().next()).getExternalProjectPath();
+        }
+        else {
+          return false;
+        }
+      }
+    }
 
-//  @NotNull
-//  public static String getLastUsedExternalProjectPath(@NotNull ProjectSystemId externalSystemId) {
-//    return PropertiesComponent.getInstance().getValue(LAST_USED_PROJECT_PATH_PREFIX + externalSystemId.getReadableName(), "");
-//  }
+    if (linkedExternalProjectPath != null && !linkedExternalProjectPath.equals(projectData.getLinkedExternalProjectPath())) {
+      // New external project is being linked.
+      return false;
+    }
+
+    for (Module module : ModuleManager.getInstance(ideProject).getModules()) {
+      if (!isExternalSystemAwareModule(projectData.getOwner(), module)) {
+        return false;
+      }
+    }
+    return true;
+  }
 
   public static void storeLastUsedExternalProjectPath(@Nullable String path, @NotNull ProjectSystemId externalSystemId) {
     if (path != null) {
@@ -810,6 +824,12 @@ public class ExternalSystemApiUtil {
   @Contract(pure=true)
   public static String getExternalProjectVersion(@Nullable Module module) {
     return module != null && !module.isDisposed() ? module.getOptionValue(ExternalSystemConstants.EXTERNAL_SYSTEM_MODULE_VERSION_KEY) : null;
+  }
+
+  @Nullable
+  @Contract(pure=true)
+  public static String getExternalModuleType(@Nullable Module module) {
+    return module != null && !module.isDisposed() ? module.getOptionValue(ExternalSystemConstants.EXTERNAL_SYSTEM_MODULE_TYPE_KEY) : null;
   }
 
   public static void subscribe(@NotNull Project project,

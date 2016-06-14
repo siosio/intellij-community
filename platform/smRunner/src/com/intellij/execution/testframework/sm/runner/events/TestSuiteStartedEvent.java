@@ -19,9 +19,6 @@ import jetbrains.buildServer.messages.serviceMessages.TestSuiteStarted;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-/**
- * @author Sergey Simonchik
- */
 public class TestSuiteStartedEvent extends BaseStartedNodeEvent {
 
   public TestSuiteStartedEvent(@NotNull TestSuiteStarted suiteStarted,
@@ -36,7 +33,7 @@ public class TestSuiteStartedEvent extends BaseStartedNodeEvent {
   }
 
   public TestSuiteStartedEvent(@NotNull String name, @Nullable String locationUrl) {
-    super(name, -1, -1, locationUrl, null, null, true);
+    super(name, null, null, locationUrl, null, null, true);
   }
 
 }

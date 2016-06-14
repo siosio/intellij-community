@@ -78,12 +78,7 @@ public abstract class AbstractConsoleRunnerWithHistory<T extends LanguageConsole
   public void initAndRun() throws ExecutionException {
     // Create Server process
     final Process process = createProcess();
-    UIUtil.invokeLaterIfNeeded(new Runnable() {
-      @Override
-      public void run() {
-        initConsoleUI(process);
-      }
-    });
+    UIUtil.invokeLaterIfNeeded(() -> initConsoleUI(process));
   }
 
   private void initConsoleUI(Process process) {
@@ -128,14 +123,9 @@ public abstract class AbstractConsoleRunnerWithHistory<T extends LanguageConsole
     actionToolbar.setTargetComponent(panel);
 
     final RunContentDescriptor contentDescriptor =
-      new RunContentDescriptor(myConsoleView, myProcessHandler, panel, constructConsoleTitle(myConsoleTitle));
+      new RunContentDescriptor(myConsoleView, myProcessHandler, panel, constructConsoleTitle(myConsoleTitle), getConsoleIcon());
 
-    contentDescriptor.setFocusComputable(new Computable<JComponent>() {
-      @Override
-      public JComponent compute() {
-        return getConsoleView().getConsoleEditor().getContentComponent();
-      }
-    });
+    contentDescriptor.setFocusComputable(() -> getConsoleView().getConsoleEditor().getContentComponent());
     contentDescriptor.setAutoFocusContent(isAutoFocusContent());
 
 
@@ -145,6 +135,11 @@ public abstract class AbstractConsoleRunnerWithHistory<T extends LanguageConsole
     registerActionShortcuts(actions, panel);
 
     showConsole(defaultExecutor, contentDescriptor);
+  }
+
+  @Nullable
+  protected Icon getConsoleIcon() {
+    return null;
   }
 
   protected String constructConsoleTitle(final @NotNull String consoleTitle) {
@@ -274,13 +269,7 @@ public abstract class AbstractConsoleRunnerWithHistory<T extends LanguageConsole
   }
 
   protected List<String> getActiveConsolesFromRunToolWindow(final String consoleTitle) {
-    List<RunContentDescriptor> consoles = ExecutionHelper.collectConsolesByDisplayName(myProject, new NotNullFunction<String, Boolean>() {
-      @NotNull
-      @Override
-      public Boolean fun(String dom) {
-        return dom.contains(consoleTitle);
-      }
-    });
+    List<RunContentDescriptor> consoles = ExecutionHelper.collectConsolesByDisplayName(myProject, dom -> dom.contains(consoleTitle));
 
     return FluentIterable.from(consoles).filter(new Predicate<RunContentDescriptor>() {
       @Override

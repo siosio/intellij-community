@@ -16,8 +16,7 @@
 package com.jetbrains.python.debugger;
 
 import com.google.common.collect.Lists;
-import com.intellij.execution.ExecutionException;
-import com.intellij.execution.ExecutionResult;
+import com.intellij.execution.*;
 import com.intellij.execution.configurations.*;
 import com.intellij.execution.console.LanguageConsoleBuilder;
 import com.intellij.execution.executors.DefaultDebugExecutor;
@@ -29,6 +28,8 @@ import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.projectRoots.Sdk;
+import com.intellij.openapi.roots.OrderRootType;
 import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -36,13 +37,15 @@ import com.intellij.xdebugger.XDebugProcess;
 import com.intellij.xdebugger.XDebugProcessStarter;
 import com.intellij.xdebugger.XDebugSession;
 import com.intellij.xdebugger.XDebuggerManager;
-import com.jetbrains.python.PythonHelpersLocator;
+import com.jetbrains.python.PythonHelper;
 import com.jetbrains.python.console.PythonConsoleView;
 import com.jetbrains.python.console.PythonDebugConsoleCommunication;
 import com.jetbrains.python.console.PythonDebugLanguageConsoleView;
 import com.jetbrains.python.console.pydev.ConsoleCommunicationListener;
+import com.jetbrains.python.debugger.settings.PyDebuggerSettings;
 import com.jetbrains.python.run.AbstractPythonRunConfiguration;
 import com.jetbrains.python.run.CommandLinePatcher;
+import com.jetbrains.python.run.DebugAwareConfiguration;
 import com.jetbrains.python.run.PythonCommandLineState;
 import com.jetbrains.python.sdk.flavors.PythonSdkFlavor;
 import org.jetbrains.annotations.NotNull;
@@ -51,6 +54,7 @@ import org.jetbrains.annotations.Nullable;
 import java.io.File;
 import java.net.ServerSocket;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author yole
@@ -63,9 +67,14 @@ public class PyDebugRunner extends GenericProgramRunner {
   public static final String CLIENT_PARAM = "--client";
   public static final String PORT_PARAM = "--port";
   public static final String FILE_PARAM = "--file";
+  public static final String MODULE_PARAM = "--module";
   public static final String IDE_PROJECT_ROOTS = "IDE_PROJECT_ROOTS";
+  public static final String LIBRARY_ROOTS = "LIBRARY_ROOTS";
+  public static final String PYTHON_ASYNCIO_DEBUG = "PYTHONASYNCIODEBUG";
   @SuppressWarnings("SpellCheckingInspection")
   public static final String GEVENT_SUPPORT = "GEVENT_SUPPORT";
+  public static final String PYDEVD_FILTERS = "PYDEVD_FILTERS";
+  public static final String PYDEVD_FILTER_LIBRARIES = "PYDEVD_FILTER_LIBRARIES";
   public static boolean isModule = false;
 
   @Override
@@ -75,38 +84,80 @@ public class PyDebugRunner extends GenericProgramRunner {
   }
 
   @Override
-  public boolean canRun(@NotNull String executorId, @NotNull RunProfile profile) {
-    return DefaultDebugExecutor.EXECUTOR_ID.equals(executorId) &&
-           profile instanceof AbstractPythonRunConfiguration &&
-           ((AbstractPythonRunConfiguration)profile).canRunWithCoverage();
+  public boolean canRun(@NotNull final String executorId, @NotNull final RunProfile profile) {
+    if (!DefaultDebugExecutor.EXECUTOR_ID.equals(executorId)) {
+      // If not debug at all
+      return false;
+    }
+    /**
+     * Any python configuration is debuggable unless it explicitly declares itself as DebugAwareConfiguration and denies it
+     * with canRunUnderDebug == false
+     */
+
+    if (profile instanceof WrappingRunConfiguration) {
+      // If configuration is wrapper -- unwrap it and check
+      return isDebuggable(((WrappingRunConfiguration<?>)profile).getPeer());
+    }
+    return isDebuggable(profile);
   }
 
-  @Override
-  protected RunContentDescriptor doExecute(@NotNull RunProfileState state, @NotNull final ExecutionEnvironment environment) throws ExecutionException {
+  private static boolean isDebuggable(@NotNull final RunProfile profile) {
+    if (profile instanceof DebugAwareConfiguration) {
+      // if configuration knows whether debug is allowed
+      return ((DebugAwareConfiguration)profile).canRunUnderDebug();
+    }
+    if (profile instanceof AbstractPythonRunConfiguration) {
+      // Any python configuration is debuggable
+      return true;
+    }
+    // No even a python configuration
+    return false;
+  }
+
+
+  protected XDebugSession createSession(@NotNull RunProfileState state, @NotNull final ExecutionEnvironment environment)
+    throws ExecutionException {
     FileDocumentManager.getInstance().saveAllDocuments();
 
     final PythonCommandLineState pyState = (PythonCommandLineState)state;
     final ServerSocket serverSocket = PythonCommandLineState.createServerSocket();
     final int serverLocalPort = serverSocket.getLocalPort();
     RunProfile profile = environment.getRunProfile();
-    final ExecutionResult result = pyState.execute(environment.getExecutor(), createCommandLinePatchers(environment.getProject(), pyState, profile, serverLocalPort));
+    final ExecutionResult result =
+      pyState.execute(environment.getExecutor(), createCommandLinePatchers(environment.getProject(), pyState, profile, serverLocalPort));
 
-    final XDebugSession session = XDebuggerManager.getInstance(environment.getProject()).
+    return XDebuggerManager.getInstance(environment.getProject()).
       startSession(environment, new XDebugProcessStarter() {
         @Override
         @NotNull
         public XDebugProcess start(@NotNull final XDebugSession session) {
           PyDebugProcess pyDebugProcess =
-            new PyDebugProcess(session, serverSocket, result.getExecutionConsole(), result.getProcessHandler(),
-                               pyState.isMultiprocessDebug());
+            createDebugProcess(session, serverSocket, result, pyState);
 
           createConsoleCommunicationAndSetupActions(environment.getProject(), result, pyDebugProcess, session);
-
-
           return pyDebugProcess;
         }
       });
+  }
+
+  @NotNull
+  protected PyDebugProcess createDebugProcess(@NotNull XDebugSession session,
+                                              ServerSocket serverSocket,
+                                              ExecutionResult result,
+                                              PythonCommandLineState pyState) {
+    return new PyDebugProcess(session, serverSocket, result.getExecutionConsole(), result.getProcessHandler(),
+                              pyState.isMultiprocessDebug());
+  }
+
+  @Override
+  protected RunContentDescriptor doExecute(@NotNull RunProfileState state, @NotNull final ExecutionEnvironment environment)
+    throws ExecutionException {
+    XDebugSession session = createSession(state, environment);
+    initSession(session, state, environment.getExecutor());
     return session.getRunContentDescriptor();
+  }
+
+  protected void initSession(XDebugSession session, RunProfileState state, Executor executor) {
   }
 
   public static int findIndex(List<String> paramList, String paramName) {
@@ -171,13 +222,13 @@ public class PyDebugRunner extends GenericProgramRunner {
     return runConfigPatcher;
   }
 
-  public static CommandLinePatcher[] createCommandLinePatchers(final Project project, final PythonCommandLineState state,
+  public CommandLinePatcher[] createCommandLinePatchers(final Project project, final PythonCommandLineState state,
                                                                RunProfile profile,
                                                                final int serverLocalPort) {
     return new CommandLinePatcher[]{createDebugServerPatcher(project, state, serverLocalPort), createRunConfigPatcher(state, profile)};
   }
 
-  private static CommandLinePatcher createDebugServerPatcher(final Project project,
+  private CommandLinePatcher createDebugServerPatcher(final Project project,
                                                              final PythonCommandLineState pyState,
                                                              final int serverLocalPort) {
     return new CommandLinePatcher() {
@@ -190,10 +241,11 @@ public class PyDebugRunner extends GenericProgramRunner {
           parametersList.getParamsGroup(PythonCommandLineState.GROUP_EXE_OPTIONS));
         ParamsGroup exeParamsOld = parametersList.removeParamsGroup(exeParamsIndex);
         isModule = false;
-        for (String param: exeParamsOld.getParameters()) {
+        for (String param : exeParamsOld.getParameters()) {
           if (!param.equals("-m")) {
             newExeParams.addParameter(param);
-          } else {
+          }
+          else {
             isModule = true;
           }
         }
@@ -229,12 +281,49 @@ public class PyDebugRunner extends GenericProgramRunner {
     };
   }
 
-  private static void fillDebugParameters(@NotNull Project project,
+  private void fillDebugParameters(@NotNull Project project,
                                           @NotNull ParamsGroup debugParams,
                                           int serverLocalPort,
                                           @NotNull PythonCommandLineState pyState,
-                                          @NotNull GeneralCommandLine generalCommandLine) {
-    debugParams.addParameter(PythonHelpersLocator.getHelperPath(DEBUGGER_MAIN));
+                                          @NotNull GeneralCommandLine cmd) {
+    PythonHelper.DEBUGGER.addToGroup(debugParams, cmd);
+
+    configureDebugParameters(project, debugParams, pyState, cmd);
+
+
+    configureDebugEnvironment(project, cmd.getEnvironment());
+
+    final String[] debuggerArgs = new String[]{
+      CLIENT_PARAM, "127.0.0.1",
+      PORT_PARAM, String.valueOf(serverLocalPort),
+      FILE_PARAM
+    };
+    for (String s : debuggerArgs) {
+      debugParams.addParameter(s);
+    }
+  }
+
+  public static void configureDebugEnvironment(@NotNull Project project, Map<String, String> environment) {
+    if (PyDebuggerOptionsProvider.getInstance(project).isSupportGeventDebugging()) {
+      environment.put(GEVENT_SUPPORT, "True");
+    }
+
+    PyDebuggerSettings debuggerSettings = PyDebuggerSettings.getInstance();
+    if (debuggerSettings.isSteppingFiltersEnabled()) {
+      environment.put(PYDEVD_FILTERS, debuggerSettings.getSteppingFiltersForProject(project));
+    }
+    if (debuggerSettings.isLibrariesFilterEnabled()) {
+      environment.put(PYDEVD_FILTER_LIBRARIES, "True");
+    }
+
+    addProjectRootsToEnv(project, environment);
+    addSdkRootsToEnv(project, environment);
+  }
+
+  protected void configureDebugParameters(@NotNull Project project,
+                                        @NotNull ParamsGroup debugParams,
+                                        @NotNull PythonCommandLineState pyState,
+                                        @NotNull GeneralCommandLine cmd) {
     if (pyState.isMultiprocessDebug()) {
       //noinspection SpellCheckingInspection
       debugParams.addParameter("--multiproc");
@@ -252,29 +341,37 @@ public class PyDebugRunner extends GenericProgramRunner {
       debugParams.addParameter("--save-signatures");
     }
 
-    if (PyDebuggerOptionsProvider.getInstance(project).isSupportGeventDebugging()) {
-      generalCommandLine.getEnvironment().put(GEVENT_SUPPORT, "True");
-    }
-
-    addProjectRootsToEnv(project, generalCommandLine);
-
-    final String[] debuggerArgs = new String[]{
-      CLIENT_PARAM, "127.0.0.1",
-      PORT_PARAM, String.valueOf(serverLocalPort),
-      FILE_PARAM
-    };
-    for (String s : debuggerArgs) {
-      debugParams.addParameter(s);
+    if (PyDebuggerOptionsProvider.getInstance(project).isSupportQtDebugging()) {
+      debugParams.addParameter("--qt-support");
     }
   }
 
-  private static void addProjectRootsToEnv(@NotNull Project project, @NotNull GeneralCommandLine commandLine) {
+  private static void addProjectRootsToEnv(@NotNull Project project, @NotNull Map<String, String> environment) {
 
     List<String> roots = Lists.newArrayList();
     for (VirtualFile contentRoot : ProjectRootManager.getInstance(project).getContentRoots()) {
       roots.add(contentRoot.getPath());
     }
 
-    commandLine.getEnvironment().put(IDE_PROJECT_ROOTS, StringUtil.join(roots, File.pathSeparator));
+    environment.put(IDE_PROJECT_ROOTS, StringUtil.join(roots, File.pathSeparator));
+  }
+
+  private static void addSdkRootsToEnv(@NotNull Project project, @NotNull Map<String, String> environment) {
+    final RunManager runManager = RunManager.getInstance(project);
+    final RunnerAndConfigurationSettings selectedConfiguration = runManager.getSelectedConfiguration();
+    if (selectedConfiguration != null) {
+      final RunConfiguration configuration = selectedConfiguration.getConfiguration();
+      if (configuration instanceof AbstractPythonRunConfiguration) {
+        AbstractPythonRunConfiguration runConfiguration = (AbstractPythonRunConfiguration)configuration;
+        final Sdk sdk = runConfiguration.getSdk();
+        if (sdk != null) {
+          List<String> roots = Lists.newArrayList();
+          for (VirtualFile contentRoot : sdk.getSdkModificator().getRoots(OrderRootType.CLASSES)) {
+            roots.add(contentRoot.getPath());
+          }
+          environment.put(LIBRARY_ROOTS, StringUtil.join(roots, File.pathSeparator));
+        }
+      }
+    }
   }
 }

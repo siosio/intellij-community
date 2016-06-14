@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,10 @@
 package com.intellij.ide;
 
 import com.intellij.ide.util.PropertiesComponent;
-import com.intellij.openapi.components.*;
+import com.intellij.openapi.components.PersistentStateComponent;
+import com.intellij.openapi.components.ServiceManager;
+import com.intellij.openapi.components.State;
+import com.intellij.openapi.components.Storage;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.xmlb.XmlSerializerUtil;
 import com.intellij.util.xmlb.annotations.OptionTag;
@@ -29,7 +32,7 @@ import java.beans.PropertyChangeSupport;
 
 @State(
   name = "GeneralSettings",
-  storages = @Storage(file = StoragePathMacros.APP_CONFIG + "/ide.general.xml")
+  storages = @Storage("ide.general.xml")
 )
 public class GeneralSettings implements PersistentStateComponent<GeneralSettings> {
   public static final int OPEN_PROJECT_ASK = -1;
@@ -37,10 +40,12 @@ public class GeneralSettings implements PersistentStateComponent<GeneralSettings
   public static final int OPEN_PROJECT_SAME_WINDOW = 1;
 
   public static final String PROP_INACTIVE_TIMEOUT = "inactiveTimeout";
+  public static final String PROP_SUPPORT_SCREEN_READERS = "supportScreenReaders";
 
   private String myBrowserPath = BrowserUtil.getDefaultAlternativeBrowserPath();
   private boolean myShowTipsOnStartup = true;
   private boolean myReopenLastProject = true;
+  private boolean mySupportScreenReaders = false;
   private boolean mySyncOnFrameActivation = true;
   private boolean mySaveOnFrameDeactivation = true;
   private boolean myAutoSaveIfInactive = false;  // If true the IDEA automatically saves files if it is inactive for some seconds
@@ -73,20 +78,20 @@ public class GeneralSettings implements PersistentStateComponent<GeneralSettings
     return myBrowserPath;
   }
 
-  @SuppressWarnings("unused")
-  @Deprecated
   /**
    * Use RecentProjectsManagerBase
    */
+  @SuppressWarnings("unused")
+  @Deprecated
   public String getLastProjectCreationLocation() {
     return null;
   }
 
-  @SuppressWarnings("unused")
-  @Deprecated
   /**
    * Use RecentProjectsManagerBase
    */
+  @SuppressWarnings("unused")
+  @Deprecated
   public void setLastProjectCreationLocation(String lastProjectLocation) {
   }
 
@@ -123,6 +128,18 @@ public class GeneralSettings implements PersistentStateComponent<GeneralSettings
 
   public void setReopenLastProject(boolean reopenLastProject) {
     myReopenLastProject = reopenLastProject;
+  }
+
+  public boolean isSupportScreenReaders() {
+    return mySupportScreenReaders;
+  }
+
+  public void setSupportScreenReaders(boolean enabled) {
+    boolean oldValue = mySupportScreenReaders;
+    mySupportScreenReaders = enabled;
+    myPropertyChangeSupport.firePropertyChange(
+      PROP_SUPPORT_SCREEN_READERS, Boolean.valueOf(oldValue), Boolean.valueOf(enabled)
+    );
   }
 
   @OptionTag("autoSyncFiles")

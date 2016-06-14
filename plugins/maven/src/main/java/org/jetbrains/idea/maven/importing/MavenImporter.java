@@ -16,6 +16,7 @@
 package org.jetbrains.idea.maven.importing;
 
 import com.intellij.openapi.extensions.ExtensionPointName;
+import com.intellij.openapi.externalSystem.service.project.IdeModifiableModelsProvider;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleType;
 import com.intellij.openapi.module.StdModuleTypes;
@@ -40,7 +41,7 @@ import org.jetbrains.jps.model.module.JpsModuleSourceRootType;
 import java.util.*;
 
 public abstract class MavenImporter {
-  public static ExtensionPointName<MavenImporter> EXTENSION_POINT_NAME = ExtensionPointName.create("org.jetbrains.idea.maven.importer");
+  public static final ExtensionPointName<MavenImporter> EXTENSION_POINT_NAME = ExtensionPointName.create("org.jetbrains.idea.maven.importer");
   protected final String myPluginGroupID;
   protected final String myPluginArtifactID;
 
@@ -88,11 +89,7 @@ public abstract class MavenImporter {
     }
 
     final ModuleType finalModuleType = moduleType;
-    return ContainerUtil.filter(result, new Condition<MavenImporter>() {
-      public boolean value(final MavenImporter importer) {
-        return importer.getModuleType() == finalModuleType;
-      }
-    });
+    return ContainerUtil.filter(result, importer -> importer.getModuleType() == finalModuleType);
   }
 
   public boolean isApplicable(MavenProject mavenProject) {
@@ -138,9 +135,9 @@ public abstract class MavenImporter {
   public abstract void preProcess(Module module,
                                   MavenProject mavenProject,
                                   MavenProjectChanges changes,
-                                  MavenModifiableModelsProvider modifiableModelsProvider);
+                                  IdeModifiableModelsProvider modifiableModelsProvider);
 
-  public abstract void process(MavenModifiableModelsProvider modifiableModelsProvider,
+  public abstract void process(IdeModifiableModelsProvider modifiableModelsProvider,
                                Module module,
                                MavenRootModelAdapter rootModel,
                                MavenProjectsTree mavenModel,
@@ -148,6 +145,12 @@ public abstract class MavenImporter {
                                MavenProjectChanges changes,
                                Map<MavenProject, String> mavenProjectToModuleName,
                                List<MavenProjectsProcessorTask> postTasks);
+
+  public void postProcess(Module module,
+                          MavenProject mavenProject,
+                          MavenProjectChanges changes,
+                          IdeModifiableModelsProvider modifiableModelsProvider) {
+  }
 
   public boolean processChangedModulesOnly() {
     return true;

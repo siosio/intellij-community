@@ -40,11 +40,11 @@ public class PythonSourceRootConfigurator implements DirectoryProjectConfigurato
   @NonNls private static final String SETUP_PY = "setup.py";
 
   @Override
-  public void configureProject(Project project, @NotNull final VirtualFile baseDir, Ref<Module> moduleRef) {
+  public void configureProject(Project project, @NotNull VirtualFile baseDir, Ref<Module> moduleRef) {
     VirtualFile setupPy = baseDir.findChild(SETUP_PY);
     if (setupPy != null) {
       final CharSequence content = LoadTextUtil.loadText(setupPy);
-      PyFile setupPyFile = (PyFile) PsiFileFactory.getInstance(project).createFileFromText(SETUP_PY, content.toString());
+      PyFile setupPyFile = (PyFile) PsiFileFactory.getInstance(project).createFileFromText(SETUP_PY, PythonFileType.INSTANCE, content.toString());
       final SetupCallVisitor visitor = new SetupCallVisitor();
       setupPyFile.accept(visitor);
       String dir = visitor.getRootPackageDir();
@@ -59,20 +59,18 @@ public class PythonSourceRootConfigurator implements DirectoryProjectConfigurato
   private static void addSourceRoot(Project project, final VirtualFile baseDir, final VirtualFile root, final boolean unique) {
     final Module[] modules = ModuleManager.getInstance(project).getModules();
     if (modules.length > 0 && root != null) {
-      ApplicationManager.getApplication().runWriteAction(new Runnable() {
-        public void run() {
-          final ModifiableRootModel model = ModuleRootManager.getInstance(modules[0]).getModifiableModel();
-          final ContentEntry[] contentEntries = model.getContentEntries();
-          for (ContentEntry contentEntry : contentEntries) {
-            if (Comparing.equal(contentEntry.getFile(), baseDir)) {
-              final SourceFolder[] sourceFolders = contentEntry.getSourceFolders();
-              if (!unique || sourceFolders.length == 0) {
-                contentEntry.addSourceFolder(root, false);
-              }
+      ApplicationManager.getApplication().runWriteAction(() -> {
+        final ModifiableRootModel model = ModuleRootManager.getInstance(modules[0]).getModifiableModel();
+        final ContentEntry[] contentEntries = model.getContentEntries();
+        for (ContentEntry contentEntry : contentEntries) {
+          if (Comparing.equal(contentEntry.getFile(), baseDir)) {
+            final SourceFolder[] sourceFolders = contentEntry.getSourceFolders();
+            if (!unique || sourceFolders.length == 0) {
+              contentEntry.addSourceFolder(root, false);
             }
           }
-          model.commit();
         }
+        model.commit();
       });
     }
   }

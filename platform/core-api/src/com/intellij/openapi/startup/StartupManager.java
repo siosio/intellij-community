@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -54,10 +54,14 @@ public abstract class StartupManager {
   public abstract void registerPostStartupActivity(@NotNull Runnable runnable);
 
   /**
-   * Executes the specified runnable immediately if the initialization of the current project
-   * is complete, or registers it as a post-startup activity if the project is being initialized.
+   * Executes the specified runnable as soon as possible if the initialization of the current project
+   * is complete, or registers it as a post-startup activity if the project is being initialized.<p/>
+   * <p>
+   * The runnable is executed on AWT thread in a non-modal state.
    *
    * @param runnable the activity to execute.
+   * @see com.intellij.openapi.application.ModalityState
+   * @see com.intellij.openapi.application.Application#invokeLater(Runnable)
    */
   public abstract void runWhenProjectIsInitialized(@NotNull Runnable runnable);
 }

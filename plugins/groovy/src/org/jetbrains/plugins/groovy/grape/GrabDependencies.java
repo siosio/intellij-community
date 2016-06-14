@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ import com.intellij.execution.CantRunException;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.execution.configurations.JavaParameters;
-import com.intellij.execution.process.DefaultJavaProcessHandler;
+import com.intellij.execution.process.OSProcessHandler;
 import com.intellij.execution.process.ProcessOutputTypes;
 import com.intellij.notification.NotificationDisplayType;
 import com.intellij.notification.NotificationGroup;
@@ -117,29 +117,22 @@ public class GrabDependencies implements IntentionAction {
   private static PsiAnnotation findGrab(final PsiFile file) {
     if (!(file instanceof GroovyFile)) return null;
 
-    return CachedValuesManager.getCachedValue(file, new CachedValueProvider<PsiAnnotation>() {
-      @Nullable
-      @Override
-      public Result<PsiAnnotation> compute() {
-        PsiClass grab = JavaPsiFacade.getInstance(file.getProject()).findClass(GrabAnnos.GRAB_ANNO, file.getResolveScope());
-        final Ref<PsiAnnotation> result = Ref.create();
-        if (grab != null) {
-          ReferencesSearch.search(grab, new LocalSearchScope(file)).forEach(new Processor<PsiReference>() {
-            @Override
-            public boolean process(PsiReference reference) {
-              if (reference instanceof GrCodeReferenceElement) {
-                PsiElement parent = ((GrCodeReferenceElement)reference).getParent();
-                if (parent instanceof PsiAnnotation) {
-                  result.set((PsiAnnotation)parent);
-                  return false;
-                }
-              }
-              return true;
+    return CachedValuesManager.getCachedValue(file, () -> {
+      PsiClass grab = JavaPsiFacade.getInstance(file.getProject()).findClass(GrabAnnos.GRAB_ANNO, file.getResolveScope());
+      final Ref<PsiAnnotation> result = Ref.create();
+      if (grab != null) {
+        ReferencesSearch.search(grab, new LocalSearchScope(file)).forEach(reference -> {
+          if (reference instanceof GrCodeReferenceElement) {
+            PsiElement parent = ((GrCodeReferenceElement)reference).getParent();
+            if (parent instanceof PsiAnnotation) {
+              result.set((PsiAnnotation)parent);
+              return false;
             }
-          });
-        }
-        return Result.create(result.get(), file);
+          }
+          return true;
+        });
       }
+      return CachedValueProvider.Result.create(result.get(), file);
     });
   }
 
@@ -209,8 +202,7 @@ public class GrabDependencies implements IntentionAction {
       lines.put(grabText, JdkUtil.setupJVMCommandLine(exePath, javaParameters, true));
     }
 
-    ProgressManager.getInstance().run(new Task.Backgroundable(project, "Processing @Grab annotations") {
-
+    ProgressManager.getInstance().run(new Task.Backgroundable(project, "Processing @Grab Annotations") {
       @Override
       public void run(@NotNull ProgressIndicator indicator) {
         int jarCount = 0;
@@ -256,12 +248,7 @@ public class GrabDependencies implements IntentionAction {
       }
     });
 
-    Function<GrAnnotation, String> mapper = new Function<GrAnnotation, String>() {
-      @Override
-      public String fun(GrAnnotation grAnnotation) {
-        return grAnnotation.getText();
-      }
-    };
+    Function<GrAnnotation, String> mapper = grAnnotation -> grAnnotation.getText();
     String common = StringUtil.join(excludes, mapper, " ") + " " + StringUtil.join(resolvers, mapper, " ");
     LinkedHashMap<String, String> result = new LinkedHashMap<String, String>();
     for (GrAnnotation grab : grabs) {
@@ -276,7 +263,7 @@ public class GrabDependencies implements IntentionAction {
     return false;
   }
 
-  private static class GrapeProcessHandler extends DefaultJavaProcessHandler {
+  private static class GrapeProcessHandler extends OSProcessHandler {
     private final StringBuilder myStdOut = new StringBuilder();
     private final StringBuilder myStdErr = new StringBuilder();
     private final Module myModule;
@@ -358,7 +345,7 @@ public class GrabDependencies implements IntentionAction {
         }
         new WriteAction() {
           @Override
-          protected void run(Result result) throws Throwable {
+          protected void run(@NotNull Result result) throws Throwable {
             jarCount = jars.size();
             messages = jarCount + " jar";
             if (jarCount != 1) {

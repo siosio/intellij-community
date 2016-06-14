@@ -41,7 +41,6 @@ import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.ui.Splitter;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.JDOMUtil;
@@ -64,8 +63,6 @@ import com.intellij.psi.search.scope.packageSet.NamedScope;
 import com.intellij.ui.*;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.util.Alarm;
-import com.intellij.util.Function;
-import com.intellij.util.config.StorageAccessors;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.Convertor;
 import com.intellij.util.containers.Queue;
@@ -105,13 +102,13 @@ public class SingleInspectionProfilePanel extends JPanel {
   @NonNls private static final String INSPECTION_FILTER_HISTORY = "INSPECTION_FILTER_HISTORY";
   private static final String UNDER_CONSTRUCTION = InspectionsBundle.message("inspection.tool.description.under.construction.text");
   @NonNls private static final String EMPTY_HTML = "<html><body></body></html>";
-  @NonNls private static final String VERTICAL_DIVIDER_PROPORTION = "VERTICAL_DIVIDER_PROPORTION";
-  @NonNls private static final String HORIZONTAL_DIVIDER_PROPORTION = "HORIZONTAL_DIVIDER_PROPORTION";
+
+  private static final float DIVIDER_PROPORTION_DEFAULT = 0.5f;
+
   private final List<ToolDescriptors> myInitialToolDescriptors = new ArrayList<ToolDescriptors>();
   private final InspectionConfigTreeNode myRoot =
     new InspectionConfigTreeNode(InspectionsBundle.message("inspection.root.node.title"));
   private final Alarm myAlarm = new Alarm();
-  private final StorageAccessors myProperties = StorageAccessors.createGlobal("SingleInspectionProfilePanel");
   private final InspectionProjectProfileManager myProjectProfileManager;
   @NotNull private Profile myOriginal;
   private InspectionProfileImpl mySelectedProfile;
@@ -131,9 +128,9 @@ public class SingleInspectionProfilePanel extends JPanel {
   @NotNull
   private String myCurrentProfileName;
   private boolean myIsInRestore = false;
-  private boolean myShareProfile;
-  private Splitter myRightSplitter;
-  private Splitter myMainSplitter;
+  private boolean myIsProjectLevel;
+  private JBSplitter myRightSplitter;
+  private JBSplitter myMainSplitter;
 
   private String[] myInitialScopesOrder;
   private Disposable myDisposable = new Disposable() {
@@ -150,7 +147,7 @@ public class SingleInspectionProfilePanel extends JPanel {
     myOriginal = original;
     mySelectedProfile = (InspectionProfileImpl)profile;
     myCurrentProfileName = inspectionProfileName;
-    myShareProfile = profile.getProfileManager() == projectProfileManager;
+    myIsProjectLevel = profile.getProfileManager() == projectProfileManager;
   }
 
   private static VisibleTreeState getExpandedNodes(InspectionProfileImpl profile) {
@@ -161,6 +158,22 @@ public class SingleInspectionProfilePanel extends JPanel {
       DefaultProjectProfileManager projectProfileManager = (DefaultProjectProfileManager)profile.getProfileManager();
       return ProjectInspectionProfilesVisibleTreeState.getInstance(projectProfileManager.getProject()).getVisibleTreeState(profile);
     }
+  }
+
+  private static InspectionConfigTreeNode findGroupNodeByPath(@NotNull String[] path, int idx, @NotNull InspectionConfigTreeNode node) {
+    if (path.length == idx) {
+      return node;
+    }
+
+    final String currentKey = path[idx];
+    for (int i = 0; i < node.getChildCount(); i++) {
+      final InspectionConfigTreeNode currentNode = (InspectionConfigTreeNode)node.getChildAt(i);
+      if (Comparing.equal(currentNode.getGroupName(), currentKey)) {
+        return findGroupNodeByPath(path, ++idx, currentNode);
+      }
+    }
+
+    return null;
   }
 
   @Nullable
@@ -317,13 +330,10 @@ public class SingleInspectionProfilePanel extends JPanel {
       @Override
       public void stateChanged() {
         //invoke after all other listeners
-        SwingUtilities.invokeLater(new Runnable() {
-          @Override
-          public void run() {
-            if (mySelectedProfile == null) return; //panel was disposed
-            updateProperSettingsForSelection();
-            wereToolSettingsModified();
-          }
+        SwingUtilities.invokeLater(() -> {
+          if (mySelectedProfile == null) return; //panel was disposed
+          updateProperSettingsForSelection();
+          wereToolSettingsModified();
         });
       }
     });
@@ -407,12 +417,7 @@ public class SingleInspectionProfilePanel extends JPanel {
     Element newConfig = Descriptor.createConfigElement(state.getTool());
     if (!JDOMUtil.areElementsEqual(oldConfig, newConfig)) {
       myAlarm.cancelAllRequests();
-      myAlarm.addRequest(new Runnable() {
-        @Override
-        public void run() {
-          myTreeTable.repaint();
-        }
-      }, 300);
+      myAlarm.addRequest(() -> myTreeTable.repaint(), 300);
       myModified = true;
       return true;
     }
@@ -428,12 +433,7 @@ public class SingleInspectionProfilePanel extends JPanel {
         final boolean properSetting = mySelectedProfile.isProperSetting(descriptor.getKey().toString());
         if (node.isProperSetting() != properSetting) {
           myAlarm.cancelAllRequests();
-          myAlarm.addRequest(new Runnable() {
-            @Override
-            public void run() {
-              myTreeTable.repaint();
-            }
-          }, 300);
+          myAlarm.addRequest(() -> myTreeTable.repaint(), 300);
           node.dropCache();
           updateUpHierarchy((InspectionConfigTreeNode)node.getParent());
         }
@@ -515,7 +515,7 @@ public class SingleInspectionProfilePanel extends JPanel {
 
     DefaultActionGroup actions = new DefaultActionGroup();
 
-    actions.add(new InspectionFilterAction(mySelectedProfile, myInspectionsFilter, myProjectProfileManager.getProject()));
+    actions.add(new InspectionFilterAction(mySelectedProfile, myInspectionsFilter, myProjectProfileManager.getProject(), myProfileFilter));
     actions.addSeparator();
 
     actions.add(actionManager.createExpandAllAction(myTreeExpander, myTreeTable));
@@ -563,7 +563,18 @@ public class SingleInspectionProfilePanel extends JPanel {
   }
 
   public void selectInspectionTool(String name) {
-    final InspectionConfigTreeNode node = findNodeByKey(name, myRoot);
+    selectNode(findNodeByKey(name, myRoot));
+  }
+
+  public void selectInspectionGroup(String[] path) {
+    final InspectionConfigTreeNode node = findGroupNodeByPath(path, 0, myRoot);
+    selectNode(node);
+    if (node != null) {
+      myTreeTable.getTree().expandPath(new TreePath(node.getPath()));
+    }
+  }
+
+  private void selectNode(InspectionConfigTreeNode node) {
     if (node != null) {
       TreeUtil.selectNode(myTreeTable.getTree(), node);
       final int rowForPath = myTreeTable.getTree().getRowForPath(new TreePath(node.getPath()));
@@ -758,10 +769,10 @@ public class SingleInspectionProfilePanel extends JPanel {
       if (filter != null && !filter.isEmpty() && !isDescriptorAccepted(descriptor, filter, forceInclude, keySetList, quoted)) {
         continue;
       }
-      if (!emptyFilter && !myInspectionsFilter.matches(mySelectedProfile.getTools(toolDescriptors.getDefaultDescriptor().getKey().toString(), project))) {
+      final InspectionConfigTreeNode node = new InspectionConfigTreeNode(toolDescriptors);
+      if (!emptyFilter && !myInspectionsFilter.matches(mySelectedProfile.getTools(toolDescriptors.getDefaultDescriptor().getKey().toString(), project), node)) {
         continue;
       }
-      final InspectionConfigTreeNode node = new InspectionConfigTreeNode(toolDescriptors);
       getGroupNode(myRoot, toolDescriptors.getDefaultDescriptor().getGroup()).add(node);
       myRoot.dropCache();
     }
@@ -775,9 +786,9 @@ public class SingleInspectionProfilePanel extends JPanel {
   }
 
   // TODO 134099: see IntentionDescriptionPanel#readHTML
-  private boolean readHTML(String text) {
+  public static boolean readHTML(JEditorPane browser, String text) {
     try {
-      myBrowser.read(new StringReader(text), null);
+      browser.read(new StringReader(text), null);
       return true;
     }
     catch (IOException ignored) {
@@ -785,10 +796,10 @@ public class SingleInspectionProfilePanel extends JPanel {
     }
   }
 
-  // TODO 134099: see IntentionDescriptionPanel#toHTML
-  private String toHTML(String text) {
-    final HintHint hintHint = new HintHint(myBrowser, new Point(0, 0));
-    hintHint.setFont(UIUtil.getLabelFont());
+  // TODO 134099: see IntentionDescriptionPanel#setHTML
+  public static String toHTML(JEditorPane browser, String text, boolean miniFontSize) {
+    final HintHint hintHint = new HintHint(browser, new Point(0, 0));
+    hintHint.setFont(miniFontSize ? UIUtil.getLabelFont(UIUtil.FontSize.SMALL) : UIUtil.getLabelFont());
     return HintUtil.prepareHintText(text, hintHint);
   }
 
@@ -808,8 +819,8 @@ public class SingleInspectionProfilePanel extends JPanel {
           final Descriptor defaultDescriptor = singleNode.getDefaultDescriptor();
           final String description = defaultDescriptor.loadDescription();
           try {
-            if (!readHTML(SearchUtil.markup(toHTML(description), myProfileFilter.getFilter()))) {
-              readHTML(toHTML("<b>" + UNDER_CONSTRUCTION + "</b>"));
+            if (!readHTML(myBrowser, SearchUtil.markup(toHTML(myBrowser, description, false), myProfileFilter.getFilter()))) {
+              readHTML(myBrowser, toHTML(myBrowser, "<b>" + UNDER_CONSTRUCTION + "</b>", false));
             }
           }
           catch (Throwable t) {
@@ -821,11 +832,11 @@ public class SingleInspectionProfilePanel extends JPanel {
 
         }
         else {
-          readHTML(toHTML("Can't find inspection description."));
+          readHTML(myBrowser, toHTML(myBrowser, "Can't find inspection description.", false));
         }
       }
       else {
-        readHTML(toHTML("Multiple inspections are selected. You can edit them as a single inspection."));
+        readHTML(myBrowser, toHTML(myBrowser, "Multiple inspections are selected. You can edit them as a single inspection.", false));
       }
 
       myOptionsPanel.removeAll();
@@ -860,20 +871,10 @@ public class SingleInspectionProfilePanel extends JPanel {
             }
           };
         final HighlightSeverity severity =
-          ScopesAndSeveritiesTable.getSeverity(ContainerUtil.map(nodes, new Function<InspectionConfigTreeNode, ScopeToolState>() {
-            @Override
-            public ScopeToolState fun(InspectionConfigTreeNode node) {
-              return node.getDefaultDescriptor().getState();
-            }
-          }));
+          ScopesAndSeveritiesTable.getSeverity(ContainerUtil.map(nodes, node -> node.getDefaultDescriptor().getState()));
         severityLevelChooser.setChosen(severity);
 
-        final ScopesChooser scopesChooser = new ScopesChooser(ContainerUtil.map(nodes, new Function<InspectionConfigTreeNode, Descriptor>() {
-          @Override
-          public Descriptor fun(final InspectionConfigTreeNode node) {
-            return node.getDefaultDescriptor();
-          }
-        }), mySelectedProfile, project, null) {
+        final ScopesChooser scopesChooser = new ScopesChooser(ContainerUtil.map(nodes, node -> node.getDefaultDescriptor()), mySelectedProfile, project, null) {
           @Override
           protected void onScopesOrderChanged() {
             myTreeTable.updateUI();
@@ -1023,7 +1024,7 @@ public class SingleInspectionProfilePanel extends JPanel {
 
   private void initOptionsAndDescriptionPanel() {
     myOptionsPanel.removeAll();
-    readHTML(EMPTY_HTML);
+    readHTML(myBrowser, EMPTY_HTML);
     myOptionsPanel.validate();
     myOptionsPanel.repaint();
   }
@@ -1056,8 +1057,6 @@ public class SingleInspectionProfilePanel extends JPanel {
     if (myInspectionProfilePanel == null) {
       return;
     }
-    myProperties.setFloat(VERTICAL_DIVIDER_PROPORTION, myMainSplitter.getProportion());
-    myProperties.setFloat(HORIZONTAL_DIVIDER_PROPORTION, myRightSplitter.getProportion());
     myAlarm.cancelAllRequests();
     myProfileFilter.dispose();
     if (mySelectedProfile != null) {
@@ -1085,9 +1084,8 @@ public class SingleInspectionProfilePanel extends JPanel {
                                                                    new Insets(2, 0, 0, 0)));
     descriptionPanel.add(ScrollPaneFactory.createScrollPane(myBrowser), BorderLayout.CENTER);
 
-    myRightSplitter = new Splitter(true);
+    myRightSplitter = new JBSplitter(true, "SingleInspectionProfilePanel.HORIZONTAL_DIVIDER_PROPORTION", DIVIDER_PROPORTION_DEFAULT);
     myRightSplitter.setFirstComponent(descriptionPanel);
-    myRightSplitter.setProportion(myProperties.getFloat(HORIZONTAL_DIVIDER_PROPORTION, 0.5f));
 
     myOptionsPanel = new JPanel(new GridBagLayout());
     initOptionsAndDescriptionPanel();
@@ -1102,7 +1100,8 @@ public class SingleInspectionProfilePanel extends JPanel {
     northPanel.add(myProfileFilter, new GridBagConstraints(0, 0, 1, 1, 0.5, 1, GridBagConstraints.BASELINE_TRAILING, GridBagConstraints.HORIZONTAL, new Insets(0, 0, 0, 0), 0, 0));
     northPanel.add(createTreeToolbarPanel().getComponent(), new GridBagConstraints(1, 0, 1, 1, 1, 1, GridBagConstraints.BASELINE_LEADING, GridBagConstraints.HORIZONTAL, new Insets(0, 0, 0, 0), 0, 0));
 
-    myMainSplitter = new Splitter(false, myProperties.getFloat(VERTICAL_DIVIDER_PROPORTION, 0.5f), 0.01f, 0.99f);
+    myMainSplitter = new JBSplitter(false, DIVIDER_PROPORTION_DEFAULT, 0.01f, 0.99f);
+    myMainSplitter.setSplitterProportionKey("SingleInspectionProfilePanel.VERTICAL_DIVIDER_PROPORTION");
     myMainSplitter.setFirstComponent(tree);
     myMainSplitter.setSecondComponent(myRightSplitter);
     myMainSplitter.setHonorComponentsMinimumSize(false);
@@ -1116,7 +1115,7 @@ public class SingleInspectionProfilePanel extends JPanel {
   public boolean isModified() {
     if (myModified) return true;
     if (mySelectedProfile.isChanged()) return true;
-    if (myShareProfile != (mySelectedProfile.getProfileManager() == myProjectProfileManager)) return true;
+    if (myIsProjectLevel != (mySelectedProfile.getProfileManager() == myProjectProfileManager)) return true;
     if (!Comparing.strEqual(myCurrentProfileName, mySelectedProfile.getName())) return true;
     if (!Comparing.equal(myInitialScopesOrder, mySelectedProfile.getScopesOrder())) return true;
     return descriptorsAreChanged();
@@ -1128,7 +1127,7 @@ public class SingleInspectionProfilePanel extends JPanel {
     final String filter = myProfileFilter.getFilter();
     myProfileFilter.reset();
     myProfileFilter.setSelectedItem(filter);
-    myShareProfile = mySelectedProfile.getProfileManager() == myProjectProfileManager;
+    myIsProjectLevel = mySelectedProfile.getProfileManager() == myProjectProfileManager;
   }
 
   public void apply() throws ConfigurationException {
@@ -1138,8 +1137,8 @@ public class SingleInspectionProfilePanel extends JPanel {
     }
     final ModifiableModel selectedProfile = getSelectedProfile();
 
-    ProfileManager profileManager = myShareProfile ? myProjectProfileManager : InspectionProfileManager.getInstance();
-    selectedProfile.setProjectLevel(myShareProfile);
+    ProfileManager profileManager = myIsProjectLevel ? myProjectProfileManager : InspectionProfileManager.getInstance();
+    selectedProfile.setProjectLevel(myIsProjectLevel);
     if (selectedProfile.getProfileManager() != profileManager) {
       if (selectedProfile.getProfileManager().getProfile(selectedProfile.getName(), false) == myOriginal) {
         selectedProfile.getProfileManager().deleteProfile(selectedProfile.getName());
@@ -1206,12 +1205,12 @@ public class SingleInspectionProfilePanel extends JPanel {
     return false;
   }
 
-  public boolean isProfileShared() {
-    return myShareProfile;
+  public boolean isProjectLevel() {
+    return myIsProjectLevel;
   }
 
-  public void setProfileShared(boolean profileShared) {
-    myShareProfile = profileShared;
+  public void setIsProjectLevel(boolean value) {
+    myIsProjectLevel = value;
   }
 
   @NotNull
@@ -1290,7 +1289,6 @@ public class SingleInspectionProfilePanel extends JPanel {
   private class MyFilterComponent extends FilterComponent {
     private MyFilterComponent() {
       super(INSPECTION_FILTER_HISTORY, 10);
-      setHistory(Collections.singletonList("\"New in 14\""));
     }
 
     @Override

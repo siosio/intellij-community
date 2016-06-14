@@ -47,13 +47,7 @@ public abstract class XmlExtension {
   public static final XmlExtension DEFAULT_EXTENSION = new DefaultXmlExtension();
 
   public static XmlExtension getExtension(@NotNull final PsiFile file) {
-    return CachedValuesManager.getCachedValue(file, new CachedValueProvider<XmlExtension>() {
-      @Nullable
-      @Override
-      public Result<XmlExtension> compute() {
-        return Result.create(calcExtension(file), PsiModificationTracker.MODIFICATION_COUNT);
-      }
-    });
+    return CachedValuesManager.getCachedValue(file, () -> CachedValueProvider.Result.create(calcExtension(file), PsiModificationTracker.MODIFICATION_COUNT));
   }
 
   private static XmlExtension calcExtension(PsiFile file) {
@@ -162,6 +156,10 @@ public abstract class XmlExtension {
 
   public boolean isIndirectSyntax(final XmlAttributeDescriptor descriptor) {
     return false;
+  }
+
+  public boolean shouldBeInserted(final XmlAttributeDescriptor descriptor) {
+    return descriptor.isRequired();
   }
 
   public boolean isCustomTagAllowed(final XmlTag tag) {

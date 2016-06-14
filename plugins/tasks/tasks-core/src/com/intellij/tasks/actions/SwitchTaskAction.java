@@ -30,6 +30,7 @@ import com.intellij.openapi.vcs.changes.LocalChangeList;
 import com.intellij.tasks.ChangeListInfo;
 import com.intellij.tasks.LocalTask;
 import com.intellij.tasks.TaskManager;
+import com.intellij.tasks.impl.LocalTaskImpl;
 import com.intellij.tasks.impl.TaskManagerImpl;
 import com.intellij.tools.SimpleActionGroup;
 import com.intellij.ui.popup.list.ListPopupImpl;
@@ -41,6 +42,7 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -149,6 +151,12 @@ public class SwitchTaskAction extends BaseTaskAction {
           manager.activateTask(task, !shiftPressed.get());
         }
       });
+      group.add(new AnAction("&Edit") {
+        @Override
+        public void actionPerformed(AnActionEvent e) {
+          EditTaskDialog.editTask((LocalTaskImpl)task, project);
+        }
+      });
     }
     final AnAction remove = new AnAction("&Remove") {
       @Override
@@ -161,6 +169,7 @@ public class SwitchTaskAction extends BaseTaskAction {
         }
       }
     };
+    remove.registerCustomShortcutSet(new CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_DELETE, 0)), null);
     group.add(remove);
 
     return group;
@@ -227,11 +236,9 @@ public class SwitchTaskAction extends BaseTaskAction {
     else {
 
       List<ChangeListInfo> infos = task.getChangeLists();
-      List<LocalChangeList> lists = ContainerUtil.mapNotNull(infos, new NullableFunction<ChangeListInfo, LocalChangeList>() {
-        public LocalChangeList fun(ChangeListInfo changeListInfo) {
-          LocalChangeList changeList = ChangeListManager.getInstance(project).getChangeList(changeListInfo.id);
-          return changeList != null && !changeList.isDefault() ? changeList : null;
-        }
+      List<LocalChangeList> lists = ContainerUtil.mapNotNull(infos, (NullableFunction<ChangeListInfo, LocalChangeList>)changeListInfo -> {
+        LocalChangeList changeList = ChangeListManager.getInstance(project).getChangeList(changeListInfo.id);
+        return changeList != null && !changeList.isDefault() ? changeList : null;
       });
 
       boolean removeIt = true;

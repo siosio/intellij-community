@@ -29,6 +29,7 @@ JNI_createJavaVM pCreateJavaVM = NULL;
 JavaVM* jvm = NULL;
 JNIEnv* env = NULL;
 volatile bool terminating = false;
+bool nativesplash = false;
 
 HANDLE hFileMapping;
 HANDLE hEvent;
@@ -42,6 +43,8 @@ bool need64BitJRE = true;
 bool need64BitJRE = false;
 #define BITS_STR "32-bit"
 #endif
+
+void TrimLine(char* line);
 
 std::string EncodeWideACP(const std::wstring &str)
 {
@@ -142,6 +145,34 @@ bool FindJVMInEnvVar(const char* envVarName, bool& result)
   return false;
 }
 
+bool FindJVMInSettings() {
+  TCHAR buffer[_MAX_PATH];
+  TCHAR copy[_MAX_PATH];
+
+  GetModuleFileName(NULL, buffer, _MAX_PATH);
+  std::wstring module(buffer);
+
+  if (LoadString(hInst, IDS_VM_OPTIONS_PATH, buffer, _MAX_PATH)) {
+    ExpandEnvironmentStrings(buffer, copy, _MAX_PATH - 1);
+    std::wstring path(copy);
+    path += L"\\config" + module.substr(module.find_last_of('\\')) + L".jdk";
+    FILE *f = _tfopen(path.c_str(), _T("rt"));
+    if (!f) return false;
+
+    char line[_MAX_PATH];
+    if (!fgets(line, _MAX_PATH, f)) {
+      fclose(f);
+      return false;
+    }
+
+    TrimLine(line);
+    fclose(f);
+
+    return FindValidJVM(line);
+  }
+  return false;
+}
+
 bool FindJVMInRegistryKey(const char* key, bool wow64_32)
 {
   HKEY hKey;
@@ -222,6 +253,8 @@ bool LocateJVM()
   {
     return result;
   }
+
+  if (FindJVMInSettings()) return true;
 
   std::vector<std::string> jrePaths;
   if(need64BitJRE) jrePaths.push_back(GetAdjacentDir("jre64"));
@@ -374,6 +407,42 @@ bool AddClassPathOptions(std::vector<std::string>& vmOptionLines)
   return true;
 }
 
+//return VMOptions from one of the files in the following order:
+//$<IDE-NAME>_VM_OPTIONS
+//$CONFIG_DIRECTORY/<ide-name>[64][.exe].vmoptions
+//bin/<ide-name>[64][.exe].vmoptions
+bool FindValidVMOptions(std::vector<std::wstring> files, std::wstring& used, std::vector<std::string>& vmOptionLines)
+{
+  if (files.size() != 0)
+  {
+    for (int i = 0; i < files.size(); i++)
+    {
+      if (GetFileAttributes(files[i].c_str()) != INVALID_FILE_ATTRIBUTES)
+      {
+        if (LoadVMOptionsFile(files[i].c_str(), vmOptionLines))
+        {
+          used += (used.size() ? L"," : L"") + files[i];
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+std::string getVMOption(int resource){
+  TCHAR buffer[_MAX_PATH];
+  TCHAR copy[_MAX_PATH];
+  std::string vmOption = "";
+  if (LoadString(hInst, resource, buffer, _MAX_PATH))
+  {
+    ExpandEnvironmentStrings(buffer, copy, _MAX_PATH);
+    std::wstring module(copy);
+    vmOption = std::string(module.begin(), module.end());
+  }
+  return vmOption;
+}
+
 void AddPredefinedVMOptions(std::vector<std::string>& vmOptionLines)
 {
   std::string vmOptions = LoadStdString(IDS_VM_OPTIONS);
@@ -385,6 +454,11 @@ void AddPredefinedVMOptions(std::vector<std::string>& vmOptionLines)
     while (pos < vmOptions.size() && vmOptions[pos] == ' ') pos++;
     vmOptions = vmOptions.substr(pos);
   }
+
+  std::string errorFile = getVMOption(IDS_VM_OPTION_ERRORFILE);
+  std::string heapDumpPath = getVMOption(IDS_VM_OPTION_HEAPDUMPPATH);
+  if (errorFile != "") vmOptionLines.push_back(errorFile);
+  if (heapDumpPath != "") vmOptionLines.push_back(heapDumpPath);
 
   char propertiesFile[_MAX_PATH];
   if (GetEnvironmentVariableA(LoadStdString(IDS_PROPS_ENV_VAR).c_str(), propertiesFile, _MAX_PATH))
@@ -403,8 +477,13 @@ bool LoadVMOptions()
   GetModuleFileName(NULL, buffer, _MAX_PATH);
   std::wstring module(buffer);
 
-  files.push_back(module + L".vmoptions");
-
+  if (LoadString(hInst, IDS_VM_OPTIONS_ENV_VAR, buffer, _MAX_PATH))
+  {
+    if (GetEnvironmentVariableW(buffer, copy, _MAX_PATH)) {
+      ExpandEnvironmentStrings(copy, buffer, _MAX_PATH);
+      files.push_back(std::wstring(buffer));
+    }
+  }
 
   if (LoadString(hInst, IDS_VM_OPTIONS_PATH, buffer, _MAX_PATH))
   {
@@ -413,34 +492,18 @@ bool LoadVMOptions()
     files.push_back(selector + module.substr(module.find_last_of('\\')) + L".vmoptions");
   }
 
-  if (LoadString(hInst, IDS_VM_OPTIONS_ENV_VAR, buffer, _MAX_PATH))
-  {
-    if (GetEnvironmentVariableW(buffer, copy, _MAX_PATH)) {
-    ExpandEnvironmentStrings(copy, buffer, _MAX_PATH);
-    files.push_back(std::wstring(buffer));
-    }
-  }
+  files.push_back(module + L".vmoptions");
+  std::wstring used;
+  std::vector<std::string> vmOptionLines;
 
-  if (files.size() == 0) {
+  if (!FindValidVMOptions(files, used, vmOptionLines))
+  {
     std::string error = LoadStdString(IDS_ERROR_LAUNCHING_APP);
     MessageBoxA(NULL, "Cannot find VM options file", error.c_str(), MB_OK);
     return false;
   }
 
-  std::wstring used;
-  std::vector<std::string> vmOptionLines;
-  for (int i = 0; i < files.size(); i++)
-  {
-    if (GetFileAttributes(files[i].c_str()) != INVALID_FILE_ATTRIBUTES)
-    {
-      if (LoadVMOptionsFile(files[i].c_str(), vmOptionLines))
-      {
-        used += (used.size() ? L"," : L"") + files[i];
-      }
-    }
-  }
-
-  vmOptionLines.push_back(std::string("-Djb.vmOptions=") + EncodeWideACP(used));
+  vmOptionLines.push_back(std::string("-Djb.vmOptionsFile=") + EncodeWideACP(used));
 
   if (!AddClassPathOptions(vmOptionLines)) return false;
   AddPredefinedVMOptions(vmOptionLines);
@@ -529,11 +592,12 @@ jobjectArray PrepareCommandLine()
   int numArgs;
   LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &numArgs);
   jclass stringClass = env->FindClass("java/lang/String");
-  jobjectArray args = env->NewObjectArray(numArgs - 1, stringClass, NULL);
-  for (int i = 1; i < numArgs; i++)
+  jobjectArray args = env->NewObjectArray(numArgs - (nativesplash ? 2 : 1), stringClass, NULL);
+  for (int i = 1, k = 0; i < numArgs; i++)
   {
     const wchar_t* arg = argv[i];
-    env->SetObjectArrayElement(args, i - 1, env->NewString((const jchar *)arg, wcslen(argv[i])));
+    if (_wcsicmp(arg, _T("/nativesplash")) == 0) continue;
+    env->SetObjectArrayElement(args, k++, env->NewString((const jchar *)arg, wcslen(argv[i])));
   }
   return args;
 }
@@ -838,7 +902,7 @@ int APIENTRY _tWinMain(HINSTANCE hInstance,
 
   if (!CheckSingleInstance()) return 1;
 
-  if (wcsstr(lpCmdLine, _T("nosplash")) == NULL) StartSplashProcess();
+  if (nativesplash = wcsstr(lpCmdLine, _T("/nativesplash")) != NULL) StartSplashProcess();
 
   if (!LocateJVM()) return 1;
   if (!LoadVMOptions()) return 1;

@@ -38,6 +38,7 @@ import com.intellij.ui.components.JBList;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.PathUtil;
 import com.intellij.util.SmartList;
+import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.jps.model.serialization.PathMacroUtil;
@@ -74,8 +75,12 @@ public class CommonProgramParametersPanel extends JPanel implements PanelWithAnc
 
   protected void init() {
     initComponents();
-    copyDialogCaption(myProgramParametersComponent);
     updateUI();
+    setupAnchor();
+  }
+
+  protected void setupAnchor() {
+    myAnchor = UIUtil.mergeComponentsWithAnchor(myProgramParametersComponent, myWorkingDirectoryComponent, myEnvVariablesComponent);
   }
 
   @Nullable
@@ -111,7 +116,7 @@ public class CommonProgramParametersPanel extends JPanel implements PanelWithAnc
 
     setPreferredSize(new Dimension(10, 10));
 
-    setAnchor(myEnvVariablesComponent.getLabel());
+    copyDialogCaption(myProgramParametersComponent);
   }
 
   protected JComponent createComponentWithMacroBrowse(@NotNull final TextFieldWithBrowseButton textAccessor) {
@@ -126,13 +131,10 @@ public class CommonProgramParametersPanel extends JPanel implements PanelWithAnc
         }
 
         final JList list = new JBList(ArrayUtil.toStringArray(macros));
-        JBPopupFactory.getInstance().createListPopupBuilder(list).setItemChoosenCallback(new Runnable() {
-          @Override
-          public void run() {
-            final Object value = list.getSelectedValue();
-            if (value instanceof String) {
-              textAccessor.setText('$' + ((String)value) + '$');
-            }
+        JBPopupFactory.getInstance().createListPopupBuilder(list).setItemChoosenCallback(() -> {
+          final Object value = list.getSelectedValue();
+          if (value instanceof String) {
+            textAccessor.setText('$' + ((String)value) + '$');
           }
         }).setMovable(false).setResizable(false).createPopup().showUnderneathOf(button);
       }

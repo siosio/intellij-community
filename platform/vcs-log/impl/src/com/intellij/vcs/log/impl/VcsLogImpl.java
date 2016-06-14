@@ -15,104 +15,109 @@
  */
 package com.intellij.vcs.log.impl;
 
-import com.intellij.openapi.util.Condition;
-import com.intellij.ui.table.JBTable;
+import com.google.common.primitives.Ints;
+import com.intellij.openapi.progress.ProgressIndicator;
+import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.util.Consumer;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.vcs.log.*;
-import com.intellij.vcs.log.data.VcsLogDataHolder;
+import com.intellij.vcs.log.data.VcsLogData;
 import com.intellij.vcs.log.ui.VcsLogUiImpl;
-import com.intellij.vcs.log.ui.tables.GraphTableModel;
+import com.intellij.vcs.log.ui.frame.VcsLogGraphTable;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.awt.*;
+import java.util.AbstractList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Future;
 
-/**
- *
- */
 public class VcsLogImpl implements VcsLog {
-
-  @NotNull private final VcsLogDataHolder myDataHolder;
+  @NotNull private final VcsLogData myLogData;
   @NotNull private final VcsLogUiImpl myUi;
 
-  public VcsLogImpl(@NotNull VcsLogDataHolder holder, @NotNull VcsLogUiImpl ui) {
-    myDataHolder = holder;
+  public VcsLogImpl(@NotNull VcsLogData manager, @NotNull VcsLogUiImpl ui) {
+    myLogData = manager;
     myUi = ui;
   }
 
   @Override
   @NotNull
-  public List<Hash> getSelectedCommits() {
-    List<Hash> hashes = ContainerUtil.newArrayList();
-    JBTable table = myUi.getTable();
-    for (int row : table.getSelectedRows()) {
-      Hash hash = ((GraphTableModel)table.getModel()).getHashAtRow(row);
-      if (hash != null) {
-        hashes.add(hash);
+  public List<CommitId> getSelectedCommits() {
+    final int[] rows = myUi.getTable().getSelectedRows();
+    return new AbstractList<CommitId>() {
+      @Nullable
+      @Override
+      public CommitId get(int index) {
+        return getTable().getModel().getCommitIdAtRow(rows[index]);
       }
-    }
-    return hashes;
+
+      @Override
+      public int size() {
+        return rows.length;
+      }
+    };
+  }
+
+  private VcsLogGraphTable getTable() {
+    return myUi.getTable();
   }
 
   @NotNull
   @Override
   public List<VcsFullCommitDetails> getSelectedDetails() {
-    List<VcsFullCommitDetails> details = ContainerUtil.newArrayList();
-    JBTable table = myUi.getTable();
-    for (int row : table.getSelectedRows()) {
-      GraphTableModel model = (GraphTableModel)table.getModel();
-      VcsFullCommitDetails commitDetails = model.getFullCommitDetails(row);
-      if (commitDetails == null) {
-        return ContainerUtil.emptyList();
+    final int[] rows = myUi.getTable().getSelectedRows();
+    return new AbstractList<VcsFullCommitDetails>() {
+      @NotNull
+      @Override
+      public VcsFullCommitDetails get(int index) {
+        return getTable().getModel().getFullDetails(rows[index]);
       }
-      details.add(commitDetails);
-    }
-    return details;
+
+      @Override
+      public int size() {
+        return rows.length;
+      }
+    };
+  }
+
+  @Override
+  public void requestSelectedDetails(@NotNull Consumer<List<VcsFullCommitDetails>> consumer, @Nullable ProgressIndicator indicator) {
+    List<Integer> rowsList = Ints.asList(myUi.getTable().getSelectedRows());
+    myLogData.getCommitDetailsGetter()
+      .loadCommitsData(getTable().getModel().convertToCommitIds(rowsList), consumer, indicator);
   }
 
   @Nullable
   @Override
-  public Collection<String> getContainingBranches(@NotNull Hash commitHash) {
-    return null;
+  public Collection<String> getContainingBranches(@NotNull Hash commitHash, @NotNull VirtualFile root) {
+    return myLogData.getContainingBranchesGetter().getContainingBranchesFromCache(root, commitHash);
   }
 
   @NotNull
   @Override
   public Collection<VcsRef> getAllReferences() {
-    return myUi.getDataPack().getRefsModel().getAllRefs();
+    return myUi.getDataPack().getRefs().getAllRefs();
   }
 
   @NotNull
   @Override
   public Future<Boolean> jumpToReference(final String reference) {
     Collection<VcsRef> references = getAllReferences();
-    VcsRef ref = ContainerUtil.find(references, new Condition<VcsRef>() {
-      @Override
-      public boolean value(VcsRef ref) {
-        return ref.getName().startsWith(reference);
-      }
-    });
-    if (ref != null) {
-      return myUi.jumpToCommit(ref.getCommitHash());
-    }
-    else {
+    List<VcsRef> matchingRefs = ContainerUtil.findAll(references, ref -> ref.getName().startsWith(reference));
+    if (matchingRefs.isEmpty()) {
       return myUi.jumpToCommitByPartOfHash(reference);
     }
-  }
-
-  @NotNull
-  @Override
-  public Component getToolbar() {
-    return myUi.getToolbar();
+    else {
+      VcsRef ref = Collections.min(matchingRefs, new VcsGoToRefComparator(myUi.getDataPack().getLogProviders()));
+      return myUi.jumpToCommit(ref.getCommitHash(), ref.getRoot());
+    }
   }
 
   @NotNull
   @Override
   public Collection<VcsLogProvider> getLogProviders() {
-    return myDataHolder.getLogProviders();
+    return myLogData.getLogProviders();
   }
-
 }

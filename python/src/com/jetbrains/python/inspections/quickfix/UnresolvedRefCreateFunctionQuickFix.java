@@ -29,6 +29,7 @@ import com.jetbrains.python.PyNames;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.impl.ParamHelper;
 import com.jetbrains.python.psi.impl.PyFunctionBuilder;
+import com.jetbrains.python.psi.impl.PyPsiUtils;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -56,9 +57,10 @@ public class UnresolvedRefCreateFunctionQuickFix implements LocalQuickFix {
   }
 
   public void applyFix(@NotNull Project project, @NotNull ProblemDescriptor descriptor) {
+    PyPsiUtils.assertValid(myElement);
     if (!myElement.isValid() || !FileModificationService.getInstance().preparePsiElementForWrite(myElement)) return;
 
-    PyFunctionBuilder functionBuilder = new PyFunctionBuilder(myReference.getText());
+    PyFunctionBuilder functionBuilder = new PyFunctionBuilder(myReference.getText(), myElement);
 
     // if function is actually an argument of a call, don't use other arguments of the call to create parameter list of new function
     final PyArgumentList argumentList = myElement.getArgumentList();

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ package com.intellij.openapi.fileEditor.impl;
 import com.intellij.ide.highlighter.HighlighterFactory;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.command.CommandProcessor;
-import com.intellij.openapi.components.ProjectComponent;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
@@ -31,6 +30,8 @@ import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx;
 import com.intellij.openapi.fileEditor.impl.text.TextEditorProvider;
 import com.intellij.openapi.fileEditor.impl.text.TextEditorPsiDataProvider;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.project.ProjectManager;
+import com.intellij.openapi.project.ProjectManagerAdapter;
 import com.intellij.openapi.util.*;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -41,7 +42,6 @@ import com.intellij.testFramework.LightVirtualFile;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.containers.HashMap;
 import org.jdom.Element;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
@@ -51,8 +51,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-@NonNls
-public class TestEditorManagerImpl extends FileEditorManagerEx implements ProjectComponent {
+final class TestEditorManagerImpl extends FileEditorManagerEx implements Disposable {
   private static final Logger LOG = Logger.getInstance("#com.intellij.idea.test.TestEditorManagerImpl");
 
   private final Project myProject;
@@ -61,9 +60,18 @@ public class TestEditorManagerImpl extends FileEditorManagerEx implements Projec
   private VirtualFile myActiveFile;
   private static final LightVirtualFile LIGHT_VIRTUAL_FILE = new LightVirtualFile("Dummy.java");
 
-  public TestEditorManagerImpl(Project project) {
+  public TestEditorManagerImpl(@NotNull Project project) {
     myProject = project;
     registerExtraEditorDataProvider(new TextEditorPsiDataProvider(), null);
+
+    project.getMessageBus().connect().subscribe(ProjectManager.TOPIC, new ProjectManagerAdapter() {
+      @Override
+      public void projectClosed(Project project) {
+        if (project == myProject) {
+          closeAllFiles();
+        }
+      }
+    });
   }
 
   @Override
@@ -72,12 +80,7 @@ public class TestEditorManagerImpl extends FileEditorManagerEx implements Projec
                                                                         final boolean focusEditor,
                                                                         boolean searchForSplitter) {
     final Ref<Pair<FileEditor[], FileEditorProvider[]>> result = new Ref<Pair<FileEditor[], FileEditorProvider[]>>();
-    CommandProcessor.getInstance().executeCommand(myProject, new Runnable() {
-      @Override
-      public void run() {
-        result.set(openFileImpl3(file, focusEditor));
-      }
-    }, "", null);
+    CommandProcessor.getInstance().executeCommand(myProject, () -> result.set(openFileImpl3(file, focusEditor)), "", null);
     return result.get();
 
   }
@@ -113,7 +116,7 @@ public class TestEditorManagerImpl extends FileEditorManagerEx implements Projec
   @Override
   public ActionCallback notifyPublisher(@NotNull Runnable runnable) {
     runnable.run();
-    return new ActionCallback.Done();
+    return ActionCallback.DONE;
   }
 
   @Override
@@ -194,12 +197,14 @@ public class TestEditorManagerImpl extends FileEditorManagerEx implements Projec
 
   @Override
   public void closeAllFiles() {
-    final EditorFactory editorFactory = EditorFactory.getInstance();
+    EditorFactory editorFactory = EditorFactory.getInstance();
+    TextEditorProvider editorProvider = TextEditorProvider.getInstance();
     Iterator<Editor> it = myVirtualFile2Editor.values().iterator();
     while (it.hasNext()) {
       Editor editor = it.next();
       it.remove();
       if (editor != null && !editor.isDisposed()){
+        editorProvider.disposeEditor(editorProvider.getTextEditor(editor));
         editorFactory.releaseEditor(editor);
       }
     }
@@ -229,11 +234,6 @@ public class TestEditorManagerImpl extends FileEditorManagerEx implements Projec
       }
 
       @Override
-      public void writeState(@NotNull FileEditorState state, @NotNull Project project, @NotNull Element targetElement) {
-
-      }
-
-      @Override
       @NotNull
       public String getEditorTypeId() {
         return "";
@@ -255,7 +255,7 @@ public class TestEditorManagerImpl extends FileEditorManagerEx implements Projec
   @NotNull
   @Override
   public AsyncResult<EditorWindow> getActiveWindow() {
-    return new AsyncResult.Done<EditorWindow>(null);
+    return AsyncResult.done(null);
   }
 
   @Override
@@ -319,26 +319,16 @@ public class TestEditorManagerImpl extends FileEditorManagerEx implements Projec
   }
 
   @Override
-  public void disposeComponent() {
+  public void dispose() {
     closeAllFiles();
-  }
-
-  @Override
-  public void initComponent() { }
-
-  @Override
-  public void projectClosed() {
-    closeAllFiles();
-  }
-
-  @Override
-  public void projectOpened() {
   }
 
   @Override
   public void closeFile(@NotNull VirtualFile file) {
     Editor editor = myVirtualFile2Editor.remove(file);
     if (editor != null){
+      TextEditorProvider editorProvider = TextEditorProvider.getInstance();
+      editorProvider.disposeEditor(editorProvider.getTextEditor(editor));
       EditorFactory.getInstance().releaseEditor(editor);
     }
     if (Comparing.equal(file, myActiveFile)) {
@@ -396,12 +386,12 @@ public class TestEditorManagerImpl extends FileEditorManagerEx implements Projec
   }
 
   @Override
-  public void showEditorAnnotation(@NotNull FileEditor editor, @NotNull JComponent annotationComoponent) {
+  public void showEditorAnnotation(@NotNull FileEditor editor, @NotNull JComponent annotationComponent) {
   }
 
 
   @Override
-  public void removeEditorAnnotation(@NotNull FileEditor editor, @NotNull JComponent annotationComoponent) {
+  public void removeEditorAnnotation(@NotNull FileEditor editor, @NotNull JComponent annotationComponent) {
   }
 
   @Override
@@ -479,12 +469,6 @@ public class TestEditorManagerImpl extends FileEditorManagerEx implements Projec
     return false;
   }
 
-  @Override
-  @NotNull
-  public String getComponentName() {
-    return "TestEditorManager";
-  }
-
   @NotNull
   @Override
   public EditorsSplitters getSplitters() {
@@ -494,7 +478,7 @@ public class TestEditorManagerImpl extends FileEditorManagerEx implements Projec
   @NotNull
   @Override
   public ActionCallback getReady(@NotNull Object requestor) {
-    return new ActionCallback.Done();
+    return ActionCallback.DONE;
   }
 
   @Override

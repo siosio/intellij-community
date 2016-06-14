@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,8 @@ import com.intellij.openapi.editor.*;
 import com.intellij.openapi.editor.ex.EditorSettingsExternalizable;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileEditor.FileDocumentManagerAdapter;
+import com.intellij.openapi.project.Project;
+import com.intellij.openapi.project.ProjectUtil;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.ShutDownTracker;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -33,6 +35,7 @@ import com.intellij.util.ArrayUtil;
 import com.intellij.util.text.CharArrayUtil;
 import gnu.trove.THashSet;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.awt.*;
 import java.util.ArrayList;
@@ -43,6 +46,8 @@ import java.util.Set;
 public final class TrailingSpacesStripper extends FileDocumentManagerAdapter {
   public static final Key<String> OVERRIDE_STRIP_TRAILING_SPACES_KEY = Key.create("OVERRIDE_TRIM_TRAILING_SPACES_KEY");
   public static final Key<Boolean> OVERRIDE_ENSURE_NEWLINE_KEY = Key.create("OVERRIDE_ENSURE_NEWLINE_KEY");
+
+  private static final Key<Boolean> DISABLE_FOR_FILE_KEY = Key.create("DISABLE_TRAILING_SPACE_STRIPPER_FOR_FILE_KEY");
 
   private final Set<Document> myDocumentsToStripLater = new THashSet<Document>();
 
@@ -64,14 +69,15 @@ public final class TrailingSpacesStripper extends FileDocumentManagerAdapter {
     if (!document.isWritable()) return;
     FileDocumentManager fileDocumentManager = FileDocumentManager.getInstance();
     VirtualFile file = fileDocumentManager.getFile(document);
-    if (file == null || !file.isValid()) return;
+    if (file == null || !file.isValid() || Boolean.TRUE.equals(DISABLE_FOR_FILE_KEY.get(file))) return;
 
     final EditorSettingsExternalizable settings = EditorSettingsExternalizable.getInstance();
     if (settings == null) return;
 
     final String overrideStripTrailingSpacesData = file.getUserData(OVERRIDE_STRIP_TRAILING_SPACES_KEY);
     final Boolean overrideEnsureNewlineData = file.getUserData(OVERRIDE_ENSURE_NEWLINE_KEY);
-    final String stripTrailingSpaces = overrideStripTrailingSpacesData != null ? overrideStripTrailingSpacesData : settings.getStripTrailingSpaces();
+    @EditorSettingsExternalizable.StripTrailingSpaces
+    String stripTrailingSpaces = overrideStripTrailingSpacesData != null ? overrideStripTrailingSpacesData : settings.getStripTrailingSpaces();
     final boolean doStrip = !stripTrailingSpaces.equals(EditorSettingsExternalizable.STRIP_TRAILING_SPACES_NONE);
     final boolean ensureEOL = overrideEnsureNewlineData != null ? overrideEnsureNewlineData.booleanValue() : settings.isEnsureNewLineAtEOF();
 
@@ -92,15 +98,12 @@ public final class TrailingSpacesStripper extends FileDocumentManagerAdapter {
         ApplicationManager.getApplication().runWriteAction(new DocumentRunnable(document, null) {
           @Override
           public void run() {
-            CommandProcessor.getInstance().runUndoTransparentAction(new Runnable() {
-              @Override
-              public void run() {
-                if (CharArrayUtil.containsOnlyWhiteSpaces(content.subSequence(start, end)) && doStrip) {
-                  document.deleteString(start, end);
-                }
-                else {
-                  document.insertString(end, "\n");
-                }
+            CommandProcessor.getInstance().runUndoTransparentAction(() -> {
+              if (CharArrayUtil.containsOnlyWhiteSpaces(content.subSequence(start, end)) && doStrip) {
+                document.deleteString(start, end);
+              }
+              else {
+                document.insertString(end, "\n");
               }
             });
           }
@@ -118,10 +121,7 @@ public final class TrailingSpacesStripper extends FileDocumentManagerAdapter {
       return;
     }
 
-    Component focusOwner = IdeFocusManager.getGlobalInstance().getFocusOwner();
-    DataContext dataContext = DataManager.getInstance().getDataContext(focusOwner);
-    boolean isDisposeInProgress = ApplicationManager.getApplication().isDisposeInProgress(); // ignore caret placing when exiting
-    Editor activeEditor = isDisposeInProgress ? null : CommonDataKeys.EDITOR.getData(dataContext);
+    Editor activeEditor = getActiveEditor(document);
 
     // when virtual space enabled, we can strip whitespace anywhere
     boolean isVirtualSpaceEnabled = activeEditor == null || activeEditor.getSettings().isVirtualSpace();
@@ -129,6 +129,8 @@ public final class TrailingSpacesStripper extends FileDocumentManagerAdapter {
     final EditorSettingsExternalizable settings = EditorSettingsExternalizable.getInstance();
     if (settings == null) return;
 
+    boolean enabled = !Boolean.TRUE.equals(DISABLE_FOR_FILE_KEY.get(FileDocumentManager.getInstance().getFile(document)));
+    if (!enabled) return;
     String stripTrailingSpaces = settings.getStripTrailingSpaces();
     final boolean doStrip = !stripTrailingSpaces.equals(EditorSettingsExternalizable.STRIP_TRAILING_SPACES_NONE);
     final boolean inChangedLinesOnly = !stripTrailingSpaces.equals(EditorSettingsExternalizable.STRIP_TRAILING_SPACES_WHOLE);
@@ -148,6 +150,17 @@ public final class TrailingSpacesStripper extends FileDocumentManagerAdapter {
     ((DocumentImpl)document).clearLineModificationFlagsExcept(caretLines);
   }
 
+  private static Editor getActiveEditor(@NotNull Document document) {
+    Component focusOwner = IdeFocusManager.getGlobalInstance().getFocusOwner();
+    DataContext dataContext = DataManager.getInstance().getDataContext(focusOwner);
+    boolean isDisposeInProgress = ApplicationManager.getApplication().isDisposeInProgress(); // ignore caret placing when exiting
+    Editor activeEditor = isDisposeInProgress ? null : CommonDataKeys.EDITOR.getData(dataContext);
+    if (activeEditor != null && activeEditor.getDocument() != document) {
+      activeEditor = null;
+    }
+    return activeEditor;
+  }
+
   public static boolean stripIfNotCurrentLine(@NotNull Document document, boolean inChangedLinesOnly) {
     if (document instanceof DocumentWindow) {
       document = ((DocumentWindow)document).getDelegate();
@@ -155,14 +168,10 @@ public final class TrailingSpacesStripper extends FileDocumentManagerAdapter {
     if (!(document instanceof DocumentImpl)) {
       return true;
     }
-    DataContext dataContext = DataManager.getInstance().getDataContext(IdeFocusManager.getGlobalInstance().getFocusOwner());
-    boolean isDisposeInProgress = ApplicationManager.getApplication().isDisposeInProgress(); // ignore caret placing when exiting
-    Editor activeEditor = isDisposeInProgress ? null : CommonDataKeys.EDITOR.getData(dataContext);
+    Editor activeEditor = getActiveEditor(document);
 
     // when virtual space enabled, we can strip whitespace anywhere
     boolean isVirtualSpaceEnabled = activeEditor == null || activeEditor.getSettings().isVirtualSpace();
-
-    boolean markAsNeedsStrippingLater;
 
     final List<Caret> carets = activeEditor == null ? Collections.<Caret>emptyList() : activeEditor.getCaretModel().getAllCarets();
     final List<VisualPosition> visualCarets = new ArrayList<VisualPosition>(carets.size());
@@ -173,24 +182,32 @@ public final class TrailingSpacesStripper extends FileDocumentManagerAdapter {
       caretOffsets[i] = caret.getOffset();
     }
 
-    markAsNeedsStrippingLater = ((DocumentImpl)document).stripTrailingSpaces(activeEditor == null ? null : activeEditor.getProject(), 
-                                                                             inChangedLinesOnly, isVirtualSpaceEnabled, caretOffsets);
+    boolean markAsNeedsStrippingLater =
+      ((DocumentImpl)document).stripTrailingSpaces(getProject(document, activeEditor),
+                                                   inChangedLinesOnly, isVirtualSpaceEnabled, caretOffsets);
 
     if (activeEditor != null && !ShutDownTracker.isShutdownHookRunning()) {
-      activeEditor.getCaretModel().runBatchCaretOperation(new Runnable() {
-        @Override
-        public void run() {
-          for (int i = 0; i < carets.size(); i++) {
-            Caret caret = carets.get(i);
-            if (caret.isValid()) {
-              caret.moveToVisualPosition(visualCarets.get(i));
-            }
+      activeEditor.getCaretModel().runBatchCaretOperation(() -> {
+        for (int i = 0; i < carets.size(); i++) {
+          Caret caret = carets.get(i);
+          if (caret.isValid()) {
+            caret.moveToVisualPosition(visualCarets.get(i));
           }
         }
       });
     }
 
     return !markAsNeedsStrippingLater;
+  }
+  
+  @Nullable
+  private static Project getProject(@NotNull Document document, @Nullable Editor editor) {
+    if (editor != null) return editor.getProject();
+    VirtualFile file = FileDocumentManager.getInstance().getFile(document);
+    if (file != null) {
+      return ProjectUtil.guessProjectForFile(file);
+    }
+    return null;
   }
 
   public void documentDeleted(@NotNull Document doc) {
@@ -200,5 +217,13 @@ public final class TrailingSpacesStripper extends FileDocumentManagerAdapter {
   @Override
   public void unsavedDocumentsDropped() {
     myDocumentsToStripLater.clear();
+  }
+
+  public static void setEnabled(@NotNull VirtualFile file, boolean enabled) {
+    DISABLE_FOR_FILE_KEY.set(file, enabled ? null : Boolean.TRUE);
+  }
+
+  public static boolean isEnabled(@NotNull VirtualFile file) {
+    return !Boolean.TRUE.equals(DISABLE_FOR_FILE_KEY.get(file));
   }
 }

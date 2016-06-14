@@ -17,10 +17,12 @@
 package com.intellij.lang.parameterInfo;
 
 import com.intellij.lang.ASTNode;
+import com.intellij.openapi.util.Conditions;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiWhiteSpace;
+import com.intellij.psi.SyntaxTraverser;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.text.CharArrayUtil;
@@ -53,16 +55,21 @@ public class ParameterInfoUtils {
   }
 
   public static int getCurrentParameterIndex(ASTNode argList, int offset, IElementType delimiterType) {
-    int curOffset = argList.getTextRange().getStartOffset();
+    SyntaxTraverser<ASTNode> s = SyntaxTraverser.astTraverser(argList).expandAndSkip(Conditions.is(argList));
+    return getCurrentParameterIndex(s, offset, delimiterType);
+  }
+
+  public static <V> int getCurrentParameterIndex(SyntaxTraverser<V> s, int offset, IElementType delimiterType) {
+    V root = s.getRoot();
+    int curOffset = s.api.rangeOf(root).getStartOffset();
     if (offset < curOffset) return -1;
-    ASTNode[] children = argList.getChildren(null);
     int index = 0;
 
-    for (ASTNode child : children) {
-      curOffset += child.getTextLength();
+    for (V child : s) {
+      curOffset += s.api.rangeOf(child).getLength();
       if (offset < curOffset) break;
 
-      IElementType type = child.getElementType();
+      IElementType type = s.api.typeOf(child);
       if (type == delimiterType) index++;
     }
 
@@ -93,28 +100,30 @@ public class ParameterInfoUtils {
     while(true){
       if (findArgumentListHelper.getArgumentListClass().isInstance(parent)) {
         TextRange range = parent.getTextRange();
-        if (!acceptRparenth){
-          if (offset == range.getEndOffset() - 1){
-            PsiElement[] children = parent.getChildren();
-            if (children.length == 0) return null;
-            PsiElement last = children[children.length - 1];
-            if (last.getNode().getElementType() == findArgumentListHelper.getActualParametersRBraceType()){
+        if (range != null) {
+          if (!acceptRparenth){
+            if (offset == range.getEndOffset() - 1){
+              PsiElement[] children = parent.getChildren();
+              if (children.length == 0) return null;
+              PsiElement last = children[children.length - 1];
+              if (last.getNode().getElementType() == findArgumentListHelper.getActualParametersRBraceType()){
+                parent = parent.getParent();
+                continue;
+              }
+            }
+          }
+          if (!acceptLparenth){
+            if (offset == range.getStartOffset()){
               parent = parent.getParent();
               continue;
             }
           }
-        }
-        if (!acceptLparenth){
-          if (offset == range.getStartOffset()){
+          if (lbraceOffset >= 0 && range.getStartOffset() != lbraceOffset){
             parent = parent.getParent();
             continue;
           }
+          break;
         }
-        if (lbraceOffset >= 0 && range.getStartOffset() != lbraceOffset){
-          parent = parent.getParent();
-          continue;
-        }
-        break;
       }
       if (parent instanceof PsiFile || parent == null) return null;
 

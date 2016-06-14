@@ -5,8 +5,6 @@ import com.intellij.openapi.fileTypes.*;
 import com.intellij.psi.PsiElement;
 import com.intellij.structuralsearch.impl.matcher.MatchUtils;
 import com.intellij.structuralsearch.plugin.ui.Configuration;
-import com.intellij.tokenindex.LanguageTokenizer;
-import com.intellij.tokenindex.Tokenizer;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -39,6 +37,15 @@ public class StructuralSearchUtil {
 
   public static PsiElement getParentIfIdentifier(PsiElement element) {
     return !isIdentifier(element) ? element : element.getParent();
+  }
+
+  @NotNull
+  public static PsiElement getPresentableElement(@NotNull PsiElement element) {
+    final StructuralSearchProfile profile = getProfileByPsiElement(element);
+    if (profile == null) {
+      return element;
+    }
+    return profile.getPresentableElement(getParentIfIdentifier(element));
   }
 
   private static StructuralSearchProfile[] getNewStyleProfiles() {
@@ -84,11 +91,6 @@ public class StructuralSearchUtil {
       }
     }
     return null;
-  }
-
-  @Nullable
-  public static Tokenizer getTokenizerForLanguage(@NotNull Language language) {
-    return LanguageTokenizer.INSTANCE.forLanguage(language);
   }
 
   public static boolean isTypedVariable(@NotNull final String name) {

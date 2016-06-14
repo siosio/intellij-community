@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 package com.intellij.navigation
+
+import com.intellij.ide.actions.GotoFileItemProvider
 import com.intellij.ide.util.gotoByName.*
 import com.intellij.lang.java.JavaLanguage
 import com.intellij.openapi.Disposable
@@ -27,6 +29,10 @@ import com.intellij.testFramework.fixtures.LightCodeInsightFixtureTestCase
 import com.intellij.util.Consumer
 import com.intellij.util.concurrency.Semaphore
 import org.jetbrains.annotations.NotNull
+import org.jetbrains.plugins.groovy.lang.psi.GroovyFile
+
+import javax.swing.SwingUtilities
+
 /**
  * @author peter
  */
@@ -163,6 +169,13 @@ class Intf {
 
   }
 
+  public void "test accept file paths starting with a dot"() {
+    def file = myFixture.addFileToProject("foo/index.html", "foo")
+    def model = new GotoFileModel(project)
+    def popup = ChooseByNamePopup.createPopup(project, model, new GotoFileItemProvider(project, null, model))
+    assert calcPopupElements(popup, "./foo/in") == [file]
+  }
+
   public void "test goto file can go to dir"() {
     PsiFile fooIndex = myFixture.addFileToProject("foo/index.html", "foo")
     PsiFile barIndex = myFixture.addFileToProject("bar.txt/bar.txt", "foo")
@@ -214,6 +227,15 @@ class Intf {
     assert getPopupElements(new GotoClassModel2(project), 'Bar:[2,3]') == [c]
   }
 
+  public void "test custom line suffixes"() {
+    def file = myFixture.addFileToProject("Bar.txt", "")
+    def model = new GotoFileModel(project)
+    assert getPopupElements(model, 'Bar:2') == [file]
+    assert getPopupElements(model, 'Bar(2)') == [file]
+    assert getPopupElements(model, 'Bar on line 2') == [file]
+    assert getPopupElements(model, 'Bar at line 2') == [file]
+  }
+
   public void "test dollar"() {
     def bar = myFixture.addClass("package foo; class Bar { class Foo {} }")
     def foo = ApplicationManager.application.runReadAction( { bar.innerClasses[0] } as Computable)
@@ -239,6 +261,13 @@ class Intf {
     assert getPopupElements(new GotoClassModel2(project), 'foo.bar.Bar') == [bar]
     assert getPopupElements(new GotoClassModel2(project), 'goo.Bar') == [bar2]
     assert getPopupElements(new GotoClassModel2(project), 'goo.baz.Bar') == [bar2]
+  }
+
+  public void "test try lowercase pattern if nothing matches"() {
+    def match = myFixture.addClass("class IPRoi { }")
+    def nonMatch = myFixture.addClass("class InspectionProfileImpl { }")
+    assert getPopupElements(new GotoClassModel2(project), 'IPRoi') == [match]
+    assert getPopupElements(new GotoClassModel2(project), 'IproImpl') == [nonMatch]
   }
 
   private static filterJavaItems(List<Object> items) {
@@ -280,15 +309,23 @@ class Intf {
     assert getPopupElements(new GotoSymbolModel2(project), 'Su.xpai', false) == [sub]
   }
 
+  public void "test groovy script class with non-identifier name"() {
+    GroovyFile file1 = myFixture.addFileToProject('foo.groovy', '')
+    GroovyFile file2 = myFixture.addFileToProject('foo-bar.groovy', '')
+
+    def variants = getPopupElements(new GotoSymbolModel2(project), 'foo', false)
+    edt { assert variants == [file1.scriptClass, file2.scriptClass] }
+  }
+
   private List<Object> getPopupElements(ChooseByNameModel model, String text, boolean checkboxState = false) {
     return calcPopupElements(createPopup(model), text, checkboxState)
   }
 
-  static ArrayList<String> calcPopupElements(ChooseByNamePopup popup, String text, boolean checkboxState = false) {
+  static ArrayList<Object> calcPopupElements(ChooseByNamePopup popup, String text, boolean checkboxState = false) {
     List<Object> elements = ['empty']
     def semaphore = new Semaphore()
     semaphore.down()
-    edt {
+    SwingUtilities.invokeLater {
       popup.scheduleCalcElements(text, checkboxState, ModalityState.NON_MODAL, { set ->
         elements = set as List
         semaphore.up()
@@ -306,9 +343,11 @@ class Intf {
       myPopup.close(false)
     }
 
-    def popup = myPopup = ChooseByNamePopup.createPopup(project, model, (PsiElement)context, "")
-    Disposer.register(testRootDisposable, { popup.close(false) } as Disposable)
-    popup
+    edt {
+      def popup = myPopup = ChooseByNamePopup.createPopup(project, model, (PsiElement)context, "")
+      Disposer.register(testRootDisposable, { popup.close(false) } as Disposable)
+    }
+    myPopup
   }
 
   @Override

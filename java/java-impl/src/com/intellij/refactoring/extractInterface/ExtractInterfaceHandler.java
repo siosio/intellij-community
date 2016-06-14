@@ -26,6 +26,7 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.ScrollType;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
+import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.refactoring.HelpID;
 import com.intellij.refactoring.RefactoringActionHandler;
 import com.intellij.refactoring.RefactoringBundle;
@@ -91,24 +92,18 @@ public class ExtractInterfaceHandler implements RefactoringActionHandler, Elemen
     final MultiMap<PsiElement, String> conflicts = new MultiMap<PsiElement, String>();
     ExtractSuperClassUtil.checkSuperAccessible(dialog.getTargetDirectory(), conflicts, myClass);
     if (!ExtractSuperClassUtil.showConflicts(dialog, conflicts, myProject)) return;
-    CommandProcessor.getInstance().executeCommand(myProject, new Runnable() {
-      public void run() {
-        ApplicationManager.getApplication().runWriteAction(new Runnable() {
-          public void run() {
-            myInterfaceName = dialog.getExtractedSuperName();
-            mySelectedMembers = ArrayUtil.toObjectArray(dialog.getSelectedMemberInfos(), MemberInfo.class);
-            myTargetDir = dialog.getTargetDirectory();
-            myJavaDocPolicy = new DocCommentPolicy(dialog.getDocCommentPolicy());
-            try {
-              doRefactoring();
-            }
-            catch (IncorrectOperationException e) {
-              LOG.error(e);
-            }
-          }
-        });
+    CommandProcessor.getInstance().executeCommand(myProject, () -> ApplicationManager.getApplication().runWriteAction(() -> {
+      myInterfaceName = dialog.getExtractedSuperName();
+      mySelectedMembers = ArrayUtil.toObjectArray(dialog.getSelectedMemberInfos(), MemberInfo.class);
+      myTargetDir = dialog.getTargetDirectory();
+      myJavaDocPolicy = new DocCommentPolicy(dialog.getDocCommentPolicy());
+      try {
+        doRefactoring();
       }
-    }, REFACTORING_NAME, null);
+      catch (IncorrectOperationException e) {
+        LOG.error(e);
+      }
+    }), REFACTORING_NAME, null);
   }
 
 
@@ -125,12 +120,7 @@ public class ExtractInterfaceHandler implements RefactoringActionHandler, Elemen
     if (anInterface != null) {
       final SmartPsiElementPointer<PsiClass> classPointer = SmartPointerManager.getInstance(myProject).createSmartPsiElementPointer(myClass);
       final SmartPsiElementPointer<PsiClass> interfacePointer = SmartPointerManager.getInstance(myProject).createSmartPsiElementPointer(anInterface);
-      final Runnable turnRefsToSuperRunnable = new Runnable() {
-        @Override
-        public void run() {
-          ExtractClassUtil.askAndTurnRefsToSuper(myProject, classPointer, interfacePointer);
-        }
-      };
+      final Runnable turnRefsToSuperRunnable = () -> ExtractClassUtil.askAndTurnRefsToSuper(myProject, classPointer, interfacePointer);
       SwingUtilities.invokeLater(turnRefsToSuperRunnable);
     }
   }
@@ -140,20 +130,21 @@ public class ExtractInterfaceHandler implements RefactoringActionHandler, Elemen
                                    String interfaceName,
                                    MemberInfo[] selectedMembers,
                                    DocCommentPolicy javaDocPolicy) throws IncorrectOperationException {
-    aClass.getProject().getMessageBus().syncPublisher(RefactoringEventListener.REFACTORING_EVENT_TOPIC)
+    final Project project = aClass.getProject();
+    project.getMessageBus().syncPublisher(RefactoringEventListener.REFACTORING_EVENT_TOPIC)
       .refactoringStarted(ExtractSuperClassUtil.REFACTORING_EXTRACT_SUPER_ID, ExtractSuperClassUtil.createBeforeData(aClass, selectedMembers));
     final PsiClass anInterface = JavaDirectoryService.getInstance().createInterface(targetDir, interfaceName);
     try {
       PsiJavaCodeReferenceElement ref = ExtractSuperClassUtil.createExtendingReference(anInterface, aClass, selectedMembers);
       final PsiReferenceList referenceList = aClass.isInterface() ? aClass.getExtendsList() : aClass.getImplementsList();
       assert referenceList != null;
-      referenceList.add(ref);
+      CodeStyleManager.getInstance(project).reformat(referenceList.add(ref));
       PullUpProcessor pullUpHelper = new PullUpProcessor(aClass, anInterface, selectedMembers, javaDocPolicy);
       pullUpHelper.moveMembersToBase();
       return anInterface;
     }
     finally {
-      aClass.getProject().getMessageBus().syncPublisher(RefactoringEventListener.REFACTORING_EVENT_TOPIC)
+      project.getMessageBus().syncPublisher(RefactoringEventListener.REFACTORING_EVENT_TOPIC)
         .refactoringDone(ExtractSuperClassUtil.REFACTORING_EXTRACT_SUPER_ID, ExtractSuperClassUtil.createAfterData(anInterface));
     }
   }

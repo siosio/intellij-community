@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ import java.util.Map;
 
 @State(
   name = "DiffSettings",
-  storages = @Storage(file = DiffUtil.DIFF_CONFIG)
+  storages = @Storage(DiffUtil.DIFF_CONFIG)
 )
 public class DiffSettingsHolder implements PersistentStateComponent<DiffSettingsHolder.State> {
   public static final Key<DiffSettings> KEY = Key.create("DiffSettings");
@@ -43,7 +43,8 @@ public class DiffSettingsHolder implements PersistentStateComponent<DiffSettings
   }
 
   private static class PlaceSettings {
-    @NotNull public List<String> DIFF_TOOLS_ORDER = new ArrayList<String>();
+    @NotNull public List<String> DIFF_TOOLS_ORDER = new ArrayList<>();
+    public boolean SYNC_BINARY_EDITOR_SETTINGS = true;
   }
 
   public static class DiffSettings {
@@ -76,6 +77,14 @@ public class DiffSettingsHolder implements PersistentStateComponent<DiffSettings
       SHARED_SETTINGS.GO_TO_NEXT_FILE_ON_NEXT_DIFFERENCE = value;
     }
 
+    public boolean isSyncBinaryEditorSettings() {
+      return PLACE_SETTINGS.SYNC_BINARY_EDITOR_SETTINGS;
+    }
+
+    public void setSyncBinaryEditorSettings(boolean value) {
+      PLACE_SETTINGS.SYNC_BINARY_EDITOR_SETTINGS= value;
+    }
+
     //
     // Impl
     //
@@ -105,17 +114,19 @@ public class DiffSettingsHolder implements PersistentStateComponent<DiffSettings
 
   public static class State {
     @MapAnnotation(surroundWithTag = false, surroundKeyWithTag = false, surroundValueWithTag = false)
-    public Map<String, PlaceSettings> PLACES_MAP = new HashMap<String, PlaceSettings>();
+    public Map<String, PlaceSettings> PLACES_MAP = new HashMap<>();
     public SharedSettings SHARED_SETTINGS = new SharedSettings();
   }
 
   private State myState = new State();
 
   @NotNull
+  @Override
   public State getState() {
     return myState;
   }
 
+  @Override
   public void loadState(State state) {
     myState = state;
   }

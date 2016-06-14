@@ -104,11 +104,11 @@ public class CreateNSDeclarationIntentionFix implements HintAction, LocalQuickFi
   @Override
   @NotNull
   public String getText() {
-    final String alias = getXmlExtension().getNamespaceAlias(getFile());
+    final String alias = getXmlNamespaceHelper().getNamespaceAlias(getFile());
     return XmlErrorMessages.message("create.namespace.declaration.quickfix", alias);
   }
 
-  private XmlNamespaceHelper getXmlExtension() {
+  private XmlNamespaceHelper getXmlNamespaceHelper() {
     return XmlNamespaceHelper.getHelper(getFile());
   }
 
@@ -148,7 +148,7 @@ public class CreateNSDeclarationIntentionFix implements HintAction, LocalQuickFi
     if (element instanceof XmlAttribute) {
       element = element.getParent();
     }
-    Set<String> set = getXmlExtension().guessUnboundNamespaces(element, xmlFile);
+    Set<String> set = getXmlNamespaceHelper().guessUnboundNamespaces(element, xmlFile);
 
     final String match = getUnboundNamespaceForPrefix(myNamespacePrefix, xmlFile, set);
     if (match != null) {
@@ -227,7 +227,7 @@ public class CreateNSDeclarationIntentionFix implements HintAction, LocalQuickFi
   }
 
   private String getTitle() {
-    return XmlErrorMessages.message("select.namespace.title", StringUtil.capitalize(getXmlExtension().getNamespaceAlias(getFile())));
+    return XmlErrorMessages.message("select.namespace.title", StringUtil.capitalize(getXmlNamespaceHelper().getNamespaceAlias(getFile())));
   }
 
   @Override
@@ -319,36 +319,25 @@ public class CreateNSDeclarationIntentionFix implements HintAction, LocalQuickFi
     if (namespacesToChooseFrom.length > 1 && !ApplicationManager.getApplication().isUnitTestMode()) {
       final JList list = new JBList(namespacesToChooseFrom);
       list.setCellRenderer(XmlNSRenderer.INSTANCE);
-      Runnable runnable = new Runnable() {
-        @Override
-        public void run() {
-          final int index = list.getSelectedIndex();
-          if (index < 0) return;
-          PsiDocumentManager.getInstance(project).commitAllDocuments();
+      Runnable runnable = () -> {
+        final int index = list.getSelectedIndex();
+        if (index < 0) return;
+        PsiDocumentManager.getInstance(project).commitAllDocuments();
 
-          CommandProcessor.getInstance().executeCommand(
-            project,
-            new Runnable() {
-              @Override
-              public void run() {
-                ApplicationManager.getApplication().runWriteAction(
-                  new Runnable() {
-                    @Override
-                    public void run() {
-                      try {
-                        onSelection.doSomethingWithGivenStringToProduceXmlAttributeNowPlease(namespacesToChooseFrom[index]);
-                      } catch (IncorrectOperationException ex) {
-                        throw new RuntimeException(ex);
-                      }
-                    }
-                  }
-                );
+        CommandProcessor.getInstance().executeCommand(
+          project,
+          () -> ApplicationManager.getApplication().runWriteAction(
+            () -> {
+              try {
+                onSelection.doSomethingWithGivenStringToProduceXmlAttributeNowPlease(namespacesToChooseFrom[index]);
+              } catch (IncorrectOperationException ex) {
+                throw new RuntimeException(ex);
               }
-            },
-            requestor.getText(),
-            requestor.getFamilyName()
-          );
-        }
+            }
+          ),
+          requestor.getText(),
+          requestor.getFamilyName()
+        );
       };
 
       new PopupChooserBuilder(list).
@@ -370,12 +359,7 @@ public class CreateNSDeclarationIntentionFix implements HintAction, LocalQuickFi
     }
     else {
       ProgressManager.getInstance().runProcessWithProgressSynchronously(
-        new Runnable() {
-          @Override
-          public void run() {
-            processExternalUrisImpl(metaHandler, file, processor);
-          }
-        },
+        () -> processExternalUrisImpl(metaHandler, file, processor),
         XmlErrorMessages.message("finding.acceptable.uri"),
         false,
         file.getProject()

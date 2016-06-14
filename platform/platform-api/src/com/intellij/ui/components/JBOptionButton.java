@@ -17,6 +17,7 @@ package com.intellij.ui.components;
 
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.ui.GraphicsConfig;
 import com.intellij.openapi.ui.JBMenuItem;
 import com.intellij.openapi.ui.JBPopupMenu;
 import com.intellij.openapi.util.Disposer;
@@ -26,6 +27,7 @@ import com.intellij.openapi.util.Weighted;
 import com.intellij.openapi.wm.IdeGlassPane;
 import com.intellij.openapi.wm.IdeGlassPaneUtil;
 import com.intellij.ui.ScreenUtil;
+import com.intellij.util.ui.GraphicsUtil;
 import com.intellij.util.ui.JBInsets;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
@@ -202,12 +204,7 @@ public class JBOptionButton extends JButton implements MouseMotionListener, Weig
         if (popup != null && listener.get() != null) {
           popup.removePopupMenuListener(listener.get());
         }
-        SwingUtilities.invokeLater(new Runnable() {
-          @Override
-          public void run() {
-            myPopupIsShowing = false;
-          }
-        });
+        SwingUtilities.invokeLater(() -> myPopupIsShowing = false);
       }
 
       @Override
@@ -217,30 +214,27 @@ public class JBOptionButton extends JButton implements MouseMotionListener, Weig
     popup.addPopupMenuListener(listener.get());
     popup.show(this, 0, y);
 
-    SwingUtilities.invokeLater(new Runnable() {
-      @Override
-      public void run() {
-        if (popup == null || !popup.isShowing() || !myPopupIsShowing) return;
-        
-        Action selection = actionToSelect;
-        if (selection == null && myOptions.length > 0 && ensureSelection) {
-          selection = getAction();
-        }
+    SwingUtilities.invokeLater(() -> {
+      if (popup == null || !popup.isShowing() || !myPopupIsShowing) return;
 
-        if (selection == null) return;
-        
-        final MenuElement[] elements = popup.getSubElements();
-        for (MenuElement eachElement : elements) {
-          if (eachElement instanceof JMenuItem) {
-            JMenuItem eachItem = (JMenuItem)eachElement;
-            if (selection.equals(eachItem.getAction())) {
-              final MenuSelectionManager mgr = MenuSelectionManager.defaultManager();
-              final MenuElement[] path = new MenuElement[2];
-              path[0] = popup;
-              path[1] = eachItem;
-              mgr.setSelectedPath(path);
-              break;
-            }
+      Action selection = actionToSelect;
+      if (selection == null && myOptions.length > 0 && ensureSelection) {
+        selection = getAction();
+      }
+
+      if (selection == null) return;
+
+      final MenuElement[] elements = popup.getSubElements();
+      for (MenuElement eachElement : elements) {
+        if (eachElement instanceof JMenuItem) {
+          JMenuItem eachItem = (JMenuItem)eachElement;
+          if (selection.equals(eachItem.getAction())) {
+            final MenuSelectionManager mgr = MenuSelectionManager.defaultManager();
+            final MenuElement[] path = new MenuElement[2];
+            path[0] = popup;
+            path[1] = eachItem;
+            mgr.setSelectedPath(path);
+            break;
           }
         }
       }
@@ -362,10 +356,12 @@ public class JBOptionButton extends JButton implements MouseMotionListener, Weig
   protected void paintChildren(Graphics g) {
     super.paintChildren(g);
     if (SystemInfo.isMac && UIUtil.isUnderIntelliJLaF()) {
-      int x = getWidth() - getInsets().right - 8;
+      int x = getWidth() - getInsets().right - 10;
       Icon icon = AllIcons.Mac.YosemiteOptionButtonSelector;
       int y = (getHeight() - icon.getIconHeight()) / 2;
+      GraphicsConfig config = isEnabled() ? new GraphicsConfig(g) : GraphicsUtil.paintWithAlpha(g, 0.6f);
       icon.paintIcon(this, g, x, y);
+      config.restore();
       return;
     }
 

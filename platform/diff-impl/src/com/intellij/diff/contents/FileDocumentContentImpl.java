@@ -15,6 +15,8 @@
  */
 package com.intellij.diff.contents;
 
+import com.intellij.diff.util.DiffUtil;
+import com.intellij.ide.GeneralSettings;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.OpenFileDescriptor;
 import com.intellij.openapi.fileEditor.impl.LoadTextUtil;
@@ -39,7 +41,7 @@ public class FileDocumentContentImpl extends DocumentContentImpl implements File
   @Nullable
   @Override
   public OpenFileDescriptor getOpenFileDescriptor(int offset) {
-    if (myProject == null || myProject.isDefault()) return null;
+    if (myProject == null || myProject.isDefault() || !myFile.isValid()) return null;
     return new OpenFileDescriptor(myProject, myFile, offset);
   }
 
@@ -51,7 +53,13 @@ public class FileDocumentContentImpl extends DocumentContentImpl implements File
   }
 
   @NotNull
+  @Override
   public VirtualFile getFile() {
     return myFile;
+  }
+
+  @Override
+  public void onAssigned(boolean isAssigned) {
+    if (isAssigned && GeneralSettings.getInstance().isSyncOnFrameActivation()) DiffUtil.markDirtyAndRefresh(true, false, false, myFile);
   }
 }

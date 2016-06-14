@@ -40,9 +40,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * Provides access to Python builtins via skeletons.
@@ -78,10 +76,14 @@ public class PyBuiltinCache {
    */
   @NotNull
   public static PyBuiltinCache getInstance(@Nullable PsiElement reference) {
-    if (reference != null && reference.isValid()) {
-      Sdk sdk = findSdkForFile(reference.getContainingFile());
-      if (sdk != null) {
-        return PythonSdkPathCache.getInstance(reference.getProject(), sdk).getBuiltins();
+    if (reference != null) {
+      try {
+        Sdk sdk = findSdkForFile(reference.getContainingFile());
+        if (sdk != null) {
+          return PythonSdkPathCache.getInstance(reference.getProject(), sdk).getBuiltins();
+        }
+      }
+      catch (PsiInvalidElementAccessException ignored) {
       }
     }
     return DUD_INSTANCE; // a non-functional fail-fast instance, for a case when skeletons are not available
@@ -141,13 +143,10 @@ public class PyBuiltinCache {
             final VirtualFile builtins_vfile = LocalFileSystem.getInstance().findFileByIoFile(builtins);
             if (builtins_vfile != null) {
               final Ref<PyFile> result = Ref.create();
-              ApplicationManager.getApplication().runReadAction(new Runnable() {
-                @Override
-                public void run() {
-                  PsiFile file = PsiManager.getInstance(project).findFile(builtins_vfile);
-                  if (file instanceof PyFile) {
-                    result.set((PyFile)file);
-                  }
+              ApplicationManager.getApplication().runReadAction(() -> {
+                PsiFile file = PsiManager.getInstance(project).findFile(builtins_vfile);
+                if (file instanceof PyFile) {
+                  result.set((PyFile)file);
                 }
               });
               return result.get();
@@ -164,28 +163,39 @@ public class PyBuiltinCache {
   public PyType createLiteralCollectionType(final PySequenceExpression sequence, final String name, @NotNull TypeEvalContext context) {
     final PyClass cls = getClass(name);
     if (cls != null) {
-      return new PyCollectionTypeImpl(cls, false, getSequenceElementType(sequence, context));
+      return new PyCollectionTypeImpl(cls, false, getSequenceElementTypes(sequence, context));
     }
     return null;
   }
 
-  @Nullable
-  private static PyType getSequenceElementType(@NotNull PySequenceExpression sequence, @NotNull TypeEvalContext context) {
+  @NotNull
+  private static List<PyType> getSequenceElementTypes(@NotNull PySequenceExpression sequence, @NotNull TypeEvalContext context) {
     final PyExpression[] elements = sequence.getElements();
     if (elements.length == 0 || elements.length > 10 /* performance */) {
-      return null;
+      return Collections.singletonList(null);
     }
-    final PyType result = context.getType(elements[0]);
-    if (result == null) {
-      return null;
+    final PyType firstElementType = context.getType(elements[0]);
+    if (firstElementType == null) {
+      return Collections.singletonList(null);
     }
     for (int i = 1; i < elements.length; i++) {
       final PyType elementType = context.getType(elements[i]);
-      if (elementType == null || !elementType.equals(result)) {
-        return null;
+      if (elementType == null || !elementType.equals(firstElementType)) {
+        return Collections.singletonList(null);
       }
     }
-    return result;
+    if (sequence instanceof PyDictLiteralExpression) {
+      if (firstElementType instanceof PyTupleType) {
+        final PyTupleType tupleType = (PyTupleType)firstElementType;
+        if (tupleType.getElementCount() == 2) {
+          return Arrays.asList(tupleType.getElementType(0), tupleType.getElementType(1));
+        }
+      }
+      return Arrays.asList(null, null);
+    }
+    else {
+      return Collections.singletonList(firstElementType);
+    }
   }
 
   @Nullable
@@ -367,6 +377,7 @@ public class PyBuiltinCache {
    */
   public boolean isBuiltin(@Nullable PsiElement target) {
     if (target == null) return false;
+    PyPsiUtils.assertValid(target);
     if (! target.isValid()) return false;
     final PsiFile the_file = target.getContainingFile();
     if (!(the_file instanceof PyFile)) {

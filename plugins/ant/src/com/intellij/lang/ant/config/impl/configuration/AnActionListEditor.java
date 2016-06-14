@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,8 +25,8 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Factory;
-import com.intellij.ui.ListScrollingUtil;
 import com.intellij.ui.ReorderableListController;
+import com.intellij.ui.ScrollingUtil;
 
 import javax.swing.*;
 import java.awt.*;
@@ -70,19 +70,17 @@ public class AnActionListEditor<T> extends JPanel {
       }
     });
     description.setEnableCondition(removeCondition);
-    description.setConfirmation(new Condition<List<T>>() {
-      public boolean value(final List<T> list) {
-        if (list.size() == 1) {
-          return Messages.showOkCancelDialog(description.getList(),
-                                             AntBundle.message("delete.selected.ant.configuration.confirmation.text"),
-                                             ExecutionBundle.message("delete.confirmation.dialog.title"),
-                                             Messages.getQuestionIcon()) == Messages.OK;
-        } else {
-          return Messages.showOkCancelDialog(description.getList(),
-                                             AntBundle.message("delete.selected.ant.configurations.confirmation.text"),
-                                             ExecutionBundle.message("delete.confirmation.dialog.title"),
-                                             Messages.getQuestionIcon()) == Messages.OK;
-        }
+    description.setConfirmation(list -> {
+      if (list.size() == 1) {
+        return Messages.showOkCancelDialog(description.getList(),
+                                           AntBundle.message("delete.selected.ant.configuration.confirmation.text"),
+                                           ExecutionBundle.message("delete.confirmation.dialog.title"),
+                                           Messages.getQuestionIcon()) == Messages.OK;
+      } else {
+        return Messages.showOkCancelDialog(description.getList(),
+                                           AntBundle.message("delete.selected.ant.configurations.confirmation.text"),
+                                           ExecutionBundle.message("delete.confirmation.dialog.title"),
+                                           Messages.getQuestionIcon()) == Messages.OK;
       }
     });
 
@@ -115,7 +113,7 @@ public class AnActionListEditor<T> extends JPanel {
     for (T item : items) {
       model.addElement(item);
     }
-    ListScrollingUtil.ensureSelectionExists(getList());
+    ScrollingUtil.ensureSelectionExists(getList());
   }
 
   public void updateItem(T item) {
@@ -160,10 +158,10 @@ public class AnActionListEditor<T> extends JPanel {
 
     public void select(T item) {
       if (item != null) {
-        ListScrollingUtil.selectItem(myList, item);
+        ScrollingUtil.selectItem(myList, item);
       }
       else {
-        ListScrollingUtil.ensureSelectionExists(myList);
+        ScrollingUtil.ensureSelectionExists(myList);
       }
     }
 

@@ -43,6 +43,7 @@ public class DetectClassesToRunTest extends LightCodeInsightFixtureTestCase {
     super.setUp();
     myFixture.addClass("package org.testng.annotations; @interface Test {public String[] dependsOnMethods() default {};}");
     myFixture.addClass("package org.testng.annotations; @interface BeforeClass {}");
+    myFixture.addClass("package org.testng.annotations; @interface BeforeGroups {public String[] value() default {};}");
   }
 
   @AfterMethod
@@ -117,6 +118,20 @@ public class DetectClassesToRunTest extends LightCodeInsightFixtureTestCase {
     doTestClassConfiguration(aClass);
   }
 
+  @Test
+  public void testBeforeGroups() throws Exception {
+    final PsiClass aClass =
+       myFixture.addClass("package a; public class ATest {" +
+                         "  @org.testng.annotations.Test(groups = { \"g1\" })\n" +
+                         "  public void testOne(){}\n" +
+                         "}");
+    final PsiClass configClass = myFixture.addClass("package a; public class ConfigTest {" +
+                                                 "  @org.testng.annotations.BeforeGroups(groups = { \"g1\" })\n" +
+                                                 "  public void testTwo(){}\n " +
+                                                 "}");
+    doTestMethodConfiguration(aClass, configClass, configClass.getMethods()[0], aClass.getMethods());
+  }
+
   public void testRerunFailedTestWithDependency() throws Exception {
     final PsiClass aClass =
       myFixture.addClass("package a; public class ATest {" +
@@ -140,8 +155,56 @@ public class DetectClassesToRunTest extends LightCodeInsightFixtureTestCase {
     assertEquals(1, paramsToRerun.size());
     assertContainsElements(paramsToRerun, "a");
   }
+  
+  public void testRerunFailedParameterized() throws Exception {
+    final PsiClass aClass =
+      myFixture.addClass("package a; " +
+                         "import org.testng.annotations.DataProvider;\n" +
+                         "import org.testng.annotations.Test;\n" +
+                         "\n" +
+                         "import static org.testng.Assert.assertEquals;\n" +
+                         "\n" +
+                         "public class ATest {\n" +
+                         "\n" +
+                         "    @DataProvider\n" +
+                         "    public Object[][] testData() {\n" +
+                         "        return new Object[][]{\n" +
+                         "                {1},\n" +
+                         "                {2},\n" +
+                         "        };\n" +
+                         "    }\n" +
+                         "\n" +
+                         "    @Test(dataProvider = \"testData\")\n" +
+                         "    public void test(int in) {\n" +
+                         "        assertEquals(in, 0);\n" +
+                         "    }\n" +
+                         "}\n");
+
+    final LinkedHashMap<PsiClass, Map<PsiMethod, List<String>>> classes = new LinkedHashMap<PsiClass, Map<PsiMethod, List<String>>>();
+    classes.put(aClass, new HashMap<PsiMethod, List<String>>());
+    final GlobalSearchScope projectScope = GlobalSearchScope.projectScope(getProject());
+    final SMTestProxy testProxy = new SMTestProxy("test", false, "java:test://a.ATest.test[0]");
+    testProxy.setLocator(new JavaTestLocator());
+    RerunFailedTestsAction.includeFailedTestWithDependencies(classes, projectScope, getProject(), testProxy); 
+    
+    final SMTestProxy testProxy2 = new SMTestProxy("test", false, "java:test://a.ATest.test[1]");
+    testProxy2.setLocator(new JavaTestLocator());
+    RerunFailedTestsAction.includeFailedTestWithDependencies(classes, projectScope, getProject(), testProxy2);
+
+    assertEquals(1, classes.size());
+    final Map<PsiMethod, List<String>> params = classes.get(aClass);
+    final PsiMethod[] tests = aClass.findMethodsByName("test", false);
+    assertContainsElements(params.keySet(), tests);
+    final List<String> paramsToRerun = params.get(tests[0]);
+    assertEquals(2, paramsToRerun.size());
+    assertContainsElements(paramsToRerun, "0", "1");
+  }
 
   private void doTestMethodConfiguration(PsiClass aClass, PsiMethod... expectedMethods) throws CantRunException {
+    doTestMethodConfiguration(aClass, null, null, expectedMethods);
+  }
+  
+  private void doTestMethodConfiguration(PsiClass aClass, PsiClass secondaryClass, PsiMethod configMethod, PsiMethod... expectedMethods) throws CantRunException {
     final TestNGConfiguration configuration =
       new TestNGConfiguration("testOne", getProject(), TestNGConfigurationType.getInstance().getConfigurationFactories()[0]);
     final TestData data = configuration.getPersistantData();
@@ -157,6 +220,11 @@ public class DetectClassesToRunTest extends LightCodeInsightFixtureTestCase {
     assertContainsElements(classes.keySet(), aClass);
     final Map<PsiMethod, List<String>> methods = classes.get(aClass);
     assertContainsElements(methods.keySet(), expectedMethods);
+    if (secondaryClass != null) {
+      final Map<PsiMethod, List<String>> configMethods = classes.get(secondaryClass);
+      assertTrue(configMethods != null);
+      assertTrue(configMethods.containsKey(configMethod));
+    }
   }
   
   private void doTestClassConfiguration(PsiClass aClass) throws CantRunException {

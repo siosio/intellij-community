@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ import com.intellij.codeInsight.CodeInsightBundle;
 import com.intellij.codeInsight.TargetElementUtil;
 import com.intellij.codeInsight.daemon.impl.IdentifierUtil;
 import com.intellij.featureStatistics.FeatureUsageTracker;
-import com.intellij.find.EditorSearchComponent;
+import com.intellij.find.EditorSearchSession;
 import com.intellij.find.findUsages.PsiElement2UsageTargetAdapter;
 import com.intellij.injected.editor.EditorWindow;
 import com.intellij.lang.injection.InjectedLanguageManager;
@@ -56,7 +56,6 @@ import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
 import java.util.*;
 
 public class HighlightUsagesHandler extends HighlightHandlerBase {
@@ -86,19 +85,16 @@ public class HighlightUsagesHandler extends HighlightHandlerBase {
       return;
     }
 
-    DumbService.getInstance(project).withAlternativeResolveEnabled(new Runnable() {
-      @Override
-      public void run() {
-        UsageTarget[] usageTargets = getUsageTargets(editor, file);
-        if (usageTargets == null) {
-          handleNoUsageTargets(file, editor, selectionModel, project);
-          return;
-        }
+    DumbService.getInstance(project).withAlternativeResolveEnabled(() -> {
+      UsageTarget[] usageTargets = getUsageTargets(editor, file);
+      if (usageTargets == null) {
+        handleNoUsageTargets(file, editor, selectionModel, project);
+        return;
+      }
 
-        boolean clearHighlights = isClearHighlights(editor);
-        for (UsageTarget target : usageTargets) {
-          target.highlightUsages(file, editor, clearHighlights);
-        }
+      boolean clearHighlights = isClearHighlights(editor);
+      for (UsageTarget target : usageTargets) {
+        target.highlightUsages(file, editor, clearHighlights);
       }
     });
   }
@@ -126,12 +122,9 @@ public class HighlightUsagesHandler extends HighlightHandlerBase {
         ResolveResult[] results = ((PsiPolyVariantReference)ref).multiResolve(false);
 
         if (results.length > 0) {
-          usageTargets = ContainerUtil.mapNotNull(results, new Function<ResolveResult, UsageTarget>() {
-            @Override
-            public UsageTarget fun(ResolveResult result) {
-              PsiElement element = result.getElement();
-              return element == null ? null : new PsiElement2UsageTargetAdapter(element);
-            }
+          usageTargets = ContainerUtil.mapNotNull(results, result -> {
+            PsiElement element = result.getElement();
+            return element == null ? null : new PsiElement2UsageTargetAdapter(element);
           }, UsageTarget.EMPTY_ARRAY);
         }
       }
@@ -192,14 +185,13 @@ public class HighlightUsagesHandler extends HighlightHandlerBase {
       editor = ((EditorWindow)editor).getDelegate();
     }
 
-    final JComponent oldHeader = editor.getHeaderComponent();
-    if (oldHeader instanceof EditorSearchComponent) {
-      final EditorSearchComponent oldSearch = (EditorSearchComponent)oldHeader;
+    EditorSearchSession oldSearch = EditorSearchSession.get(editor);
+    if (oldSearch != null) {
       if (oldSearch.hasMatches()) {
         String oldText = oldSearch.getTextInField();
-        if (!oldSearch.isRegexp()) {
+        if (!oldSearch.getFindModel().isRegularExpressions()) {
           oldText = StringUtil.escapeToRegexp(oldText);
-          oldSearch.setRegexp(true);
+          oldSearch.getFindModel().setRegularExpressions(true);
         }
 
         String newText = oldText + '|' + StringUtil.escapeToRegexp(text);
@@ -208,9 +200,7 @@ public class HighlightUsagesHandler extends HighlightHandlerBase {
       }
     }
 
-    final EditorSearchComponent header = new EditorSearchComponent(editor, project);
-    header.setRegexp(false);
-    editor.setHeaderComponent(header);
+    EditorSearchSession.start(editor, project).getFindModel().setRegularExpressions(false);
   }
 
   public static class DoHighlightRunnable implements Runnable {
@@ -370,18 +360,8 @@ public class HighlightUsagesHandler extends HighlightHandlerBase {
                                       TextAttributes attributes) {
     if (editor instanceof EditorWindow) editor = ((EditorWindow)editor).getDelegate();
     RangeHighlighter[] highlighters = ((HighlightManagerImpl)highlightManager).getHighlighters(editor);
-    Arrays.sort(highlighters, new Comparator<RangeHighlighter>() {
-      @Override
-      public int compare(RangeHighlighter o1, RangeHighlighter o2) {
-        return o1.getStartOffset() - o2.getStartOffset();
-      }
-    });
-    Collections.sort(rangesToHighlight, new Comparator<TextRange>() {
-      @Override
-      public int compare(TextRange o1, TextRange o2) {
-        return o1.getStartOffset() - o2.getStartOffset();
-      }
-    });
+    Arrays.sort(highlighters, (o1, o2) -> o1.getStartOffset() - o2.getStartOffset());
+    Collections.sort(rangesToHighlight, (o1, o2) -> o1.getStartOffset() - o2.getStartOffset());
     int i = 0;
     int j = 0;
     while (i < highlighters.length && j < rangesToHighlight.size()) {
@@ -410,21 +390,30 @@ public class HighlightUsagesHandler extends HighlightHandlerBase {
                                       TextAttributes attributes, boolean clearHighlights) {
     List<TextRange> textRanges = new ArrayList<TextRange>(refs.size());
     for (PsiReference ref : refs) {
-      textRanges.addAll(getRangesToHighlight(ref));
+      collectRangesToHighlight(ref, textRanges);
     }
     highlightRanges(highlightManager, editor, attributes, clearHighlights, textRanges);
   }
 
-  public static List<TextRange> getRangesToHighlight(final PsiReference ref) {
-    final List<TextRange> relativeRanges = ReferenceRange.getRanges(ref);
-    List<TextRange> answer = new ArrayList<TextRange>(relativeRanges.size());
-    for (TextRange relativeRange : relativeRanges) {
+  /**
+   * @deprecated Use {@link #collectRangesToHighlight}
+   */
+  @SuppressWarnings("unused")
+  @NotNull
+  @Deprecated
+  public static List<TextRange> getRangesToHighlight(@NotNull PsiReference ref) {
+    return collectRangesToHighlight(ref, new ArrayList<TextRange>());
+  }
+
+  @NotNull
+  public static List<TextRange> collectRangesToHighlight(@NotNull PsiReference ref, @NotNull List<TextRange> result) {
+    for (TextRange relativeRange : ReferenceRange.getRanges(ref)) {
       PsiElement element = ref.getElement();
       TextRange range = safeCut(element.getTextRange(), relativeRange);
       // injection occurs
-      answer.add(InjectedLanguageManager.getInstance(element.getProject()).injectedToHost(element, range));
+      result.add(InjectedLanguageManager.getInstance(element.getProject()).injectedToHost(element, range));
     }
-    return answer;
+    return result;
   }
 
   private static TextRange safeCut(TextRange range, TextRange relative) {

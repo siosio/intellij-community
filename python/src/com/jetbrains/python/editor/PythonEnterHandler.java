@@ -29,17 +29,20 @@ import com.intellij.openapi.editor.actionSystem.EditorActionHandler;
 import com.intellij.openapi.editor.actions.SplitLineAction;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.TextRange;
+import com.intellij.openapi.util.text.LineTokenizer;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.source.tree.TreeUtil;
 import com.intellij.psi.impl.source.tree.injected.InjectedLanguageUtil;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.jetbrains.python.PyTokenTypes;
 import com.jetbrains.python.codeInsight.PyCodeInsightSettings;
-import com.jetbrains.python.documentation.PythonDocumentationProvider;
+import com.jetbrains.python.documentation.docstrings.*;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.impl.PyStringLiteralExpressionImpl;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.regex.Matcher;
 
 /**
  * @author yole
@@ -104,9 +107,12 @@ public class PythonEnterHandler extends EnterHandlerDelegateAdapter {
         comment = file.findElementAt(offset - 1);
       }
       int expectedStringStart = editor.getCaretModel().getOffset() - 3; // """ or '''
-      if (PythonDocCommentUtil.atDocCommentStart(comment, expectedStringStart)) {
-        insertDocStringStub(editor, comment);
-        return Result.Continue;
+      if (comment != null) {
+        final DocstringState state = canGenerateDocstring(comment, expectedStringStart, doc);
+        if (state != DocstringState.NONE) {
+          insertDocStringStub(editor, comment, state);
+          return Result.Continue;
+        }
       }
     }
 
@@ -256,21 +262,23 @@ public class PythonEnterHandler extends EnterHandlerDelegateAdapter {
     return wrappableBefore != wrappableAfter;
   }
 
-  private static void insertDocStringStub(Editor editor, PsiElement element) {
-    PythonDocumentationProvider provider = new PythonDocumentationProvider();
-    PyFunction fun = PsiTreeUtil.getParentOfType(element, PyFunction.class);
-    if (fun != null) {
-      String docStub = provider.generateDocumentationContentStub(fun, false);
-      docStub += element.getParent().getText().substring(0,3);
-      if (docStub.length() != 0) {
-        editor.getDocument().insertString(editor.getCaretModel().getOffset(), docStub);
-        return;
+  private static void insertDocStringStub(Editor editor, PsiElement element, DocstringState state) {
+    PyDocStringOwner docOwner = PsiTreeUtil.getParentOfType(element, PyDocStringOwner.class);
+    if (docOwner != null) {
+      final int caretOffset = editor.getCaretModel().getOffset();
+      final Document document = editor.getDocument();
+      final String quotes = document.getText(TextRange.from(caretOffset - 3, 3));
+      final String docString = PyDocstringGenerator.forDocStringOwner(docOwner)
+        .withInferredParameters(true)
+        .withQuotes(quotes)
+        .forceNewMode()
+        .buildDocString();
+      if (state == DocstringState.INCOMPLETE) {
+        document.insertString(caretOffset, docString.substring(3));
       }
-    }
-    PyElement klass = PsiTreeUtil.getParentOfType(element, PyClass.class, PyFile.class);
-    if (klass != null && element != null) {
-      editor.getDocument().insertString(editor.getCaretModel().getOffset(),
-                      PythonDocCommentUtil.generateDocForClass(klass, element.getParent().getText().substring(0, 3)));
+      else if (state == DocstringState.EMPTY) {
+        document.replaceString(caretOffset, caretOffset + 3, docString.substring(3));
+      }
     }
   }
 
@@ -350,11 +358,95 @@ public class PythonEnterHandler extends EnterHandlerDelegateAdapter {
   public Result postProcessEnter(@NotNull PsiFile file,
                                  @NotNull Editor editor,
                                  @NotNull DataContext dataContext) {
+    if (!(file instanceof PyFile)) {
+      return Result.Continue;
+    }
     if (myPostprocessShift > 0) {
       editor.getCaretModel().moveCaretRelatively(myPostprocessShift, 0, false, false, false);
       myPostprocessShift = 0;
+      return Result.Continue;
     }
-    return super.postProcessEnter(file, editor,
-                                  dataContext);
+    addGoogleDocStringSectionIndent(file, editor, editor.getCaretModel().getOffset());
+    return super.postProcessEnter(file, editor, dataContext);
+  }
+
+  private static void addGoogleDocStringSectionIndent(@NotNull PsiFile file, @NotNull Editor editor, int offset) {
+    final Document document = editor.getDocument();
+    PsiDocumentManager.getInstance(file.getProject()).commitDocument(document);
+    final PsiElement element = file.findElementAt(offset);
+    if (element != null) {
+      // Insert additional indentation after section header in Google code style docstrings
+      final PyStringLiteralExpression pyString = DocStringUtil.getParentDefinitionDocString(element);
+      if (pyString != null) {
+        final String docStringText = pyString.getText();
+        final DocStringFormat format = DocStringUtil.guessDocStringFormat(docStringText, pyString);
+        if (format == DocStringFormat.GOOGLE && offset + 1 < document.getTextLength()) {
+          final int lineNum = document.getLineNumber(offset);
+          final TextRange lineRange = TextRange.create(document.getLineStartOffset(lineNum - 1), document.getLineEndOffset(lineNum - 1));
+          final Matcher matcher = GoogleCodeStyleDocString.SECTION_HEADER.matcher(document.getText(lineRange));
+          if (matcher.matches() && SectionBasedDocString.isValidSectionTitle(matcher.group(1))) {
+            document.insertString(offset, GoogleCodeStyleDocStringBuilder.getDefaultSectionIndent(file.getProject()));
+            editor.getCaretModel().moveCaretRelatively(2, 0, false, false, false);
+          }
+        }
+      }
+    }
+  }
+  
+  enum DocstringState {
+    NONE,
+    INCOMPLETE,
+    EMPTY
+  }
+
+  @NotNull
+  public static DocstringState canGenerateDocstring(@NotNull PsiElement element, int firstQuoteOffset, @NotNull Document document) {
+    if (firstQuoteOffset < 0 || firstQuoteOffset > document.getTextLength() - 3) {
+      return DocstringState.NONE;
+    }
+    final String quotes = document.getText(TextRange.from(firstQuoteOffset, 3));
+    if (!quotes.equals("\"\"\"") && !quotes.equals("'''")) {
+      return DocstringState.NONE;
+    }
+    final PyStringLiteralExpression pyString = DocStringUtil.getParentDefinitionDocString(element);
+    if (pyString != null) {
+
+      String nodeText = element.getText();
+      final int prefixLength = PyStringLiteralExpressionImpl.getPrefixLength(nodeText);
+      nodeText = nodeText.substring(prefixLength);
+
+      final String literalText = pyString.getText();
+      if (literalText.endsWith(nodeText) && nodeText.startsWith(quotes)) {
+        if (firstQuoteOffset == pyString.getTextOffset() + prefixLength) {
+          PsiErrorElement error = PsiTreeUtil.getNextSiblingOfType(pyString, PsiErrorElement.class);
+          if (error == null) {
+            error = PsiTreeUtil.getNextSiblingOfType(pyString.getParent(), PsiErrorElement.class);
+          }
+          if (error != null) {
+            return DocstringState.INCOMPLETE;
+          }
+  
+          if (nodeText.equals(quotes + quotes)) {
+            return DocstringState.EMPTY;
+          }
+  
+          if (nodeText.length() < 6 || !nodeText.endsWith(quotes)) {
+            return DocstringState.INCOMPLETE;
+          }
+          // Sometimes if incomplete docstring is followed by another declaration with a docstring, it might be treated
+          // as complete docstring, because we can't understand that closing quotes actually belong to another docstring.
+          final String docstringIndent = PyIndentUtil.getLineIndent(document, document.getLineNumber(firstQuoteOffset));
+          for (String line : LineTokenizer.tokenizeIntoList(nodeText, false)) {
+            final String lineIndent = PyIndentUtil.getLineIndent(line);
+            final String lineContent = line.substring(lineIndent.length());
+            if ((lineContent.startsWith("def ") || lineContent.startsWith("class ")) &&
+                docstringIndent.length() > lineIndent.length() && docstringIndent.startsWith(lineIndent)) {
+              return DocstringState.INCOMPLETE;
+            }
+          }
+        }
+      }
+    }
+    return DocstringState.NONE;
   }
 }

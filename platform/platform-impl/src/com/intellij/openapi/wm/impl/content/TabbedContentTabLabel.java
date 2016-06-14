@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,6 +50,7 @@ public class TabbedContentTabLabel extends ContentTabLabel implements Disposable
     }
   };
   private final TabbedContent myContent;
+  private boolean myDisposed;
 
   public TabbedContentTabLabel(TabbedContent content, TabContentLayout layout) {
     super(content, layout);
@@ -57,7 +58,9 @@ public class TabbedContentTabLabel extends ContentTabLabel implements Disposable
     new ClickListener() {
       @Override
       public boolean onClick(@NotNull MouseEvent event, int clickCount) {
-        showPopup();
+        if (!myDisposed) {
+          showPopup();
+        }
         return true;
       }
     }.installOn(this);
@@ -71,7 +74,7 @@ public class TabbedContentTabLabel extends ContentTabLabel implements Disposable
     }
     final JBList list = new JBList(names);
     list.installCellRenderer(new NotNullFunction<Object, JComponent>() {
-      final JLabel label = new JLabel();
+      private final JLabel label = new JLabel();
       {
         label.setBorder(new EmptyBorder(UIUtil.getListCellPadding()));
       }
@@ -83,13 +86,10 @@ public class TabbedContentTabLabel extends ContentTabLabel implements Disposable
       }
     });
     final JBPopup popup = JBPopupFactory.getInstance().createListPopupBuilder(list)
-      .setItemChoosenCallback(new Runnable() {
-        @Override
-        public void run() {
-          int index = list.getSelectedIndex();
-          if (index != -1) {
-            myContent.selectContent(index);
-          }
+      .setItemChoosenCallback(() -> {
+        int index = list.getSelectedIndex();
+        if (index != -1) {
+          myContent.selectContent(index);
         }
       }).createPopup();
     Disposer.register(this, popup);
@@ -119,6 +119,7 @@ public class TabbedContentTabLabel extends ContentTabLabel implements Disposable
 
   @Override
   public void dispose() {
+    myDisposed = true;
   }
 
   @Override

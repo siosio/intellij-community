@@ -244,7 +244,7 @@ public class PyFormatterTest extends PyTestCase {
   }
 
   public void testSpaceWithinBraces() {  // PY-8069
-    getPythonCodeStyle().SPACE_WITHIN_BRACES = true;
+    getPythonCodeStyleSettings().SPACE_WITHIN_BRACES = true;
     doTest();
   }
 
@@ -303,7 +303,7 @@ public class PyFormatterTest extends PyTestCase {
   }
 
   public void testIndentInComprehensions() {  // PY-8516
-    getPythonCodeStyle().ALIGN_COLLECTIONS_AND_COMPREHENSIONS = false;
+    getPythonCodeStyleSettings().ALIGN_COLLECTIONS_AND_COMPREHENSIONS = false;
     doTest();
   }
 
@@ -336,12 +336,12 @@ public class PyFormatterTest extends PyTestCase {
   }
 
   public void testSpaceBeforeBackslash() {
-    getPythonCodeStyle().SPACE_BEFORE_BACKSLASH = false;
+    getPythonCodeStyleSettings().SPACE_BEFORE_BACKSLASH = false;
     doTest();
   }
 
   public void testNewLineAfterColon() {
-    getPythonCodeStyle().NEW_LINE_AFTER_COLON = true;
+    getPythonCodeStyleSettings().NEW_LINE_AFTER_COLON = true;
     doTest();
   }
 
@@ -361,6 +361,11 @@ public class PyFormatterTest extends PyTestCase {
 
   // PY-8961, PY-16050
   public void testSpaceInAnnotations() {
+    doTestPy3();
+  }
+
+  // PY-15791
+  public void testForceSpacesAroundEqualSignInAnnotatedParameter() {
     doTestPy3();
   }
 
@@ -421,17 +426,14 @@ public class PyFormatterTest extends PyTestCase {
 
   private void doTest(final boolean reformatText) {
     myFixture.configureByFile("formatter/" + getTestName(true) + ".py");
-    WriteCommandAction.runWriteCommandAction(null, new Runnable() {
-      @Override
-      public void run() {
-        CodeStyleManager codeStyleManager = CodeStyleManager.getInstance(myFixture.getProject());
-        PsiFile file = myFixture.getFile();
-        if (reformatText) {
-          codeStyleManager.reformatText(file, 0, file.getTextLength());
-        }
-        else {
-          codeStyleManager.reformat(file);
-        }
+    WriteCommandAction.runWriteCommandAction(null, () -> {
+      CodeStyleManager codeStyleManager = CodeStyleManager.getInstance(myFixture.getProject());
+      PsiFile file = myFixture.getFile();
+      if (reformatText) {
+        codeStyleManager.reformatText(file, 0, file.getTextLength());
+      }
+      else {
+        codeStyleManager.reformat(file);
       }
     });
     myFixture.checkResultByFile("formatter/" + getTestName(true) + "_after.py");
@@ -453,12 +455,7 @@ public class PyFormatterTest extends PyTestCase {
     getCommonCodeStyleSettings().ALIGN_MULTILINE_PARAMETERS_IN_CALLS = true;
     final String testName = "formatter/" + getTestName(true);
     myFixture.configureByFile(testName + ".py");
-    WriteCommandAction.runWriteCommandAction(null, new Runnable() {
-      @Override
-      public void run() {
-        myFixture.type("\n(");
-      }
-    });
+    WriteCommandAction.runWriteCommandAction(null, () -> myFixture.type("\n("));
     myFixture.checkResultByFile(testName + "_after.py");
   }
 
@@ -474,7 +471,7 @@ public class PyFormatterTest extends PyTestCase {
 
   // PY-14408
   public void testIndentsWithTabsInsideDictLiteral() {
-    getCommonCodeStyleSettings().getIndentOptions().USE_TAB_CHARACTER = true;
+    getIndentOptions().USE_TAB_CHARACTER = true;
     doTest();
   }
 
@@ -532,16 +529,13 @@ public class PyFormatterTest extends PyTestCase {
    */
   public void testReformatOfSingleElementPossible() {
     myFixture.configureByFile("formatter/" + getTestName(true) + ".py");
-    WriteCommandAction.runWriteCommandAction(myFixture.getProject(), new Runnable() {
-      @Override
-      public void run() {
-        final PsiElement elementAtCaret = myFixture.getFile().findElementAt(myFixture.getCaretOffset());
-        assertNotNull(elementAtCaret);
-        final PyStatement statement = PsiTreeUtil.getParentOfType(elementAtCaret, PyStatement.class, false);
-        assertNotNull(statement);
-        final CodeStyleManager codeStyleManager = CodeStyleManager.getInstance(myFixture.getProject());
-        codeStyleManager.reformat(statement);
-      }
+    WriteCommandAction.runWriteCommandAction(myFixture.getProject(), () -> {
+      final PsiElement elementAtCaret = myFixture.getFile().findElementAt(myFixture.getCaretOffset());
+      assertNotNull(elementAtCaret);
+      final PyStatement statement = PsiTreeUtil.getParentOfType(elementAtCaret, PyStatement.class, false);
+      assertNotNull(statement);
+      final CodeStyleManager codeStyleManager = CodeStyleManager.getInstance(myFixture.getProject());
+      codeStyleManager.reformat(statement);
     });
     myFixture.checkResultByFile("formatter/" + getTestName(true) + "_after.py");
   }
@@ -579,35 +573,46 @@ public class PyFormatterTest extends PyTestCase {
 
   // PY-14962
   public void testAlignDictLiteralOnValue() {
-    getPythonCodeStyle().DICT_ALIGNMENT = PyCodeStyleSettings.DICT_ALIGNMENT_ON_VALUE;
+    getPythonCodeStyleSettings().DICT_ALIGNMENT = PyCodeStyleSettings.DICT_ALIGNMENT_ON_VALUE;
     doTest();
   }
 
   // PY-14962
   public void testAlignDictLiteralOnColon() {
-    getPythonCodeStyle().DICT_ALIGNMENT = PyCodeStyleSettings.DICT_ALIGNMENT_ON_COLON;
+    getPythonCodeStyleSettings().DICT_ALIGNMENT = PyCodeStyleSettings.DICT_ALIGNMENT_ON_COLON;
     doTest();
   }
 
   // PY-14962
   public void testDictWrappingChopDownIfLong() {
     getCodeStyleSettings().setRightMargin(PythonLanguage.getInstance(), 80);
-    getPythonCodeStyle().DICT_WRAPPING = WrapType.CHOP_DOWN_IF_LONG.getLegacyRepresentation();
+    getPythonCodeStyleSettings().DICT_WRAPPING = WrapType.CHOP_DOWN_IF_LONG.getLegacyRepresentation();
     doTest();
   }
 
   // PY-14962
   public void testForceNewLineAfterLeftBraceInDict() {
-    getPythonCodeStyle().DICT_NEW_LINE_AFTER_LEFT_BRACE = true;
+    getPythonCodeStyleSettings().DICT_NEW_LINE_AFTER_LEFT_BRACE = true;
     doTest();
   }
 
   // PY-14962
   public void testForceNewLineBeforeRightBraceInDict() {
-    getPythonCodeStyle().DICT_NEW_LINE_BEFORE_RIGHT_BRACE = true;
+    getPythonCodeStyleSettings().DICT_NEW_LINE_BEFORE_RIGHT_BRACE = true;
+    doTest();
+  }
+  
+  // PY-17674
+  public void testForceNewLineBeforeRightBraceInDictAfterColon() {
+    getPythonCodeStyleSettings().DICT_NEW_LINE_BEFORE_RIGHT_BRACE = true;
     doTest();
   }
 
+  // PY-16393
+  public void testHangingIndentDetectionIgnoresComments() {
+    doTest();
+  }
+  
   // PY-15530
   public void testAlignmentInArgumentListWhereFirstArgumentIsEmptyCall() {
     doTest();
@@ -631,11 +636,28 @@ public class PyFormatterTest extends PyTestCase {
   }
 
   public void testDoNotDestroyAlignment_OnPostponedFormatting() throws Exception {
-    getPythonCodeStyle().DICT_ALIGNMENT = PyCodeStyleSettings.DICT_ALIGNMENT_ON_COLON;
+    getPythonCodeStyleSettings().DICT_ALIGNMENT = PyCodeStyleSettings.DICT_ALIGNMENT_ON_COLON;
     doTest();
   }
 
   public void testAlignmentOfEmptyCollectionLiterals() {
+    doTest();
+  }
+
+  // PY-17593
+  public void testBlanksBetweenImportsPreservedWithoutOptimizeImports() {
+    doTest();
+  }
+
+  // PY-17979, PY-13304
+  public void testContinuationIndentBeforeFunctionArguments() {
+    getPythonCodeStyleSettings().USE_CONTINUATION_INDENT_FOR_ARGUMENTS = true;
+    doTest();
+  }
+
+  // PY-18265
+  public void testNoSpaceAroundPowerOperator() {
+    getPythonCodeStyleSettings().SPACE_AROUND_POWER_OPERATOR = false;
     doTest();
   }
 }

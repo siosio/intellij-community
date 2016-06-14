@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package git4idea.commands;
 
+import com.intellij.concurrency.JobScheduler;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
@@ -23,6 +24,7 @@ import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.text.StringUtil;
@@ -31,27 +33,21 @@ import git4idea.GitVcs;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.Timer;
-import java.util.TimerTask;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * A Task to run the given GitHandler with ability to cancel it.
+ * All Git commands are cancellable when called via {@link GitHandler}. <br/>
+ * To execute the command synchronously, call {@link GitHandler#runInCurrentThread(Runnable)}
+ * or better {@link Git#runCommand(Computable)}.<br/>
+ * To execute in the background or under a modal progress, use the standard {@link Task}. <br/>
+ * To watch the progress, call {@link GitStandardProgressAnalyzer#createListener(ProgressIndicator)}.
  *
- * <b>Cancellation</b> is implemented with a {@link java.util.Timer} which checks whether the ProgressIndicator was cancelled and kills
- * the GitHandler in that case.
- *
- * A GitTask may be executed synchronously ({@link #executeModal()} or asynchronously ({@link #executeAsync(GitTask.ResultHandler)}.
- * Result of the execution is encapsulated in {@link GitTaskResult}.
- *
- * <p>
- * <b>GitTaskResultHandler</b> is called from AWT-thread. Use {@link #setExecuteResultInAwt(boolean) setExecuteResultInAwt(false)}
- * to execute the result {@link com.intellij.openapi.application.Application#executeOnPooledThread(Runnable) on the pooled thread}.
- * </p>
- *
- * @author Kirill Likhodedov
+ * @deprecated To remove in IDEA 2017.
  */
+@Deprecated
 public class GitTask {
 
   private static final Logger LOG = Logger.getInstance(GitTask.class);
@@ -72,16 +68,9 @@ public class GitTask {
    * Executes this task synchronously, with a modal progress dialog.
    * @return Result of the task execution.
    */
+  @SuppressWarnings("unused")
   public GitTaskResult executeModal() {
     return execute(true);
-  }
-
-  /**
-   * Executes the task synchronously, with a modal progress dialog.
-   * @param resultHandler callback which will be called after task execution.
-   */
-  public void executeModal(GitTaskResultHandler resultHandler) {
-    execute(true, true, resultHandler);
   }
 
   /**
@@ -128,6 +117,11 @@ public class GitTask {
           completed.set(true);
         }
         @Override public void onCancel() {
+          commonOnCancel(LOCK, resultHandler);
+          completed.set(true);
+        }
+        @Override public void onError(@NotNull Exception error) {
+          super.onError(error);
           commonOnCancel(LOCK, resultHandler);
           completed.set(true);
         }
@@ -265,7 +259,7 @@ public class GitTask {
   // To minimize code duplication we use GitTaskDelegate.
 
   private abstract class BackgroundableTask extends Task.Backgroundable implements TaskExecution {
-    private GitTaskDelegate myDelegate;
+    private final GitTaskDelegate myDelegate;
 
     public BackgroundableTask(@Nullable final Project project, @NotNull GitHandler handler, @NotNull final String processTitle) {
       super(project, processTitle, true);
@@ -315,7 +309,7 @@ public class GitTask {
   }
 
   private abstract class ModalTask extends Task.Modal implements TaskExecution {
-    private GitTaskDelegate myDelegate;
+    private final GitTaskDelegate myDelegate;
 
     public ModalTask(@Nullable final Project project, @NotNull GitHandler handler, @NotNull final String processTitle) {
       super(project, processTitle, true);
@@ -340,16 +334,16 @@ public class GitTask {
   }
 
   /**
-   * Does the work which is common for BackgrounableTask and ModalTask.
+   * Does the work which is common for BackgroundableTask and ModalTask.
    * Actually - starts a timer which checks if current progress indicator is cancelled.
    * If yes, kills the GitHandler.
    */
   private static class GitTaskDelegate implements Disposable {
-    private GitHandler myHandler;
+    private final GitHandler myHandler;
     private ProgressIndicator myIndicator;
-    private TaskExecution myTask;
-    private Timer myTimer;
-    private Project myProject;
+    private final TaskExecution myTask;
+    private ScheduledFuture<?> myTimer;
+    private final Project myProject;
 
     public GitTaskDelegate(Project project, GitHandler handler, TaskExecution task) {
       myProject = project;
@@ -360,27 +354,26 @@ public class GitTask {
 
     public void run(ProgressIndicator indicator) {
       myIndicator = indicator;
-      myTimer = new Timer();
-      myTimer.schedule(new TimerTask() {
-        @Override
-        public void run() {
+      myTimer = JobScheduler.getScheduler().scheduleWithFixedDelay(
+        ()-> {
           if (myIndicator != null && myIndicator.isCanceled()) {
             try {
               if (myHandler != null) {
                 myHandler.destroyProcess();
               }
-            } finally {
-              Disposer.dispose(GitTaskDelegate.this);
+            }
+            finally {
+              Disposer.dispose(this);
             }
           }
-        }
-      }, 0, 200);
+      }, 0, 200, TimeUnit.MILLISECONDS);
       myTask.execute(indicator);
     }
 
+    @Override
     public void dispose() {
       if (myTimer != null) {
-        myTimer.cancel();
+        myTimer.cancel(false);
       }
     }
   }

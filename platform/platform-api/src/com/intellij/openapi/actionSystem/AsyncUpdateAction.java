@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 package com.intellij.openapi.actionSystem;
 
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.util.ConcurrencyUtil;
+import com.intellij.util.concurrency.AppExecutorUtil;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
@@ -31,7 +31,7 @@ import java.util.concurrent.ExecutorService;
 public abstract class AsyncUpdateAction<T> extends AnAction {
   private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.actionSystem.AsyncUpdateAction");
 
-  private static final ExecutorService ourUpdaterService = ConcurrencyUtil.newSingleThreadExecutor("Action Updater");
+  private static final ExecutorService ourUpdaterService = AppExecutorUtil.createBoundedApplicationPoolExecutor(1);
 
   // Async update
   @Override
@@ -40,22 +40,16 @@ public abstract class AsyncUpdateAction<T> extends AnAction {
     final Presentation originalPresentation = e.getPresentation();
     if (!forceSyncUpdate(e) && isDumbAware()) {
       final Presentation realPresentation = originalPresentation.clone();
-      ourUpdaterService.submit(new Runnable() {
-        @Override
-        public void run() {
-          performUpdate(realPresentation, data);
-          SwingUtilities.invokeLater(new Runnable() {
-            @Override
-            public void run() {
-              if (originalPresentation.isVisible() != realPresentation.isVisible()) {
-                LOG.error("Async update is not supported for actions that change their visibility." +
-                          "Either stop extending AsyncUpdateAction or override forceSyncUpdate() to return true." +
-                          "Action class is: " + AsyncUpdateAction.this.getClass().getName());
-              }
-              originalPresentation.copyFrom(realPresentation);
-            }
-          });
-        }
+      ourUpdaterService.submit(() -> {
+        performUpdate(realPresentation, data);
+        SwingUtilities.invokeLater(() -> {
+          if (originalPresentation.isVisible() != realPresentation.isVisible()) {
+            LOG.error("Async update is not supported for actions that change their visibility." +
+                      "Either stop extending AsyncUpdateAction or override forceSyncUpdate() to return true." +
+                      "Action class is: " + AsyncUpdateAction.this.getClass().getName());
+          }
+          originalPresentation.copyFrom(realPresentation);
+        });
       });
 
       originalPresentation.setVisible(true);

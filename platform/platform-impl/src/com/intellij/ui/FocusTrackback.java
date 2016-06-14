@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -216,32 +216,21 @@ public class FocusTrackback {
       final IdeFocusManager focusManager = IdeFocusManager.getInstance(project);
       cleanParentWindow();
       final Project finalProject = project;
-      focusManager.requestFocus(new MyFocusCommand(), myForcedRestore).doWhenProcessed(new Runnable() {
-        public void run() {
-          dispose();
-        }
-      }).doWhenRejected(new Runnable() {
+      focusManager.requestFocus(new MyFocusCommand(), myForcedRestore).doWhenProcessed(() -> dispose()).doWhenRejected(() -> focusManager.revalidateFocus(new ExpirableRunnable.ForProject(finalProject) {
         @Override
         public void run() {
-          focusManager.revalidateFocus(new ExpirableRunnable.ForProject(finalProject) {
-            @Override
-            public void run() {
-              if (UIUtil.isMeaninglessFocusOwner(focusManager.getFocusOwner())) {
-                focusManager.requestDefaultFocus(false);
-              }
-            }
-          });
+          if (UIUtil.isMeaninglessFocusOwner(focusManager.getFocusOwner())) {
+            focusManager.requestDefaultFocus(false);
+          }
         }
-      });
+      }));
     }
     else {
       // no ide focus manager, so no way -- do just later
       //noinspection SSBasedInspection
-      SwingUtilities.invokeLater(new Runnable() {
-        public void run() {
-          _restoreFocus();
-          dispose();
-        }
+      SwingUtilities.invokeLater(() -> {
+        _restoreFocus();
+        dispose();
       });
     }
   }
@@ -249,7 +238,7 @@ public class FocusTrackback {
   private ActionCallback _restoreFocus() {
     final List<FocusTrackback> stack = getCleanStack();
 
-    if (!stack.contains(this)) return new ActionCallback.Rejected();
+    if (!stack.contains(this)) return ActionCallback.REJECTED;
 
     Component toFocus = queryToFocus(stack, this, true);
 
@@ -268,11 +257,11 @@ public class FocusTrackback {
       if (myParentWindow != null) {
         final Window to = UIUtil.getWindow(toFocus);
         if (to != null && UIUtil.findUltimateParent(to) == UIUtil.findUltimateParent(myParentWindow)) {  // IDEADEV-34537
-          toFocus.requestFocus();
+          requestFocus(toFocus);
           result.setDone();
         }
       } else {
-        toFocus.requestFocus();
+        requestFocus(toFocus);
         result.setDone();
       }
     }
@@ -285,6 +274,14 @@ public class FocusTrackback {
     dispose();
 
     return result;
+  }
+
+  private void requestFocus(Component toFocus) {
+    if (myForcedRestore) {
+      toFocus.requestFocus();
+    } else {
+      toFocus.requestFocusInWindow();
+    }
   }
 
   private static Component queryToFocus(final List<FocusTrackback> stack, final FocusTrackback trackback, boolean mustBeLastInStack) {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,7 +51,7 @@ public class JavaFindUsagesHelper {
   private static final Logger LOG = Logger.getInstance("#com.intellij.find.findUsages.JavaFindUsagesHelper");
 
   @NotNull
-  static Set<String> getElementNames(@NotNull final PsiElement element) {
+  public static Set<String> getElementNames(@NotNull final PsiElement element) {
     if (element instanceof PsiDirectory) {  // normalize a directory to a corresponding package
       PsiPackage aPackage = ApplicationManager.getApplication().runReadAction(new Computable<PsiPackage>() {
         @Override
@@ -64,47 +64,44 @@ public class JavaFindUsagesHelper {
 
     final Set<String> result = new HashSet<String>();
 
-    ApplicationManager.getApplication().runReadAction(new Runnable() {
-      @Override
-      public void run() {
-        if (element instanceof PsiPackage) {
-          ContainerUtil.addIfNotNull(result, ((PsiPackage)element).getQualifiedName());
-        }
-        else if (element instanceof PsiClass) {
-          final String qname = ((PsiClass)element).getQualifiedName();
-          if (qname != null) {
-            result.add(qname);
-            PsiClass topLevelClass = PsiUtil.getTopLevelClass(element);
-            if (topLevelClass != null) {
-              String topName = topLevelClass.getQualifiedName();
-              assert topName != null;
-              if (qname.length() > topName.length()) {
-                result.add(topName + qname.substring(topName.length()).replace('.', '$'));
-              }
+    ApplicationManager.getApplication().runReadAction(() -> {
+      if (element instanceof PsiPackage) {
+        ContainerUtil.addIfNotNull(result, ((PsiPackage)element).getQualifiedName());
+      }
+      else if (element instanceof PsiClass) {
+        final String qname = ((PsiClass)element).getQualifiedName();
+        if (qname != null) {
+          result.add(qname);
+          PsiClass topLevelClass = PsiUtil.getTopLevelClass(element);
+          if (topLevelClass != null) {
+            String topName = topLevelClass.getQualifiedName();
+            assert topName != null;
+            if (qname.length() > topName.length()) {
+              result.add(topName + qname.substring(topName.length()).replace('.', '$'));
             }
           }
         }
-        else if (element instanceof PsiMethod) {
-          ContainerUtil.addIfNotNull(result, ((PsiMethod)element).getName());
+      }
+      else if (element instanceof PsiMethod) {
+        ContainerUtil.addIfNotNull(result, ((PsiMethod)element).getName());
+      }
+      else if (element instanceof PsiVariable) {
+        ContainerUtil.addIfNotNull(result, ((PsiVariable)element).getName());
+      }
+      else if (element instanceof PsiMetaOwner) {
+        final PsiMetaData metaData = ((PsiMetaOwner)element).getMetaData();
+        if (metaData != null) {
+          ContainerUtil.addIfNotNull(result, metaData.getName());
         }
-        else if (element instanceof PsiVariable) {
-          ContainerUtil.addIfNotNull(result, ((PsiVariable)element).getName());
-        }
-        else if (element instanceof PsiMetaOwner) {
-          final PsiMetaData metaData = ((PsiMetaOwner)element).getMetaData();
-          if (metaData != null) {
-            ContainerUtil.addIfNotNull(result, metaData.getName());
-          }
-        }
-        else if (element instanceof PsiNamedElement) {
-          ContainerUtil.addIfNotNull(result, ((PsiNamedElement)element).getName());
-        }
-        else if (element instanceof XmlAttributeValue) {
-          ContainerUtil.addIfNotNull(result, ((XmlAttributeValue)element).getValue());
-        }
-        else {
-          LOG.error("Unknown element type: " + element);
-        }
+      }
+      else if (element instanceof PsiNamedElement) {
+        ContainerUtil.addIfNotNull(result, ((PsiNamedElement)element).getName());
+      }
+      else if (element instanceof XmlAttributeValue) {
+        ContainerUtil.addIfNotNull(result, ((XmlAttributeValue)element).getValue());
+      }
+      else {
+        LOG.error("Unknown element type: " + element);
       }
     });
 
@@ -121,16 +118,13 @@ public class JavaFindUsagesHelper {
           if (!addElementUsages(element, options, processor)) return false;
         }
         else{
-          if (!addElementUsages(element, varOptions, new Processor<UsageInfo>() {
-            @Override
-            public boolean process(UsageInfo info) {
-              final PsiElement element = info.getElement();
-              boolean isWrite = element instanceof PsiExpression && PsiUtil.isAccessedForWriting((PsiExpression)element);
-              if (isWrite == varOptions.isWriteAccess) {
-                if (!processor.process(info)) return false;
-              }
-              return true;
+          if (!addElementUsages(element, varOptions, info -> {
+            final PsiElement element1 = info.getElement();
+            boolean isWrite = element1 instanceof PsiExpression && PsiUtil.isAccessedForWriting((PsiExpression)element1);
+            if (isWrite == varOptions.isWriteAccess) {
+              if (!processor.process(info)) return false;
             }
+            return true;
           })) return false;
         }
       }
@@ -294,31 +288,35 @@ public class JavaFindUsagesHelper {
       progress.pushState();
     }
 
-    List<PsiClass> classes = new ArrayList<PsiClass>();
-    addClassesInPackage(aPackage, options.isIncludeSubpackages, classes);
-    for (final PsiClass aClass : classes) {
-      if (progress != null) {
-        String name = ApplicationManager.getApplication().runReadAction(new Computable<String>() {
+    try {
+      List<PsiClass> classes = new ArrayList<PsiClass>();
+      addClassesInPackage(aPackage, options.isIncludeSubpackages, classes);
+      for (final PsiClass aClass : classes) {
+        if (progress != null) {
+          String name = ApplicationManager.getApplication().runReadAction(new Computable<String>() {
+            @Override
+            public String compute() {
+              return aClass.getName();
+            }
+          });
+          progress.setText(FindBundle.message("find.searching.for.references.to.class.progress", name));
+          progress.checkCanceled();
+        }
+        boolean success = ReferencesSearch.search(new ReferencesSearch.SearchParameters(aClass, options.searchScope, false, options.fastTrack)).forEach(new ReadActionProcessor<PsiReference>() {
           @Override
-          public String compute() {
-            return aClass.getName();
+          public boolean processInReadAction(final PsiReference psiReference) {
+            return addResult(psiReference, options, processor);
           }
         });
-        progress.setText(FindBundle.message("find.searching.for.references.to.class.progress", name));
-        progress.checkCanceled();
+        if (!success) return false;
       }
-      boolean success = ReferencesSearch.search(new ReferencesSearch.SearchParameters(aClass, options.searchScope, false, options.fastTrack)).forEach(new ReadActionProcessor<PsiReference>() {
-        @Override
-        public boolean processInReadAction(final PsiReference psiReference) {
-          return addResult(psiReference, options, processor);
-        }
-      });
-      if (!success) return false;
+    }
+    finally {
+      if (progress != null){
+        progress.popState();
+      }
     }
 
-    if (progress != null){
-      progress.popState();
-    }
     return true;
   }
 
@@ -337,16 +335,13 @@ public class JavaFindUsagesHelper {
   private static void addClassesInDirectory(@NotNull final PsiDirectory dir,
                                             final boolean includeSubdirs,
                                             @NotNull final List<PsiClass> array) {
-    ApplicationManager.getApplication().runReadAction(new Runnable() {
-      @Override
-      public void run() {
-        PsiClass[] classes = JavaDirectoryService.getInstance().getClasses(dir);
-        ContainerUtil.addAll(array, classes);
-        if (includeSubdirs) {
-          PsiDirectory[] dirs = dir.getSubdirectories();
-          for (PsiDirectory directory : dirs) {
-            addClassesInDirectory(directory, includeSubdirs, array);
-          }
+    ApplicationManager.getApplication().runReadAction(() -> {
+      PsiClass[] classes = JavaDirectoryService.getInstance().getClasses(dir);
+      ContainerUtil.addAll(array, classes);
+      if (includeSubdirs) {
+        PsiDirectory[] dirs = dir.getSubdirectories();
+        for (PsiDirectory directory : dirs) {
+          addClassesInDirectory(directory, true, array);
         }
       }
     });

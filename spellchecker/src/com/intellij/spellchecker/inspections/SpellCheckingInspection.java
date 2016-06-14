@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
  */
 package com.intellij.spellchecker.inspections;
 
-import com.intellij.codeHighlighting.HighlightDisplayLevel;
 import com.intellij.codeInspection.*;
 import com.intellij.codeInspection.ui.SingleCheckboxOptionsPanel;
 import com.intellij.lang.*;
@@ -30,7 +29,6 @@ import com.intellij.spellchecker.tokenizer.*;
 import com.intellij.spellchecker.util.SpellCheckerBundle;
 import com.intellij.util.Consumer;
 import gnu.trove.THashSet;
-import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -41,20 +39,6 @@ import java.util.Set;
 
 public class SpellCheckingInspection extends LocalInspectionTool {
   public static final String SPELL_CHECKING_INSPECTION_TOOL_NAME = "SpellCheckingInspection";
-
-  @Override
-  @Nls
-  @NotNull
-  public String getGroupDisplayName() {
-    return SpellCheckerBundle.message("spelling");
-  }
-
-  @Override
-  @Nls
-  @NotNull
-  public String getDisplayName() {
-    return SpellCheckerBundle.message("spellchecking.inspection.name");
-  }
 
   @NotNull
   @Override
@@ -96,17 +80,6 @@ public class SpellCheckingInspection extends LocalInspectionTool {
   }
 
   @Override
-  public boolean isEnabledByDefault() {
-    return true;
-  }
-
-  @Override
-  @NotNull
-  public HighlightDisplayLevel getDefaultLevel() {
-    return SpellCheckerManager.getHighlightDisplayLevel();
-  }
-
-  @Override
   @NotNull
   public PsiElementVisitor buildVisitor(@NotNull final ProblemsHolder holder, final boolean isOnTheFly) {
     final SpellCheckerManager manager = SpellCheckerManager.getInstance(holder.getProject());
@@ -119,6 +92,7 @@ public class SpellCheckingInspection extends LocalInspectionTool {
         if (node == null) {
           return;
         }
+
         // Extract parser definition from element
         final Language language = element.getLanguage();
         final IElementType elementType = node.getElementType();
@@ -192,7 +166,7 @@ public class SpellCheckingInspection extends LocalInspectionTool {
     }
     assert textRange.getStartOffset() >= 0;
 
-    final String description = SpellCheckerBundle.message("typo.in.word.ref", wordWithTypo);
+    final String description = SpellCheckerBundle.message("typo.in.word.ref");
     return holder.getManager()
       .createProblemDescriptor(element, textRange, description, ProblemHighlightType.GENERIC_ERROR_OR_WARNING, onTheFly, fixes);
   }

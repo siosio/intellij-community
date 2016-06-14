@@ -39,12 +39,16 @@ public abstract class ApplicationActionBase<T extends CloudApplicationRuntime> e
     return DeploymentNode.class;
   }
 
+  protected Deployment getDeployment(DeploymentNode node) {
+    return ObjectUtils.tryCast(node.getValue(), Deployment.class);
+  }
+
   protected T getApplicationRuntime(DeploymentNode node) {
-    Object nodeValue = node.getValue();
-    if (!(nodeValue instanceof Deployment)) {
+    Deployment deployment = getDeployment(node);
+    if (deployment == null) {
       return null;
     }
-    DeploymentRuntime deploymentRuntime = ((Deployment)nodeValue).getRuntime();
+    DeploymentRuntime deploymentRuntime = deployment.getRuntime();
     return ObjectUtils.tryCast(deploymentRuntime, getApplicationRuntimeClass());
   }
 
@@ -84,13 +88,7 @@ public abstract class ApplicationActionBase<T extends CloudApplicationRuntime> e
         return;
       }
 
-      ApplicationManager.getApplication().invokeLater(new Runnable() {
-
-        @Override
-        public void run() {
-          myContent.select(connection, deployment.getName(), myLogName);
-        }
-      });
+      ApplicationManager.getApplication().invokeLater(() -> myContent.select(connection, deployment.getName(), myLogName));
     }
 
     private Deployment findDeployment(ServerConnection<?> connection) {

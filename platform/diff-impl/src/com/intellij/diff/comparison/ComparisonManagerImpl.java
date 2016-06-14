@@ -39,6 +39,7 @@ public class ComparisonManagerImpl extends ComparisonManager {
   public static final Logger LOG = Logger.getInstance(ComparisonManagerImpl.class);
 
   @NotNull
+  @Override
   public List<LineFragment> compareLines(@NotNull CharSequence text1,
                                          @NotNull CharSequence text2,
                                          @NotNull ComparisonPolicy policy,
@@ -52,21 +53,14 @@ public class ComparisonManagerImpl extends ComparisonManager {
   }
 
   @NotNull
+  @Override
   public List<LineFragment> compareLinesInner(@NotNull CharSequence text1,
                                               @NotNull CharSequence text2,
                                               @NotNull ComparisonPolicy policy,
                                               @NotNull ProgressIndicator indicator) throws DiffTooBigException {
-    List<LineFragment> fragments = compareLines(text1, text2, policy, indicator);
-    return compareLinesInner(text1, text2, fragments, policy, indicator);
-  }
+    List<LineFragment> lineFragments = compareLines(text1, text2, policy, indicator);
 
-  @NotNull
-  public List<LineFragment> compareLinesInner(@NotNull CharSequence text1,
-                                              @NotNull CharSequence text2,
-                                              @NotNull List<LineFragment> lineFragments,
-                                              @NotNull ComparisonPolicy policy,
-                                              @NotNull ProgressIndicator indicator) throws DiffTooBigException {
-    List<LineFragment> fineFragments = new ArrayList<LineFragment>(lineFragments.size());
+    List<LineFragment> fineFragments = new ArrayList<>(lineFragments.size());
     int tooBigChunksCount = 0;
 
     for (LineFragment fragment : lineFragments) {
@@ -74,7 +68,7 @@ public class ComparisonManagerImpl extends ComparisonManager {
       CharSequence subSequence2 = text2.subSequence(fragment.getStartOffset2(), fragment.getEndOffset2());
 
       if (fragment.getStartLine1() == fragment.getEndLine1() ||
-          fragment.getStartLine2() == fragment.getEndLine2()) { // Do not try to build fine blocks after few fails)
+          fragment.getStartLine2() == fragment.getEndLine2()) { // Insertion / Deletion
         if (isEquals(subSequence1, subSequence2, policy)) {
           fineFragments.add(new LineFragmentImpl(fragment, Collections.<DiffFragment>emptyList()));
         }
@@ -121,11 +115,22 @@ public class ComparisonManagerImpl extends ComparisonManager {
         tooBigChunksCount++;
       }
     }
-
     return fineFragments;
   }
 
   @NotNull
+  @Override
+  @Deprecated
+  public List<LineFragment> compareLinesInner(@NotNull CharSequence text1,
+                                              @NotNull CharSequence text2,
+                                              @NotNull List<LineFragment> lineFragments,
+                                              @NotNull ComparisonPolicy policy,
+                                              @NotNull ProgressIndicator indicator) throws DiffTooBigException {
+    return compareLinesInner(text1, text2, policy, indicator);
+  }
+
+  @NotNull
+  @Override
   public List<DiffFragment> compareWords(@NotNull CharSequence text1,
                                          @NotNull CharSequence text2,
                                          @NotNull ComparisonPolicy policy,
@@ -134,6 +139,7 @@ public class ComparisonManagerImpl extends ComparisonManager {
   }
 
   @NotNull
+  @Override
   public List<DiffFragment> compareChars(@NotNull CharSequence text1,
                                          @NotNull CharSequence text2,
                                          @NotNull ComparisonPolicy policy,
@@ -148,17 +154,9 @@ public class ComparisonManagerImpl extends ComparisonManager {
     return convertIntoFragments(ByChar.compareTwoStep(text1, text2, indicator));
   }
 
+  @Override
   public boolean isEquals(@NotNull CharSequence text1, @NotNull CharSequence text2, @NotNull ComparisonPolicy policy) {
-    switch (policy) {
-      case DEFAULT:
-        return StringUtil.equals(text1, text2);
-      case TRIM_WHITESPACES:
-        return StringUtil.equalsTrimWhitespaces(text1, text2);
-      case IGNORE_WHITESPACES:
-        return StringUtil.equalsIgnoreWhitespaces(text1, text2);
-      default:
-        throw new IllegalArgumentException(policy.name());
-    }
+    return ComparisonUtil.isEquals(text1, text2, policy);
   }
 
   //
@@ -166,20 +164,17 @@ public class ComparisonManagerImpl extends ComparisonManager {
   //
 
   @NotNull
+  @Override
   public List<LineFragment> squash(@NotNull List<LineFragment> oldFragments) {
     if (oldFragments.isEmpty()) return oldFragments;
 
-    final List<LineFragment> newFragments = new ArrayList<LineFragment>();
-    processAdjoining(oldFragments, new Consumer<List<LineFragment>>() {
-      @Override
-      public void consume(List<LineFragment> fragments) {
-        newFragments.add(doSquash(fragments));
-      }
-    });
+    final List<LineFragment> newFragments = new ArrayList<>();
+    processAdjoining(oldFragments, fragments -> newFragments.add(doSquash(fragments)));
     return newFragments;
   }
 
   @NotNull
+  @Override
   public List<LineFragment> processBlocks(@NotNull List<LineFragment> oldFragments,
                                           @NotNull final CharSequence text1, @NotNull final CharSequence text2,
                                           @NotNull final ComparisonPolicy policy,
@@ -187,13 +182,8 @@ public class ComparisonManagerImpl extends ComparisonManager {
     if (!squash && !trim) return oldFragments;
     if (oldFragments.isEmpty()) return oldFragments;
 
-    final List<LineFragment> newFragments = new ArrayList<LineFragment>();
-    processAdjoining(oldFragments, new Consumer<List<LineFragment>>() {
-      @Override
-      public void consume(List<LineFragment> fragments) {
-        newFragments.addAll(processAdjoining(fragments, text1, text2, policy, squash, trim));
-      }
-    });
+    final List<LineFragment> newFragments = new ArrayList<>();
+    processAdjoining(oldFragments, fragments -> newFragments.addAll(processAdjoining(fragments, text1, text2, policy, squash, trim)));
     return newFragments;
   }
 
@@ -259,7 +249,7 @@ public class ComparisonManagerImpl extends ComparisonManager {
     LineFragment firstFragment = oldFragments.get(0);
     LineFragment lastFragment = oldFragments.get(oldFragments.size() - 1);
 
-    List<DiffFragment> newInnerFragments = new ArrayList<DiffFragment>();
+    List<DiffFragment> newInnerFragments = new ArrayList<>();
     for (LineFragment fragment : oldFragments) {
       for (DiffFragment innerFragment : extractInnerFragments(fragment)) {
         int shift1 = fragment.getStartOffset1() - firstFragment.getStartOffset1();

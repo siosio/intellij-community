@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ import org.jetbrains.plugins.groovy.lang.psi.api.types.GrTypeElement;
  * @author ven
  */
 public abstract class GrReferenceElementImpl<Q extends PsiElement> extends GroovyPsiElementImpl implements GrReferenceElement<Q> {
-  private volatile String myCachedQName = null;
+  private volatile String myCachedQName;
   private volatile String myCachedTextSkipWhiteSpaceAndComments;
 
   public GrReferenceElementImpl(@NotNull ASTNode node) {
@@ -193,7 +193,7 @@ public abstract class GrReferenceElementImpl<Q extends PsiElement> extends Groov
     return cachedQName;
   }
 
-  protected String getTextSkipWhiteSpaceAndComments() {
+  public String getTextSkipWhiteSpaceAndComments() {
     String whiteSpaceAndComments = myCachedTextSkipWhiteSpaceAndComments;
     if (whiteSpaceAndComments == null) {
       myCachedTextSkipWhiteSpaceAndComments = whiteSpaceAndComments = PsiImplUtil.getTextSkipWhiteSpaceAndComments(getNode());

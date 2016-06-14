@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -87,7 +87,12 @@ public class DefaultKeymap {
       return KeymapManager.MAC_OS_X_KEYMAP;
     }
     else if (SystemInfo.isXWindow) {
-      return KeymapManager.X_WINDOW_KEYMAP;
+      if (SystemInfo.isKDE) {
+        return KeymapManager.KDE_KEYMAP;
+      }
+      else {
+        return KeymapManager.X_WINDOW_KEYMAP;
+      }
     }
     else {
       return KeymapManager.DEFAULT_IDEA_KEYMAP;
@@ -96,6 +101,12 @@ public class DefaultKeymap {
 
   public String getKeymapPresentableName(@NotNull KeymapImpl keymap) {
     String name = keymap.getName();
+
+    // Netbeans keymap is no longer for version 6.5, but we need to keep the id
+    if ("NetBeans 6.5".equals(name)) {
+      return "NetBeans";
+    }
+
     return KeymapManager.DEFAULT_IDEA_KEYMAP.equals(name) ? "Default" : name;
   }
 }

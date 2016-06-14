@@ -18,6 +18,7 @@ package com.intellij.refactoring.rename.inplace;
 import com.intellij.codeInsight.TargetElementUtil;
 import com.intellij.lang.findUsages.DescriptiveNameUtil;
 import com.intellij.lang.injection.InjectedLanguageManager;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.command.impl.FinishMarkAction;
 import com.intellij.openapi.command.impl.StartMarkAction;
@@ -41,6 +42,7 @@ import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.rename.RenameProcessor;
 import com.intellij.refactoring.rename.RenamePsiElementProcessor;
 import com.intellij.refactoring.rename.naming.AutomaticRenamerFactory;
+import com.intellij.refactoring.util.TextOccurrencesUtil;
 import com.intellij.usageView.UsageViewUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -78,6 +80,7 @@ public class MemberInplaceRenamer extends VariableInplaceRenamer {
     showDialogAdvertisement("RenameElement");
   }
 
+  @NotNull
   @Override
   protected VariableInplaceRenamer createInplaceRenamerToRestart(PsiNamedElement variable, Editor editor, String initialName) {
     return new MemberInplaceRenamer(variable, getSubstituted(), editor, initialName, myOldName);
@@ -206,15 +209,22 @@ public class MemberInplaceRenamer extends VariableInplaceRenamer {
             return;
           }
 
-          final String commandName = RefactoringBundle
-            .message("renaming.0.1.to.2", UsageViewUtil.getType(variable), DescriptiveNameUtil.getDescriptiveName(variable), newName);
-          CommandProcessor.getInstance().executeCommand(myProject, new Runnable() {
-            @Override
-            public void run() {
+          Runnable performRunnable = () -> {
+            final String commandName = RefactoringBundle.message("renaming.0.1.to.2",
+                                                                 UsageViewUtil.getType(variable),
+                                                                 DescriptiveNameUtil.getDescriptiveName(variable), newName);
+            CommandProcessor.getInstance().executeCommand(myProject, () -> {
               performRenameInner(substituted, newName);
               PsiDocumentManager.getInstance(myProject).commitAllDocuments();
-            }
-          }, commandName, null);
+            }, commandName, null);
+          };
+
+          if (ApplicationManager.getApplication().isUnitTestMode()) {
+            performRunnable.run();
+          }
+          else {
+            ApplicationManager.getApplication().invokeLater(performRunnable);
+          }
         }
       }
     }
@@ -229,33 +239,17 @@ public class MemberInplaceRenamer extends VariableInplaceRenamer {
   }
 
   protected void performRenameInner(PsiElement element, String newName) {
-    final RenamePsiElementProcessor elementProcessor = RenamePsiElementProcessor.forElement(element);
-    final RenameProcessor
-      renameProcessor = new RenameProcessor(myProject, element, newName,
-                                            elementProcessor.isToSearchInComments(element),
-                                            elementProcessor.isToSearchForTextOccurrences(element)){
-      @Nullable
-      @Override
-      protected String getRefactoringId() {
-        return "refactoring.inplace.rename";
-      }
-
-      @Override
-      public void doRun() {
-        try {
-          super.doRun();
-        }
-        finally {
-          restoreCaretOffsetAfterRename();
-        }
-      }
-    };
+    final RenameProcessor renameProcessor = createRenameProcessor(element, newName);
     for (AutomaticRenamerFactory factory : Extensions.getExtensions(AutomaticRenamerFactory.EP_NAME)) {
       if (factory.getOptionName() != null && factory.isApplicable(element)) {
         renameProcessor.addRenamerFactory(factory);
       }
     }
     renameProcessor.run();
+  }
+
+  protected RenameProcessor createRenameProcessor(PsiElement element, String newName) {
+    return new MyRenameProcessor(element, newName);
   }
 
   protected void restoreCaretOffsetAfterRename() {
@@ -298,5 +292,32 @@ public class MemberInplaceRenamer extends VariableInplaceRenamer {
       }
     }
     return getVariable();
+  }
+
+  protected class MyRenameProcessor extends RenameProcessor {
+    public MyRenameProcessor(PsiElement element, String newName) {
+      this(element, newName, RenamePsiElementProcessor.forElement(element));
+    }
+
+    public MyRenameProcessor(PsiElement element, String newName, RenamePsiElementProcessor elementProcessor) {
+      super(MemberInplaceRenamer.this.myProject, element, newName, elementProcessor.isToSearchInComments(element),
+            elementProcessor.isToSearchForTextOccurrences(element) && TextOccurrencesUtil.isSearchTextOccurencesEnabled(element));
+    }
+
+    @Nullable
+    @Override
+    protected String getRefactoringId() {
+      return "refactoring.inplace.rename";
+    }
+
+    @Override
+    public void doRun() {
+      try {
+        super.doRun();
+      }
+      finally {
+        restoreCaretOffsetAfterRename();
+      }
+    }
   }
 }

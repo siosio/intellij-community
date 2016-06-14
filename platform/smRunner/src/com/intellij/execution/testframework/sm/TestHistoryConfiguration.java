@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,9 +18,7 @@ package com.intellij.execution.testframework.sm;
 import com.intellij.execution.configurations.ConfigurationType;
 import com.intellij.execution.configurations.ConfigurationTypeUtil;
 import com.intellij.execution.testframework.sm.runner.history.actions.AbstractImportTestsAction;
-import com.intellij.execution.testframework.sm.runner.ui.SMTestRunnerResultsForm;
 import com.intellij.openapi.components.*;
-import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.project.Project;
 import com.intellij.util.xmlb.annotations.Attribute;
 import com.intellij.util.xmlb.annotations.MapAnnotation;
@@ -28,14 +26,11 @@ import com.intellij.util.xmlb.annotations.Property;
 import com.intellij.util.xmlb.annotations.Tag;
 
 import javax.swing.*;
-import java.util.HashMap;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-@State(
-  name = "TestHistory",
-  storages = {@Storage(
-    file = StoragePathMacros.WORKSPACE_FILE)})
+@State(name = "TestHistory", storages = @Storage(StoragePathMacros.WORKSPACE_FILE))
 public class TestHistoryConfiguration implements PersistentStateComponent<TestHistoryConfiguration.State> {
 
   public static class State {
@@ -78,6 +73,10 @@ public class TestHistoryConfiguration implements PersistentStateComponent<TestHi
     myState = state;
   }
   
+  public Collection<String> getFiles() {
+    return myState.getHistoryElements().keySet();
+  }
+  
   public String getConfigurationName(String file) {
     final ConfigurationBean bean = myState.getHistoryElements().get(file);
     return bean != null ? bean.name : null;
@@ -86,12 +85,8 @@ public class TestHistoryConfiguration implements PersistentStateComponent<TestHi
   public Icon getIcon(String file) {
     final ConfigurationBean bean = myState.getHistoryElements().get(file);
     if (bean != null) {
-      ConfigurationType[] types = Extensions.getExtensions(ConfigurationType.CONFIGURATION_TYPE_EP);
-      for (ConfigurationType type : types) {
-        if (type.getId().equals(bean.configurationId)) {
-          return type.getIcon();
-        }
-      }
+      ConfigurationType type = ConfigurationTypeUtil.findConfigurationType(bean.configurationId);
+      if (type != null) return type.getIcon();
     }
     return null;
   }

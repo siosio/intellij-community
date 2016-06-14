@@ -80,7 +80,7 @@ public class ResolvingElementQuickFix implements LocalQuickFix, IntentionAction 
   @Override
   @NotNull
   public String getFamilyName() {
-    return DomBundle.message("quick.fixes.family");
+    return DomBundle.message("create.new.element.family");
   }
 
   @Override
@@ -104,17 +104,12 @@ public class ResolvingElementQuickFix implements LocalQuickFix, IntentionAction 
   }
 
   private void applyFix() {
-    chooseParent(myParents, new Consumer<DomElement>() {
+    chooseParent(myParents, parent -> new WriteCommandAction.Simple(parent.getManager().getProject(), DomUtil.getFile(parent)) {
       @Override
-      public void consume(final DomElement parent) {
-        new WriteCommandAction.Simple(parent.getManager().getProject(), DomUtil.getFile(parent)) {
-          @Override
-          protected void run() throws Throwable {
-            doFix(parent, myChildDescription, myNewName);
-          }
-        }.execute();
+      protected void run() throws Throwable {
+        doFix(parent, myChildDescription, myNewName);
       }
-    });
+    }.execute());
   }
 
   protected DomElement doFix(DomElement parent, final DomCollectionChildDescription childDescription, String newName) {

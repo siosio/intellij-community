@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,10 @@ package com.intellij.notification.impl;
 import com.intellij.notification.NotificationDisplayType;
 import com.intellij.notification.NotificationGroup;
 import com.intellij.notification.NotificationsConfiguration;
-import com.intellij.openapi.components.*;
+import com.intellij.openapi.components.ApplicationComponent;
+import com.intellij.openapi.components.PersistentStateComponent;
+import com.intellij.openapi.components.State;
+import com.intellij.openapi.components.Storage;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.util.messages.MessageBus;
 import gnu.trove.THashMap;
@@ -37,7 +40,7 @@ import java.util.Map;
  */
 @State(
   name = "NotificationConfiguration",
-  storages = @Storage(file = StoragePathMacros.APP_CONFIG + "/notifications.xml")
+  storages = @Storage("notifications.xml")
 )
 public class NotificationsConfigurationImpl
     extends NotificationsConfiguration
@@ -47,12 +50,8 @@ public class NotificationsConfigurationImpl
   private static final String SHOW_BALLOONS_ATTRIBUTE = "showBalloons";
   private static final String SYSTEM_NOTIFICATIONS_ATTRIBUTE = "systemNotifications";
 
-  private static final Comparator<NotificationSettings> NOTIFICATION_SETTINGS_COMPARATOR = new Comparator<NotificationSettings>() {
-    @Override
-    public int compare(@NotNull NotificationSettings o1, @NotNull NotificationSettings o2) {
-      return o1.getGroupId().compareToIgnoreCase(o2.getGroupId());
-    }
-  };
+  private static final Comparator<NotificationSettings> NOTIFICATION_SETTINGS_COMPARATOR =
+    (o1, o2) -> o1.getGroupId().compareToIgnoreCase(o2.getGroupId());
 
   private final Map<String, NotificationSettings> myIdToSettingsMap = new THashMap<String, NotificationSettings>();
   private final Map<String, String> myToolWindowCapable = new THashMap<String, String>();

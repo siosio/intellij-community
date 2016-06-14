@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,7 +30,6 @@ import com.intellij.openapi.fileTypes.StdFileTypes;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.javadoc.PsiDocComment;
@@ -50,64 +49,57 @@ public class JavaTypedHandler extends TypedHandlerDelegate {
   private boolean myJavaLTTyped;
 
   private static void autoPopupMemberLookup(Project project, final Editor editor) {
-    AutoPopupController.getInstance(project).autoPopupMemberLookup(editor, new Condition<PsiFile>() {
-      @Override
-      public boolean value(final PsiFile file) {
-        int offset = editor.getCaretModel().getOffset();
+    AutoPopupController.getInstance(project).autoPopupMemberLookup(editor, file -> {
+      int offset = editor.getCaretModel().getOffset();
 
-        PsiElement lastElement = file.findElementAt(offset - 1);
-        if (lastElement == null) {
-          return false;
-        }
+      PsiElement lastElement = file.findElementAt(offset - 1);
+      if (lastElement == null) {
+        return false;
+      }
 
-        //do not show lookup when typing varargs ellipsis
-        final PsiElement prevSibling = PsiTreeUtil.prevVisibleLeaf(lastElement);
-        if (prevSibling == null || ".".equals(prevSibling.getText())) return false;
-        PsiElement parent = prevSibling;
-        do {
-          parent = parent.getParent();
-        } while(parent instanceof PsiJavaCodeReferenceElement || parent instanceof PsiTypeElement);
-        if (parent instanceof PsiParameterList || parent instanceof PsiParameter) return false;
+      //do not show lookup when typing varargs ellipsis
+      final PsiElement prevSibling = PsiTreeUtil.prevVisibleLeaf(lastElement);
+      if (prevSibling == null || ".".equals(prevSibling.getText())) return false;
+      PsiElement parent = prevSibling;
+      do {
+        parent = parent.getParent();
+      } while(parent instanceof PsiJavaCodeReferenceElement || parent instanceof PsiTypeElement);
+      if (parent instanceof PsiParameterList || parent instanceof PsiParameter) return false;
 
-        if (!".".equals(lastElement.getText()) && !"#".equals(lastElement.getText())) {
-          return JavaClassReferenceCompletionContributor.findJavaClassReference(file, offset - 1) != null;
-        }
-        else{
-          final PsiElement element = file.findElementAt(offset);
-          return element == null ||
-                 !"#".equals(lastElement.getText()) ||
-                 PsiTreeUtil.getParentOfType(element, PsiDocComment.class) != null;
-        }
+      if (!".".equals(lastElement.getText()) && !"#".equals(lastElement.getText())) {
+        return JavaClassReferenceCompletionContributor.findJavaClassReference(file, offset - 1) != null;
+      }
+      else{
+        final PsiElement element = file.findElementAt(offset);
+        return element == null ||
+               !"#".equals(lastElement.getText()) ||
+               PsiTreeUtil.getParentOfType(element, PsiDocComment.class) != null;
       }
     });
   }
 
   @Override
   public Result beforeCharTyped(final char c, final Project project, final Editor editor, final PsiFile file, final FileType fileType) {
-    if (c == '@' && file instanceof PsiJavaFile) {
+    if (!(file instanceof PsiJavaFile)) return Result.CONTINUE;
+
+    if (c == '@') {
       autoPopupJavadocLookup(project, editor);
     }
     else if (c == '#' || c == '.') {
       autoPopupMemberLookup(project, editor);
     }
 
-
-    final FileType originalFileType = getOriginalFileType(file);
-
     int offsetBefore = editor.getCaretModel().getOffset();
 
     //important to calculate before inserting charTyped
     myJavaLTTyped = '<' == c &&
-                    file instanceof PsiJavaFile &&
                     !(file instanceof JspFile) &&
                     CodeInsightSettings.getInstance().AUTOINSERT_PAIR_BRACKET &&
                     PsiUtil.isLanguageLevel5OrHigher(file) &&
                     isAfterClassLikeIdentifierOrDot(offsetBefore, editor);
 
     if ('>' == c) {
-      if (file instanceof PsiJavaFile && !(file instanceof JspFile) &&
-          CodeInsightSettings.getInstance().AUTOINSERT_PAIR_BRACKET &&
-               PsiUtil.isLanguageLevel5OrHigher(file)) {
+      if (!(file instanceof JspFile) && CodeInsightSettings.getInstance().AUTOINSERT_PAIR_BRACKET && PsiUtil.isLanguageLevel5OrHigher(file)) {
         if (handleJavaGT(editor, JavaTokenType.LT, JavaTokenType.GT, INVALID_INSIDE_REFERENCE)) return Result.STOP;
       }
     }
@@ -115,7 +107,7 @@ public class JavaTypedHandler extends TypedHandlerDelegate {
     if (c == ';') {
       if (handleSemicolon(editor, fileType)) return Result.STOP;
     }
-    if (originalFileType == StdFileTypes.JAVA && c == '{') {
+    if (fileType == StdFileTypes.JAVA && c == '{') {
       int offset = editor.getCaretModel().getOffset();
       if (offset == 0) {
         return Result.CONTINUE;
@@ -138,18 +130,20 @@ public class JavaTypedHandler extends TypedHandlerDelegate {
       PsiElement prev = offset > 1 ? file.findElementAt(offset - 1) : null;
       if (CodeInsightSettings.getInstance().AUTOINSERT_PAIR_BRACKET && isRparenth(leaf) &&
           (st instanceof PsiWhileStatement || st instanceof PsiIfStatement) && shouldInsertStatementBody(st, doc, prev)) {
-        CommandProcessor.getInstance().executeCommand(project, new Runnable() {
-          @Override
-          public void run() {
-            new JavaSmartEnterProcessor().process(project, editor, file);
-          }
-        }, "Insert block statement", null);
+        CommandProcessor.getInstance().executeCommand(project, () -> new JavaSmartEnterProcessor().process(project, editor, file), "Insert block statement", null);
         return Result.STOP;
       }
+
+      PsiElement prevLeaf = leaf == null ? null : PsiTreeUtil.prevVisibleLeaf(leaf);
+      if (PsiUtil.isJavaToken(prevLeaf, JavaTokenType.ARROW) || 
+          PsiTreeUtil.getParentOfType(prevLeaf, PsiNewExpression.class, true, PsiCodeBlock.class, PsiMember.class) != null) {
+        return Result.CONTINUE;
+      }
+
       if (PsiTreeUtil.getParentOfType(leaf, PsiCodeBlock.class, false, PsiMember.class) != null) {
         EditorModificationUtil.insertStringAtCaret(editor, "{");
         TypedHandler.indentOpenedBrace(project, editor);
-        return Result.STOP;
+        return Result.STOP; // use case: manually wrapping part of method's code in 'if', 'while', etc
       }
     }
 
@@ -189,12 +183,6 @@ public class JavaTypedHandler extends TypedHandlerDelegate {
       }
     }
     return Result.CONTINUE;
-  }
-
-  @Nullable
-  private static FileType getOriginalFileType(final PsiFile file) {
-    final VirtualFile virtualFile = file.getVirtualFile();
-    return virtualFile != null ? virtualFile.getFileType() : null;
   }
 
   private static boolean handleSemicolon(Editor editor, FileType fileType) {
@@ -289,14 +277,11 @@ public class JavaTypedHandler extends TypedHandlerDelegate {
   }
 
   private static void autoPopupJavadocLookup(final Project project, final Editor editor) {
-    AutoPopupController.getInstance(project).autoPopupMemberLookup(editor, new Condition<PsiFile>() {
-      @Override
-      public boolean value(PsiFile file) {
-        int offset = editor.getCaretModel().getOffset();
+    AutoPopupController.getInstance(project).autoPopupMemberLookup(editor, file -> {
+      int offset = editor.getCaretModel().getOffset();
 
-        PsiElement lastElement = file.findElementAt(offset - 1);
-        return lastElement != null && StringUtil.endsWithChar(lastElement.getText(), '@');
-      }
+      PsiElement lastElement = file.findElementAt(offset - 1);
+      return lastElement != null && StringUtil.endsWithChar(lastElement.getText(), '@');
     });
   }
 

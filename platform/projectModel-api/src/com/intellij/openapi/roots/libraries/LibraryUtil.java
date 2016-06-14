@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,9 +14,6 @@
  * limitations under the License.
  */
 
-/**
- * @author cdr
- */
 package com.intellij.openapi.roots.libraries;
 
 import com.intellij.openapi.module.Module;
@@ -26,6 +23,7 @@ import com.intellij.openapi.roots.*;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.util.PathUtil;
 import com.intellij.util.Processor;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.HashSet;
@@ -139,15 +137,12 @@ public class LibraryUtil {
   @Nullable
   public static Library findLibrary(@NotNull Module module, @NotNull final String name) {
     final Ref<Library> result = Ref.create(null);
-    OrderEnumerator.orderEntries(module).forEachLibrary(new Processor<Library>() {
-      @Override
-      public boolean process(Library library) {
-        if (name.equals(library.getName())) {
-          result.set(library);
-          return false;
-        }
-        return true;
+    OrderEnumerator.orderEntries(module).forEachLibrary(library -> {
+      if (name.equals(library.getName())) {
+        result.set(library);
+        return false;
       }
+      return true;
     });
     return result.get();
   }
@@ -161,5 +156,18 @@ public class LibraryUtil {
       }
     }
     return null;
+  }
+
+  @NotNull
+  public static String getPresentableName(@NotNull Library library) {
+    final String name = library.getName();
+    if (name != null) {
+      return name;
+    }
+    String[] urls = library.getUrls(OrderRootType.CLASSES);
+    if (urls.length > 0) {
+      return PathUtil.getFileName(VfsUtilCore.urlToPath(urls[0]));
+    }
+    return "Empty Library";
   }
 }

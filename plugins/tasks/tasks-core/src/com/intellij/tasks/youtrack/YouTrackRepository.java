@@ -117,11 +117,7 @@ public class YouTrackRepository extends BaseRepositoryImpl {
 
       List<Element> children = element.getChildren("issue");
 
-      final List<Task> tasks = ContainerUtil.mapNotNull(children, new NullableFunction<Element, Task>() {
-        public Task fun(Element o) {
-          return createIssue(o);
-        }
-      });
+      final List<Task> tasks = ContainerUtil.mapNotNull(children, (NullableFunction<Element, Task>)o -> createIssue(o));
       return tasks.toArray(new Task[tasks.size()]);
     }
     finally {
@@ -218,16 +214,13 @@ public class YouTrackRepository extends BaseRepositoryImpl {
   @NotNull
   @Override
   public Set<CustomTaskState> getAvailableTaskStates(@NotNull Task task) throws Exception {
-    final HttpMethod method = doREST("/rest/issue/" + task.getId() + "/execute/intellisense?command=" + encodeUrl("state "), false);
+    final HttpMethod method = doREST("/rest/issue/" + task.getId() + "/execute/intellisense?command=" + encodeUrl("state: "), false);
     try {
       final InputStream stream = method.getResponseBodyAsStream();
       final Element element = new SAXBuilder(false).build(stream).getRootElement();
-      return ContainerUtil.map2Set(element.getChild("suggest").getChildren("item"), new Function<Element, CustomTaskState>() {
-        @Override
-        public CustomTaskState fun(Element element) {
-          final String stateName = element.getChildText("option");
-          return new CustomTaskState(stateName, stateName);
-        }
+      return ContainerUtil.map2Set(element.getChild("suggest").getChildren("item"), element1 -> {
+        final String stateName = element1.getChildText("option");
+        return new CustomTaskState(stateName, stateName);
       });
     }
     finally {
@@ -352,7 +345,8 @@ public class YouTrackRepository extends BaseRepositoryImpl {
   @Override
   public void updateTimeSpent(@NotNull LocalTask task, @NotNull String timeSpent, @NotNull String comment) throws Exception {
     checkVersion();
-    final HttpMethod method = doREST("/rest/issue/execute/" + task.getId() + "?command=work+Today+" + timeSpent.replaceAll(" ", "+") + "+" + comment, true);
+    String command = encodeUrl(String.format("work Today %s %s", timeSpent, comment));
+    final HttpMethod method = doREST("/rest/issue/execute/" + task.getId() + "?command=" + command, true);
     try {
       if (method.getStatusCode() != 200) {
         InputStream stream = method.getResponseBodyAsStream();
@@ -372,7 +366,7 @@ public class YouTrackRepository extends BaseRepositoryImpl {
       Element element = new SAXBuilder(false).build(stream).getRootElement();
       final boolean timeTrackingAvailable = element.getName().equals("version") && VersionComparatorUtil.compare(element.getChildText("version"), "4.1") >= 0;
       if (!timeTrackingAvailable) {
-        throw new Exception("This version of Youtrack the time tracking is not supported");
+        throw new Exception("Time tracking is not supported in this version of Youtrack");
       }
     }
     finally {
@@ -383,5 +377,11 @@ public class YouTrackRepository extends BaseRepositoryImpl {
   @Override
   protected int getFeatures() {
     return super.getFeatures() | TIME_MANAGEMENT | STATE_UPDATING;
+  }
+
+  @TestOnly
+  @Override
+  public HttpClient getHttpClient() {
+    return super.getHttpClient();
   }
 }

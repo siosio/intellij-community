@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -118,11 +118,11 @@ interface NullableMethodAnalysisData {
 
 class NullableMethodAnalysis {
 
-  static Result<Key, Value> FinalNull = new Final<Key, Value>(Value.Null);
-  static Result<Key, Value> FinalBot = new Final<Key, Value>(Value.Bot);
+  static Result FinalNull = new Final(Value.Null);
+  static Result FinalBot = new Final(Value.Bot);
   static BasicValue lNull = new LabeledNull(0);
 
-  static Result<Key, Value> analyze(MethodNode methodNode, boolean[] origins, boolean jsr) throws AnalyzerException {
+  static Result analyze(MethodNode methodNode, boolean[] origins, boolean jsr) throws AnalyzerException {
     InsnList insns = methodNode.instructions;
     Constraint[] data = new Constraint[insns.size()];
     int[] originsMapping = mapOrigins(origins);
@@ -148,17 +148,17 @@ class NullableMethodAnalysis {
       Calls calls = ((Calls)result);
       int mergedMappedLabels = calls.mergedLabels;
       if (mergedMappedLabels != 0) {
-        Set<Product<Key, Value>> sum = new HashSet<Product<Key, Value>>();
+        Set<Product> sum = new HashSet<Product>();
         Key[] createdKeys = interpreter.keys;
         for (int origin = 0; origin < originsMapping.length; origin++) {
           int mappedOrigin = originsMapping[origin];
           Key createdKey = createdKeys[origin];
           if (createdKey != null && (mergedMappedLabels & (1 << mappedOrigin)) != 0) {
-            sum.add(new Product<Key, Value>(Value.Null, Collections.singleton(createdKey)));
+            sum.add(new Product(Value.Null, Collections.singleton(createdKey)));
           }
         }
         if (!sum.isEmpty()) {
-          return new Pending<Key, Value>(sum);
+          return new Pending(sum);
         }
       }
     }
@@ -211,12 +211,12 @@ class NullableMethodInterpreter extends BasicInterpreter implements InterpreterE
   private final int[] originsMapping;
   final Key[] keys;
 
-  Constraint constraint = null;
-  int delta = 0;
-  int nullsDelta = 0;
+  Constraint constraint;
+  int delta;
+  int nullsDelta;
   int notNullInsn = -1;
-  int notNullCall = 0;
-  int notNullNull = 0;
+  int notNullCall;
+  int notNullNull;
 
   NullableMethodInterpreter(InsnList insns, boolean[] origins, int[] originsMapping) {
     this.insns = insns;

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,7 +44,7 @@ import java.util.*;
 
 @State(
     name = "IdeDocumentHistory",
-    storages = {@Storage(file = StoragePathMacros.WORKSPACE_FILE)}
+    storages = {@Storage(StoragePathMacros.WORKSPACE_FILE)}
 )
 public class IdeDocumentHistoryImpl extends IdeDocumentHistory implements ProjectComponent, PersistentStateComponent<IdeDocumentHistoryImpl.RecentlyChangedFilesState> {
   private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.fileEditor.impl.IdeDocumentHistoryImpl");
@@ -334,15 +334,12 @@ public class IdeDocumentHistoryImpl extends IdeDocumentHistory implements Projec
     putLastOrMerge(myForwardPlaces, info, Integer.MAX_VALUE);
 
     myBackInProgress = true;
-
-    executeCommand(new Runnable() {
-      @Override
-      public void run() {
-        gotoPlaceInfo(info);
-      }
-    }, "", null);
-
-    myBackInProgress = false;
+    try {
+      executeCommand(() -> gotoPlaceInfo(info), "", null);
+    }
+    finally {
+      myBackInProgress = false;
+    }
   }
 
   @Override
@@ -353,13 +350,11 @@ public class IdeDocumentHistoryImpl extends IdeDocumentHistory implements Projec
     if (target == null) return;
 
     myForwardInProgress = true;
-    executeCommand(new Runnable() {
-      @Override
-      public void run() {
-        gotoPlaceInfo(target);
-      }
-    }, "", null);
-    myForwardInProgress = false;
+    try {
+      executeCommand(() -> gotoPlaceInfo(target), "", null);
+    } finally {
+      myForwardInProgress = false;
+    }
   }
 
   private PlaceInfo getTargetForwardInfo() {
@@ -396,12 +391,7 @@ public class IdeDocumentHistoryImpl extends IdeDocumentHistory implements Projec
     int index = myCurrentIndex - 1;
     final PlaceInfo info = myChangePlaces.get(index - myStartIndex);
 
-    executeCommand(new Runnable() {
-      @Override
-      public void run() {
-        gotoPlaceInfo(info);
-      }
-    }, "", null);
+    executeCommand(() -> gotoPlaceInfo(info), "", null);
     myCurrentIndex = index;
   }
 
@@ -426,12 +416,7 @@ public class IdeDocumentHistoryImpl extends IdeDocumentHistory implements Projec
     int index = myCurrentIndex + 1;
     final PlaceInfo info = myChangePlaces.get(index - myStartIndex);
 
-    executeCommand(new Runnable() {
-      @Override
-      public void run() {
-        gotoPlaceInfo(info);
-      }
-    }, "", null);
+    executeCommand(() -> gotoPlaceInfo(info), "", null);
     myCurrentIndex = index;
   }
 

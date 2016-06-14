@@ -41,12 +41,7 @@ import java.util.List;
  */
 public class ExternalSystemExecuteTaskTask extends AbstractExternalSystemTask {
 
-  @NotNull private static final Function<ExternalTaskPojo, String> MAPPER = new Function<ExternalTaskPojo, String>() {
-    @Override
-    public String fun(ExternalTaskPojo task) {
-      return task.getName();
-    }
-  };
+  @NotNull private static final Function<ExternalTaskPojo, String> MAPPER = task -> task.getName();
 
   @NotNull private final List<ExternalTaskPojo> myTasksToExecute;
   @Nullable private final String myVmOptions;
@@ -69,6 +64,20 @@ public class ExternalSystemExecuteTaskTask extends AbstractExternalSystemTask {
   @NotNull
   public List<ExternalTaskPojo> getTasksToExecute() {
     return myTasksToExecute;
+  }
+
+  @Nullable
+  public String getVmOptions() {
+    return myVmOptions;
+  }
+
+  @Nullable
+  public String getScriptParameters() {
+    return myScriptParameters;
+  }
+
+  public void appendScriptParameters(@NotNull String scriptParameters) {
+    myScriptParameters = myScriptParameters == null ? scriptParameters : myScriptParameters + ' ' + scriptParameters;
   }
 
   @NotNull

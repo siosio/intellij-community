@@ -18,8 +18,6 @@ package com.jetbrains.python.sdk;
 import com.google.common.base.Predicate;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
-import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.options.ShowSettingsUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.Sdk;
@@ -36,6 +34,7 @@ import com.intellij.openapi.ui.popup.util.BaseListPopupStep;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.util.NullableConsumer;
 import com.jetbrains.python.PyBundle;
+import com.jetbrains.python.packaging.PyCondaPackageService;
 import com.jetbrains.python.remote.PythonRemoteInterpreterManager;
 import com.jetbrains.python.sdk.flavors.PythonSdkFlavor;
 import org.jetbrains.annotations.NotNull;
@@ -53,11 +52,12 @@ public class PythonSdkDetailsStep extends BaseListPopupStep<String> {
   private final Project myProject;
   private final Component myOwnerComponent;
   private final Sdk[] myExistingSdks;
-  private final NullableConsumer<Sdk> myCallback;
+  private final NullableConsumer<Sdk> mySdkAddedCallback;
 
   private static final String LOCAL = PyBundle.message("sdk.details.step.add.local");
   private static final String REMOTE = PyBundle.message("sdk.details.step.add.remote");
   private static final String VIRTUALENV = PyBundle.message("sdk.details.step.create.virtual.env");
+  private static final String CONDA = PyBundle.message("sdk.details.step.create.conda.env");
   private static final String MORE = PyBundle.message("sdk.details.step.show.more");
   private boolean myNewProject;
 
@@ -65,8 +65,8 @@ public class PythonSdkDetailsStep extends BaseListPopupStep<String> {
                           final Sdk[] existingSdks,
                           @Nullable final DialogWrapper moreDialog,
                           JComponent ownerComponent, final Point popupPoint,
-                          final NullableConsumer<Sdk> callback) {
-    show(project, existingSdks, moreDialog, ownerComponent, popupPoint, callback, false);
+                          final NullableConsumer<Sdk> sdkAddedCallback) {
+    show(project, existingSdks, moreDialog, ownerComponent, popupPoint, sdkAddedCallback, false);
 
   }
 
@@ -74,8 +74,8 @@ public class PythonSdkDetailsStep extends BaseListPopupStep<String> {
                           final Sdk[] existingSdks,
                           @Nullable final DialogWrapper moreDialog,
                           JComponent ownerComponent, final Point popupPoint,
-                          final NullableConsumer<Sdk> callback, boolean isNewProject) {
-    final PythonSdkDetailsStep sdkHomesStep = new PythonSdkDetailsStep(project, moreDialog, ownerComponent, existingSdks, callback);
+                          final NullableConsumer<Sdk> sdkAddedCallback, boolean isNewProject) {
+    final PythonSdkDetailsStep sdkHomesStep = new PythonSdkDetailsStep(project, moreDialog, ownerComponent, existingSdks, sdkAddedCallback);
     sdkHomesStep.setNewProject(isNewProject);
     final ListPopup popup = JBPopupFactory.getInstance().createListPopup(sdkHomesStep);
     popup.showInScreenCoordinates(ownerComponent, popupPoint);
@@ -88,13 +88,13 @@ public class PythonSdkDetailsStep extends BaseListPopupStep<String> {
   public PythonSdkDetailsStep(@Nullable final Project project,
                               @Nullable final DialogWrapper moreDialog, @NotNull final Component ownerComponent,
                               @NotNull final Sdk[] existingSdks,
-                              @NotNull final NullableConsumer<Sdk> callback) {
+                              @NotNull final NullableConsumer<Sdk> sdkAddedCallback) {
     super(null, getAvailableOptions(moreDialog != null));
     myProject = project;
     myMore = moreDialog;
     myOwnerComponent = ownerComponent;
     myExistingSdks = existingSdks;
-    myCallback = callback;
+    mySdkAddedCallback = sdkAddedCallback;
   }
 
   private static List<String> getAvailableOptions(boolean showMore) {
@@ -104,6 +104,9 @@ public class PythonSdkDetailsStep extends BaseListPopupStep<String> {
       options.add(REMOTE);
     }
     options.add(VIRTUALENV);
+    if (PyCondaPackageService.getSystemCondaExecutable() != null) {
+      options.add(CONDA);
+    }
 
     if (showMore) {
       options.add(MORE);
@@ -129,24 +132,22 @@ public class PythonSdkDetailsStep extends BaseListPopupStep<String> {
     else if (VIRTUALENV.equals(selectedValue)) {
       createVirtualEnvSdk();
     }
+    else if (CONDA.equals(selectedValue)) {
+      createCondaEnvSdk();
+    }
     else if (myMore != null) {
       myMore.show();
     }
   }
 
   private void createLocalSdk() {
-    ApplicationManager.getApplication().invokeLater(new Runnable() {
-      @Override
-      public void run() {
-        SdkConfigurationUtil.createSdk(myProject, myExistingSdks, myCallback, false, PythonSdkType.getInstance());
-      }
-    }, ModalityState.any());
+    SdkConfigurationUtil.createSdk(myProject, myExistingSdks, mySdkAddedCallback, false, PythonSdkType.getInstance());
   }
 
   private void createRemoteSdk() {
     PythonRemoteInterpreterManager remoteInterpreterManager = PythonRemoteInterpreterManager.getInstance();
     if (remoteInterpreterManager != null) {
-      remoteInterpreterManager.addRemoteSdk(myProject, myOwnerComponent, Lists.newArrayList(myExistingSdks), myCallback);
+      remoteInterpreterManager.addRemoteSdk(myProject, myOwnerComponent, Lists.newArrayList(myExistingSdks), mySdkAddedCallback);
     }
     else {
       final String pathToPluginsPage = ShowSettingsUtil.getSettingsMenuName() + " | Plugins";
@@ -156,26 +157,7 @@ public class PythonSdkDetailsStep extends BaseListPopupStep<String> {
   }
 
   private void createVirtualEnvSdk() {
-    CreateVirtualEnvDialog.VirtualEnvCallback callback = new CreateVirtualEnvDialog.VirtualEnvCallback() {
-      @Override
-      public void virtualEnvCreated(Sdk sdk, boolean associateWithProject) {
-        PythonSdkType.setupSdkPaths(sdk, myProject, null);
-        if (associateWithProject) {
-          SdkAdditionalData additionalData = sdk.getSdkAdditionalData();
-          if (additionalData == null) {
-            additionalData = new PythonSdkAdditionalData(PythonSdkFlavor.getFlavor(sdk.getHomePath()));
-            ((ProjectJdkImpl)sdk).setSdkAdditionalData(additionalData);
-          }
-          if (myNewProject) {
-            ((PythonSdkAdditionalData)additionalData).associateWithNewProject();
-          }
-          else {
-            ((PythonSdkAdditionalData)additionalData).associateWithProject(myProject);
-          }
-        }
-        myCallback.consume(sdk);
-      }
-    };
+    AbstractCreateVirtualEnvDialog.VirtualEnvCallback callback = getVEnvCallback();
 
     final CreateVirtualEnvDialog dialog;
     final List<Sdk> allSdks = Lists.newArrayList(myExistingSdks);
@@ -197,13 +179,51 @@ public class PythonSdkDetailsStep extends BaseListPopupStep<String> {
       allSdks.add(new PyDetectedSdk(string));
     }
     if (myProject != null) {
-      dialog = new CreateVirtualEnvDialog(myProject, allSdks, null);
+      dialog = new CreateVirtualEnvDialog(myProject, allSdks);
     }
     else {
-      dialog = new CreateVirtualEnvDialog(myOwnerComponent, allSdks, null);
+      dialog = new CreateVirtualEnvDialog(myOwnerComponent, allSdks);
     }
     if (dialog.showAndGet()) {
-      dialog.createVirtualEnv(allSdks, callback);
+      dialog.createVirtualEnv(callback);
+    }
+  }
+
+  @NotNull
+  private AbstractCreateVirtualEnvDialog.VirtualEnvCallback getVEnvCallback() {
+    return new CreateVirtualEnvDialog.VirtualEnvCallback() {
+        @Override
+        public void virtualEnvCreated(Sdk sdk, boolean associateWithProject) {
+          if (associateWithProject) {
+            SdkAdditionalData additionalData = sdk.getSdkAdditionalData();
+            if (additionalData == null) {
+              additionalData = new PythonSdkAdditionalData(PythonSdkFlavor.getFlavor(sdk.getHomePath()));
+              ((ProjectJdkImpl)sdk).setSdkAdditionalData(additionalData);
+            }
+            if (myNewProject) {
+              ((PythonSdkAdditionalData)additionalData).associateWithNewProject();
+            }
+            else {
+              ((PythonSdkAdditionalData)additionalData).associateWithProject(myProject);
+            }
+          }
+          mySdkAddedCallback.consume(sdk);
+        }
+      };
+  }
+
+  private void createCondaEnvSdk() {
+    AbstractCreateVirtualEnvDialog.VirtualEnvCallback callback = getVEnvCallback();
+
+    final CreateCondaEnvDialog dialog;
+    if (myProject != null) {
+      dialog = new CreateCondaEnvDialog(myProject);
+    }
+    else {
+      dialog = new CreateCondaEnvDialog(myOwnerComponent);
+    }
+    if (dialog.showAndGet()) {
+      dialog.createVirtualEnv(callback);
     }
   }
 
@@ -220,10 +240,6 @@ public class PythonSdkDetailsStep extends BaseListPopupStep<String> {
 
   @Override
   public PopupStep onChosen(final String selectedValue, boolean finalChoice) {
-    return doFinalStep(new Runnable() {
-      public void run() {
-        optionSelected(selectedValue);
-      }
-    });
+    return doFinalStep(() -> optionSelected(selectedValue));
   }
 }

@@ -15,9 +15,6 @@
   <action id="FullyExpandTreeNode">
     <keyboard-shortcut first-keystroke="MULTIPLY"/>
   </action>
-  <!--<action id="TextComponent.ClearAction">
-    <keyboard-shortcut first-keystroke="ESCAPE"/>
-  </action>-->
   <action id="ExpandTreeNode">
     <keyboard-shortcut first-keystroke="ADD"/>
   </action>
@@ -692,10 +689,16 @@
   <action id="ToggleTemporaryLineBreakpoint">
     <keyboard-shortcut first-keystroke="control shift alt F8"/>
   </action>
+  <action id="XDebugger.SetValue">
+    <keyboard-shortcut first-keystroke="F2"/>
+  </action>
+  <action id="XDebugger.NewWatch">
+    <keyboard-shortcut first-keystroke="INSERT"/>
+  </action>
   <action id="Debugger.EditTypeSource">
     <keyboard-shortcut first-keystroke="shift F4"/>
   </action>
-  <action id="ToggleBookmark">
+    <action id="ToggleBookmark">
     <keyboard-shortcut first-keystroke="F11"/>
   </action>
   <action id="ToggleBookmarkWithMnemonic">
@@ -706,6 +709,12 @@
   </action>
   <action id="MoveStatementUp">
     <keyboard-shortcut first-keystroke="control shift UP"/>
+  </action>
+  <action id="MoveElementLeft">
+    <keyboard-shortcut first-keystroke="control alt shift LEFT"/>
+  </action>
+  <action id="MoveElementRight">
+    <keyboard-shortcut first-keystroke="control alt shift RIGHT"/>
   </action>
   <action id="MoveLineDown">
     <keyboard-shortcut first-keystroke="alt shift DOWN"/>
@@ -855,7 +864,7 @@
   <action id="ActivateHierarchyToolWindow">
     <keyboard-shortcut first-keystroke="alt 8"/>
   </action>
-  <action id="ActivateChangesToolWindow">
+  <action id="ActivateVersionControlToolWindow">
     <keyboard-shortcut first-keystroke="alt 9"/>
     <keyboard-shortcut first-keystroke="alt shift 9"/>
   </action>
@@ -970,10 +979,6 @@
   <action id="CodeInspection.OnEditor">
     <keyboard-shortcut first-keystroke="alt shift I"/>
   </action>
-  <action id="RemoveFromFavorites">
-    <keyboard-shortcut first-keystroke="control DELETE"/>
-  </action>
-
   <action id="FileChooser.GotoHome">
     <keyboard-shortcut first-keystroke="control 1"/>
   </action>
@@ -1032,6 +1037,10 @@
 
   <action id="NewScratchFile">
     <keyboard-shortcut first-keystroke="control alt shift INSERT"/>
+  </action>
+
+  <action id="EditorMatchBrace">
+    <keyboard-shortcut first-keystroke="control shift M" />
   </action>
 </keymap>
 </component>

@@ -70,11 +70,7 @@ public class RerunFailedTestsAction extends JavaRerunFailedTestsAction {
                 final GlobalSearchScope scope = getConfiguration().getConfigurationModule().getSearchScope();
                 final Project project = getConfiguration().getProject();
                 for (final AbstractTestProxy proxy : failedTests) {
-                  ApplicationManager.getApplication().runReadAction(new Runnable() {
-                    public void run() {
-                      includeFailedTestWithDependencies(classes, scope, project, proxy);
-                    }
-                  });
+                  ApplicationManager.getApplication().runReadAction(() -> includeFailedTestWithDependencies(classes, scope, project, proxy));
                 }
               }
 
@@ -113,13 +109,17 @@ public class RerunFailedTestsAction extends JavaRerunFailedTestsAction {
         if (strings == null || strings.isEmpty()) {
           strings = new ArrayList<String>();
         }
-        if (location instanceof PsiMemberParameterizedLocation) {
-          final String paramSetName = ((PsiMemberParameterizedLocation)location).getParamSetName();
-          if (paramSetName != null) {
-            strings.add(TestNGConfigurationProducer.getInvocationNumber(paramSetName));
-          }
-        }
+        setupParameterName(location, strings);
         psiMethods.put(psiMethod, strings);
+      }
+    }
+  }
+
+  private static void setupParameterName(Location location, List<String> strings) {
+    if (location instanceof PsiMemberParameterizedLocation) {
+      final String paramSetName = ((PsiMemberParameterizedLocation)location).getParamSetName();
+      if (paramSetName != null) {
+        strings.add(TestNGConfigurationProducer.getInvocationNumber(paramSetName));
       }
     }
   }

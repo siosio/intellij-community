@@ -27,6 +27,8 @@ import com.intellij.util.ui.update.Activatable;
 import com.intellij.util.ui.update.UiNotifyConnector;
 import org.jetbrains.annotations.NotNull;
 
+import javax.accessibility.Accessible;
+import javax.accessibility.AccessibleContext;
 import javax.swing.*;
 import javax.swing.event.TableModelEvent;
 import javax.swing.event.TableModelListener;
@@ -60,7 +62,7 @@ public class JBTable extends JTable implements ComponentWithEmptyText, Component
   private Integer myMinRowHeight;
   private boolean myStriped;
 
-  private AsyncProcessIcon myBusyIcon;
+  protected AsyncProcessIcon myBusyIcon;
   private boolean myBusy;
 
   private int myMaxItemsForSizeCalculation = Integer.MAX_VALUE;
@@ -94,12 +96,7 @@ public class JBTable extends JTable implements ComponentWithEmptyText, Component
     final TableModelListener modelListener = new TableModelListener() {
       @Override
       public void tableChanged(@NotNull final TableModelEvent e) {
-        if (!myRowHeightIsExplicitlySet) {
-          myRowHeight = -1;
-        }
-        if (e.getType() == TableModelEvent.DELETE && isEmpty() || e.getType() == TableModelEvent.INSERT && !isEmpty()) {
-          repaintViewport();
-        }
+        onTableChanged(e);
       }
     };
 
@@ -123,6 +120,15 @@ public class JBTable extends JTable implements ComponentWithEmptyText, Component
     new MyCellEditorRemover();
   }
 
+  protected void onTableChanged(@NotNull TableModelEvent e) {
+    if (!myRowHeightIsExplicitlySet) {
+      myRowHeight = -1;
+    }
+    if (e.getType() == TableModelEvent.DELETE && isEmpty() || e.getType() == TableModelEvent.INSERT && !isEmpty()) {
+      repaintViewport();
+    }
+  }
+
   @Override
   public int getRowHeight() {
     if (myRowHeightIsComputing) {
@@ -132,19 +138,7 @@ public class JBTable extends JTable implements ComponentWithEmptyText, Component
     if (myRowHeight < 0) {
       try {
         myRowHeightIsComputing = true;
-        for (int row = 0; row < Math.min(getRowCount(), myMaxItemsForSizeCalculation); row++) {
-          for (int column = 0; column < Math.min(getColumnCount(), myMaxItemsForSizeCalculation); column++) {
-            final TableCellRenderer renderer = getCellRenderer(row, column);
-            if (renderer != null) {
-              final Object value = getValueAt(row, column);
-              final Component component = renderer.getTableCellRendererComponent(this, value, true, true, row, column);
-              if (component != null) {
-                final Dimension size = component.getPreferredSize();
-                myRowHeight = Math.max(size.height, myRowHeight);
-              }
-            }
-          }
-        }
+        myRowHeight = calculateRowHeight();
       }
       finally {
         myRowHeightIsComputing = false;
@@ -156,6 +150,26 @@ public class JBTable extends JTable implements ComponentWithEmptyText, Component
     }
 
     return Math.max(myRowHeight, myMinRowHeight);
+  }
+
+  protected int calculateRowHeight() {
+    int result = -1;
+
+    for (int row = 0; row < Math.min(getRowCount(), myMaxItemsForSizeCalculation); row++) {
+      for (int column = 0; column < Math.min(getColumnCount(), myMaxItemsForSizeCalculation); column++) {
+        final TableCellRenderer renderer = getCellRenderer(row, column);
+        if (renderer != null) {
+          final Object value = getValueAt(row, column);
+          final Component component = renderer.getTableCellRendererComponent(this, value, true, true, row, column);
+          if (component != null) {
+            final Dimension size = component.getPreferredSize();
+            result = Math.max(size.height, result);
+          }
+        }
+      }
+    }
+
+    return result;
   }
 
   public void setShowColumns(boolean value) {
@@ -330,6 +344,11 @@ public class JBTable extends JTable implements ComponentWithEmptyText, Component
   }
 
   @Override
+  protected Graphics getComponentGraphics(Graphics graphics) {
+    return JBSwingUtilities.runGlobalCGTransform(this, super.getComponentGraphics(graphics));
+  }
+
+  @Override
   public void paint(@NotNull Graphics g) {
     if (!isEnabled()) {
       g = new Grayer((Graphics2D)g, getBackground());
@@ -350,7 +369,7 @@ public class JBTable extends JTable implements ComponentWithEmptyText, Component
   private void updateBusy() {
     if (myBusy) {
       if (myBusyIcon == null) {
-        myBusyIcon = new AsyncProcessIcon(toString()).setUseMask(false);
+        myBusyIcon = createBusyIcon();
         myBusyIcon.setOpaque(false);
         myBusyIcon.setPaintPassiveIcon(false);
         add(myBusyIcon);
@@ -364,12 +383,9 @@ public class JBTable extends JTable implements ComponentWithEmptyText, Component
       else {
         myBusyIcon.suspend();
         //noinspection SSBasedInspection
-        SwingUtilities.invokeLater(new Runnable() {
-          @Override
-          public void run() {
-            if (myBusyIcon != null) {
-              repaint();
-            }
+        SwingUtilities.invokeLater(() -> {
+          if (myBusyIcon != null) {
+            repaint();
           }
         });
       }
@@ -377,6 +393,11 @@ public class JBTable extends JTable implements ComponentWithEmptyText, Component
         myBusyIcon.updateLocation(this);
       }
     }
+  }
+
+  @NotNull
+  protected AsyncProcessIcon createBusyIcon() {
+    return new AsyncProcessIcon(toString()).setUseMask(false);
   }
 
   public boolean isStriped() {
@@ -432,12 +453,7 @@ public class JBTable extends JTable implements ComponentWithEmptyText, Component
         // this replaces focus request in JTable.processKeyBinding
         final IdeFocusManager focusManager = IdeFocusManager.findInstanceByComponent(this);
         focusManager.setTypeaheadEnabled(false);
-        focusManager.requestFocus(editorComp, true).doWhenProcessed(new Runnable() {
-          @Override
-          public void run() {
-            focusManager.setTypeaheadEnabled(true);
-          }
-        });
+        focusManager.requestFocus(editorComp, true).doWhenProcessed(() -> focusManager.setTypeaheadEnabled(true));
       }
 
       setCellEditor(editor);
@@ -498,13 +514,12 @@ public class JBTable extends JTable implements ComponentWithEmptyText, Component
     }
 
     if (myExpandableItemsHandler.getExpandedItems().contains(new TableCell(row, column))) {
-      result = new ExpandedItemRendererComponentWrapper(result);
+      result = ExpandedItemRendererComponentWrapper.wrap(result);
     }
     return result;
   }
 
   private final class MyCellEditorRemover extends Activatable.Adapter implements PropertyChangeListener {
-    private final IdeFocusManager myFocusManager = IdeFocusManager.findInstanceByComponent(JBTable.this);
     private boolean myIsActive = false;
 
     public MyCellEditorRemover() {
@@ -558,7 +573,8 @@ public class JBTable extends JTable implements ComponentWithEmptyText, Component
         return;
       }
 
-      myFocusManager.doWhenFocusSettlesDown(new ExpirableRunnable() {
+      final IdeFocusManager focusManager = IdeFocusManager.findInstanceByComponent(JBTable.this);
+      focusManager.doWhenFocusSettlesDown(new ExpirableRunnable() {
         @Override
         public boolean isExpired() {
           return !isEditing();
@@ -566,7 +582,7 @@ public class JBTable extends JTable implements ComponentWithEmptyText, Component
 
         @Override
         public void run() {
-          Component c = myFocusManager.getFocusOwner();
+          Component c = focusManager.getFocusOwner();
           if (UIUtil.isMeaninglessFocusOwner(c)) {
             // this allows using popup menus and menu bar without stopping cell editing
             return;
@@ -728,8 +744,9 @@ public class JBTable extends JTable implements ComponentWithEmptyText, Component
       JBTable.this.addPropertyChangeListener(new PropertyChangeListener() {
         @Override
         public void propertyChange(@NotNull PropertyChangeEvent evt) {
-          JBTableHeader.this.revalidate();
-          JBTableHeader.this.repaint();
+          if ("enabled".equals(evt.getPropertyName())) {
+            JBTableHeader.this.repaint();
+          }
         }
       });
     }
@@ -787,12 +804,7 @@ public class JBTable extends JTable implements ComponentWithEmptyText, Component
       tableSize.width += newWidth - column.getWidth();
       JBTable.this.setSize(tableSize);
       // let the table update it's layout with resizing column set
-      ApplicationManager.getApplication().invokeLater(new Runnable() {
-        @Override
-        public void run() {
-          setResizingColumn(null);
-        }
-      });
+      ApplicationManager.getApplication().invokeLater(() -> setResizingColumn(null));
     }
 
     private int getColumnToPack(Point p) {
@@ -852,5 +864,100 @@ public class JBTable extends JTable implements ComponentWithEmptyText, Component
    */
   public void setMaxItemsForSizeCalculation(int maxItemsForSizeCalculation) {
     myMaxItemsForSizeCalculation = maxItemsForSizeCalculation;
+  }
+
+  @Override
+  public AccessibleContext getAccessibleContext() {
+    if (accessibleContext == null) {
+      accessibleContext = new AccessibleJBTable();
+    }
+    return accessibleContext;
+  }
+
+  /**
+   * Specialization of {@link AccessibleJTable} to ensure instances of
+   * {@link AccessibleJBTableCell}, as opposed to {@link AccessibleJTableCell},
+   * are created in all code paths.
+   */
+  protected class AccessibleJBTable extends AccessibleJTable {
+    @Override
+    public Accessible getAccessibleChild(int i) {
+      if (i < 0 || i >= getAccessibleChildrenCount()) {
+        return null;
+      } else {
+        int column = getAccessibleColumnAtIndex(i);
+        int row = getAccessibleRowAtIndex(i);
+        return new AccessibleJBTableCell(JBTable.this, row, column, getAccessibleIndexAt(row, column));
+      }
+    }
+
+    @Override
+    public Accessible getAccessibleAt(Point p) {
+      int column = columnAtPoint(p);
+      int row = rowAtPoint(p);
+
+      if ((column != -1) && (row != -1)) {
+        return getAccessibleChild(getAccessibleIndexAt(row, column));
+      }
+      return null;
+    }
+
+    /**
+     * Specialization of {@link AccessibleJTableCell} to ensure the underlying cell renderer
+     * is obtained by calling the virtual method {@link JTable#getCellRenderer(int, int)}.
+     *
+     * <p>
+     * NOTE: The reason we need this class is that even though the documentation of the
+     * {@link JTable#getCellRenderer(int, int)} method mentions that
+     * </p>
+     *
+     * <pre>
+     * Throughout the table package, the internal implementations always
+     * use this method to provide renderers so that this default behavior
+     * can be safely overridden by a subclass.
+     * </pre>
+     *
+     * <p>
+     * the {@link AccessibleJTableCell#getCurrentComponent()} and
+     * {@link AccessibleJTableCell#getCurrentAccessibleContext()} methods do not
+     * respect that contract, instead using a <strong>copy</strong> of the default
+     * implementation of {@link JTable#getCellRenderer(int, int)}.
+     * </p>
+     *
+     * <p>
+     * There are a few derived classes of {@link JBTable}, e.g.
+     * {@link com.intellij.ui.dualView.TreeTableView} that depend on the ability to
+     * override {@link JTable#getCellRenderer(int, int)} method to behave correctly,
+     * so we need to ensure we go through the same code path to ensure correct
+     * accessibility behavior.
+     * </p>
+     */
+    protected class AccessibleJBTableCell extends AccessibleJTableCell {
+      private final int myRow;
+      private final int myColumn;
+
+      public AccessibleJBTableCell(JTable table, int row, int columns, int index) {
+        super(table, row, columns, index);
+        this.myRow = row;
+        this.myColumn = columns;
+      }
+
+      @Override
+      protected Component getCurrentComponent() {
+        return JBTable.this
+          .getCellRenderer(myRow, myColumn)
+          .getTableCellRendererComponent(JBTable.this, getValueAt(myRow, myColumn), false, false, myRow, myColumn);
+      }
+
+      @Override
+      protected AccessibleContext getCurrentAccessibleContext() {
+        Component c = getCurrentComponent();
+        if (c instanceof Accessible)
+          return c.getAccessibleContext();
+        // Note: don't call "super" as 1) we know for sure the cell is not accessible
+        // and 2) the super implementation is incorrect anyways
+        return null;
+      }
+    }
   }
 }

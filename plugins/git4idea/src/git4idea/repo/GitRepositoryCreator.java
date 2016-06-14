@@ -20,29 +20,23 @@ import com.intellij.dvcs.repo.VcsRepositoryCreator;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vcs.VcsKey;
 import com.intellij.openapi.vfs.VirtualFile;
-import git4idea.GitPlatformFacade;
 import git4idea.GitUtil;
 import git4idea.GitVcs;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.File;
-
 public class GitRepositoryCreator extends VcsRepositoryCreator {
   @NotNull private final Project myProject;
-  @NotNull private final GitPlatformFacade myPlatformFacade;
 
-  public GitRepositoryCreator(@NotNull Project project, @NotNull GitPlatformFacade platformFacade) {
+  public GitRepositoryCreator(@NotNull Project project) {
     myProject = project;
-    myPlatformFacade = platformFacade;
   }
 
   @Override
   @Nullable
   public Repository createRepositoryIfValid(@NotNull VirtualFile root) {
-    return GitUtil.isGitRoot(new File(root.getPath()))
-           ? GitRepositoryImpl.getFullInstance(root, myProject, myPlatformFacade, myProject)
-           : null;
+    VirtualFile gitDir = GitUtil.findGitDir(root);
+    return gitDir == null ? null : GitRepositoryImpl.getInstance(root, gitDir, myProject, true);
   }
 
   @NotNull

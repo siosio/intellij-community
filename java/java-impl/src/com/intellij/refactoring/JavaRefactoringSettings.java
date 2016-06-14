@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,16 +15,13 @@
  */
 package com.intellij.refactoring;
 
-import com.intellij.openapi.components.*;
+import com.intellij.openapi.components.PersistentStateComponent;
+import com.intellij.openapi.components.ServiceManager;
+import com.intellij.openapi.components.State;
+import com.intellij.openapi.components.Storage;
 import com.intellij.util.xmlb.XmlSerializerUtil;
 
-@State(
-  name = "RefactoringSettings",
-  storages = {
-    @Storage(
-      file = StoragePathMacros.APP_CONFIG + "/other.xml"
-    )}
-)
+@State(name = "RefactoringSettings", storages = @Storage("other.xml"))
 public class JavaRefactoringSettings implements PersistentStateComponent<JavaRefactoringSettings> {
   // properties should be public in order to get saved by DefaultExternalizable implementation
 
@@ -63,9 +60,9 @@ public class JavaRefactoringSettings implements PersistentStateComponent<JavaRef
   public boolean TYPE_COOK_DROP_CASTS = true;
   public boolean TYPE_COOK_PRESERVE_RAW_ARRAYS = true;
   public boolean TYPE_COOK_LEAVE_OBJECT_PARAMETERIZED_TYPES_RAW = true;
-  public boolean TYPE_COOK_EXHAUSTIVE = false;
-  public boolean TYPE_COOK_COOK_OBJECTS = false;
-  public boolean TYPE_COOK_PRODUCE_WILDCARDS = false;
+  public boolean TYPE_COOK_EXHAUSTIVE;
+  public boolean TYPE_COOK_COOK_OBJECTS;
+  public boolean TYPE_COOK_PRODUCE_WILDCARDS;
 
   public boolean TYPE_MIGRATION_PREVIEW_USAGES = true;
 
@@ -88,11 +85,11 @@ public class JavaRefactoringSettings implements PersistentStateComponent<JavaRef
   public boolean INHERITANCE_TO_DELEGATION_DELEGATE_OTHER;
   //public boolean REPLACE_CONSTRUCTOR_WITH_FACTORY_PREVIEW_USAGES;
   public String INTRODUCE_CONSTANT_VISIBILITY;
-  public boolean INTRODUCE_CONSTANT_MOVE_TO_ANOTHER_CLASS = false;
+  public boolean INTRODUCE_CONSTANT_MOVE_TO_ANOTHER_CLASS;
   public boolean CONVERT_TO_INSTANCE_METHOD_PREVIEW_USAGES = true;
 
-  public Boolean INTRODUCE_LOCAL_CREATE_FINALS = null;
-  public Boolean INTRODUCE_PARAMETER_CREATE_FINALS = null;
+  public Boolean INTRODUCE_LOCAL_CREATE_FINALS;
+  public Boolean INTRODUCE_PARAMETER_CREATE_FINALS;
 
   public boolean INLINE_CLASS_SEARCH_IN_COMMENTS = true;
   public boolean INLINE_CLASS_SEARCH_IN_NON_JAVA = true;

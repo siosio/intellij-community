@@ -43,12 +43,7 @@ import java.util.Comparator;
 public class CompilerPaths {
   private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.compiler.CompilerPaths");
   private static volatile String ourSystemPath;
-  private static final Comparator<String> URLS_COMPARATOR = new Comparator<String>() {
-    @Override
-    public int compare(String o1, String o2) {
-      return o1.compareTo(o2);
-    }
-  };
+  private static final Comparator<String> URLS_COMPARATOR = (o1, o2) -> o1.compareTo(o2);
   /**
    * Returns a directory
    * @return a directory where compiler may generate files. All generated files are not deleted when the application exits
@@ -112,6 +107,9 @@ public class CompilerPaths {
   @Nullable
   public static VirtualFile getModuleOutputDirectory(final Module module, boolean forTestClasses) {
     final CompilerModuleExtension compilerModuleExtension = CompilerModuleExtension.getInstance(module);
+    if (compilerModuleExtension == null) {
+      return null;
+    }
     VirtualFile outPath;
     if (forTestClasses) {
       final VirtualFile path = compilerModuleExtension.getCompilerOutputPathForTests();
@@ -144,6 +142,9 @@ public class CompilerPaths {
     final String outPathUrl;
     final Application application = ApplicationManager.getApplication();
     final CompilerModuleExtension extension = CompilerModuleExtension.getInstance(module);
+    if (extension == null) {
+      return null;
+    }
     if (forTestClasses) {
       if (application.isDispatchThread()) {
         final String url = extension.getCompilerOutputUrlForTests();

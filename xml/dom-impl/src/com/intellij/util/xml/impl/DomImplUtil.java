@@ -151,22 +151,19 @@ public class DomImplUtil {
       return Collections.emptyList();
     }
 
-    return ContainerUtil.findAll(tags, new Condition<XmlTag>() {
-      @Override
-      public boolean value(XmlTag childTag) {
-        try {
-          return isNameSuitable(name, childTag.getLocalName(), childTag.getName(), childTag.getNamespace(), file);
+    return ContainerUtil.findAll(tags, childTag -> {
+      try {
+        return isNameSuitable(name, childTag.getLocalName(), childTag.getName(), childTag.getNamespace(), file);
+      }
+      catch (PsiInvalidElementAccessException e) {
+        if (!childTag.isValid()) {
+          LOG.error("tag.getSubTags() returned invalid, " +
+                    "tag=" + tag + ", " +
+                    "containing file: " + tag.getContainingFile() +
+                    "subTag.parent=" + childTag.getNode().getTreeParent());
+          return false;
         }
-        catch (PsiInvalidElementAccessException e) {
-          if (!childTag.isValid()) {
-            LOG.error("tag.getSubTags() returned invalid, " +
-                      "tag=" + tag + ", " +
-                      "containing file: " + tag.getContainingFile() +
-                      "subTag.parent=" + childTag.getNode().getTreeParent());
-            return false;
-          }
-          throw e;
-        }
+        throw e;
       }
     });
   }
@@ -176,12 +173,7 @@ public class DomImplUtil {
       return Collections.emptyList();
     }
 
-    return ContainerUtil.findAll(tags, new Condition<XmlTag>() {
-      @Override
-      public boolean value(XmlTag childTag) {
-        return isNameSuitable(name, childTag, file);
-      }
-    });
+    return ContainerUtil.findAll(tags, childTag -> isNameSuitable(name, childTag, file));
   }
 
   public static boolean isNameSuitable(final XmlName name, final XmlTag tag, @NotNull final DomInvocationHandler handler, final XmlFile file) {
@@ -273,18 +265,15 @@ public class DomImplUtil {
       DomFixedChildDescription description = fixedChildrenDescriptions.get(i);
       usedNames.add(description.getXmlName());
     }
-    return ContainerUtil.findAll(subTags, new Condition<XmlTag>() {
-      @Override
-      public boolean value(final XmlTag tag) {
-        if (StringUtil.isEmpty(tag.getName())) return false;
+    return ContainerUtil.findAll(subTags, tag -> {
+      if (StringUtil.isEmpty(tag.getName())) return false;
 
-        for (final XmlName name : usedNames) {
-          if (isNameSuitable(name, tag, handler, file)) {
-            return false;
-          }
+      for (final XmlName name : usedNames) {
+        if (isNameSuitable(name, tag, handler, file)) {
+          return false;
         }
-        return true;
       }
+      return true;
     });
   }
 
@@ -294,14 +283,24 @@ public class DomImplUtil {
     }
     DomInvocationHandler handler = DomManagerImpl.getDomInvocationHandler(domElement);
     assert handler != null : domElement;
-    while (handler != null && !(handler instanceof DomRootInvocationHandler) && handler.getXmlTag() == null) {
-      handler = handler.getParentHandler();
+    while (true) {
+      if (handler instanceof DomRootInvocationHandler) {
+        return ((DomRootInvocationHandler)handler).getParent().getFile();
+      }
+
+      XmlTag tag = handler.getXmlTag();
+      if (tag != null) {
+        return getContainingFile(tag);
+      }
+      DomInvocationHandler parent = handler.getParentHandler();
+      if (parent == null) {
+        throw new AssertionError("No parent for " + handler.toStringEx());
+      }
+      handler = parent;
     }
-    if (handler instanceof DomRootInvocationHandler) {
-      return ((DomRootInvocationHandler)handler).getParent().getFile();
-    }
-    assert handler != null;
-    XmlTag tag = handler.getXmlTag();
+  }
+
+  private static XmlFile getContainingFile(XmlTag tag) {
     while (true) {
       final PsiElement parentTag = PhysicalDomParentStrategy.getParentTagCandidate(tag);
       if (!(parentTag instanceof XmlTag)) {

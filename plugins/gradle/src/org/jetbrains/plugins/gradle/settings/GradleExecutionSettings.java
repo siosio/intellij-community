@@ -17,7 +17,6 @@ package org.jetbrains.plugins.gradle.settings;
 
 import com.intellij.openapi.externalSystem.model.settings.ExternalSystemExecutionSettings;
 import com.intellij.openapi.util.Comparing;
-import com.intellij.openapi.util.SystemInfo;
 import com.intellij.util.containers.ContainerUtilRt;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -46,6 +45,9 @@ public class GradleExecutionSettings extends ExternalSystemExecutionSettings {
   @Nullable private String wrapperPropertyFile;
 
   @Nullable private String myJavaHome;
+  @Nullable
+  private String myIdeProjectPath;
+  private boolean resolveModulePerSourceSet = true;
 
   public GradleExecutionSettings(@Nullable String gradleHome,
                                  @Nullable String serviceDirectory,
@@ -59,6 +61,15 @@ public class GradleExecutionSettings extends ExternalSystemExecutionSettings {
     myDaemonVmOptions = daemonVmOptions;
     myIsOfflineWork = isOfflineWork;
     setVerboseProcessing(USE_VERBOSE_GRADLE_API_BY_DEFAULT);
+  }
+
+  public void setIdeProjectPath(@Nullable String ideProjectPath) {
+    myIdeProjectPath = ideProjectPath;
+  }
+
+  @Nullable
+  public String getIdeProjectPath() {
+    return myIdeProjectPath;
   }
 
   @Nullable
@@ -82,6 +93,14 @@ public class GradleExecutionSettings extends ExternalSystemExecutionSettings {
 
   public boolean isOfflineWork() {
     return myIsOfflineWork;
+  }
+
+  public boolean isResolveModulePerSourceSet() {
+    return resolveModulePerSourceSet;
+  }
+
+  public void setResolveModulePerSourceSet(boolean resolveModulePerSourceSet) {
+    this.resolveModulePerSourceSet = resolveModulePerSourceSet;
   }
 
   @NotNull

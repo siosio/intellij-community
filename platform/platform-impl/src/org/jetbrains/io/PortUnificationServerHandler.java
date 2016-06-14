@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package org.jetbrains.io;
 
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.AtomicNotNullLazyValue;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.*;
@@ -32,8 +33,6 @@ import javax.net.ssl.SSLEngine;
 import java.security.KeyStore;
 import java.security.Security;
 import java.util.UUID;
-
-import static io.netty.handler.codec.http.HttpHeaders.Names.CONTENT_TYPE;
 
 @ChannelHandler.Sharable
 class PortUnificationServerHandler extends Decoder {
@@ -106,14 +105,14 @@ class PortUnificationServerHandler extends Decoder {
       else if (isHttp(magic1, magic2)) {
         NettyUtil.addHttpServerCodec(pipeline);
         pipeline.addLast("delegatingHttpHandler", delegatingHttpRequestHandler);
-        if (BuiltInServer.LOG.isDebugEnabled()) {
+        final Logger logger = Logger.getInstance(BuiltInServer.class);
+        if (logger.isDebugEnabled()) {
           pipeline.addLast(new ChannelOutboundHandlerAdapter() {
             @Override
             public void write(ChannelHandlerContext context, Object message, ChannelPromise promise) throws Exception {
               if (message instanceof HttpResponse) {
-                //BuiltInServer.LOG.debug("OUT HTTP:\n" + message);
                 HttpResponse response = (HttpResponse)message;
-                BuiltInServer.LOG.debug("OUT HTTP: " + response.status().code() + " " + response.headers().get(CONTENT_TYPE));
+                logger.debug("OUT HTTP: " + response.toString());
               }
               super.write(context, message, promise);
             }
@@ -125,7 +124,7 @@ class PortUnificationServerHandler extends Decoder {
         pipeline.addLast(new CustomHandlerDelegator());
       }
       else {
-        BuiltInServer.LOG.warn("unknown request, first two bytes " + magic1 + " " + magic2);
+        Logger.getInstance(BuiltInServer.class).warn("unknown request, first two bytes " + magic1 + " " + magic2);
         context.close();
       }
     }
@@ -142,7 +141,7 @@ class PortUnificationServerHandler extends Decoder {
 
   @Override
   public void exceptionCaught(ChannelHandlerContext context, Throwable cause) throws Exception {
-    NettyUtil.logAndClose(cause, BuiltInServer.LOG, context.channel());
+    NettyUtil.logAndClose(cause, Logger.getInstance(BuiltInServer.class), context.channel());
   }
 
   private static boolean isHttp(int magic1, int magic2) {
@@ -184,7 +183,7 @@ class PortUnificationServerHandler extends Decoder {
 
     @Override
     public void exceptionCaught(ChannelHandlerContext context, Throwable cause) {
-      NettyUtil.logAndClose(cause, BuiltInServer.LOG, context.channel());
+      NettyUtil.logAndClose(cause, Logger.getInstance(BuiltInServer.class), context.channel());
     }
   }
 }

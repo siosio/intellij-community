@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@ package com.intellij.compiler.ant;
 
 import com.intellij.codeInspection.InspectionsBundle;
 import com.intellij.compiler.actions.GenerateAntBuildAction;
-import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.application.ex.ApplicationEx;
 import com.intellij.openapi.application.ex.ApplicationManagerEx;
 import com.intellij.openapi.diagnostic.Logger;
@@ -46,23 +45,21 @@ public class GenerateAntApplication {
       GenerateAntMain.printHelp();
     }
 
-    SwingUtilities.invokeLater(new Runnable() {
-      public void run() {
-        ApplicationEx application = ApplicationManagerEx.getApplicationEx();
-        try {
-          logMessage(0, "Starting app... ");
-          application.doNotSave();
-          application.load(PathManager.getOptionsPath());
-          logMessageLn(0, "done");
+    SwingUtilities.invokeLater(() -> {
+      ApplicationEx application = ApplicationManagerEx.getApplicationEx();
+      try {
+        logMessage(0, "Starting app... ");
+        application.doNotSave();
+        application.load();
+        logMessageLn(0, "done");
 
-          GenerateAntApplication.this.run();
-        }
-        catch (Exception e) {
-          GenerateAntApplication.LOG.error(e);
-        }
-        finally {
-          application.exit(true, true);
-        }
+        GenerateAntApplication.this.run();
+      }
+      catch (Exception e) {
+        GenerateAntApplication.LOG.error(e);
+      }
+      finally {
+        application.exit(true, true);
       }
     });
   }

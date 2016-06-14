@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,9 +27,14 @@ import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.*;
 import com.intellij.util.PlatformIcons;
+import com.intellij.xdebugger.XDebugSession;
+import com.intellij.xdebugger.XDebuggerManager;
+import com.intellij.xdebugger.impl.XDebugSessionImpl;
 import com.intellij.xdebugger.impl.ui.DebuggerUIUtil;
+import com.intellij.xdebugger.impl.ui.XDebugSessionTab;
 import com.intellij.xdebugger.impl.ui.XDebuggerUIConstants;
 import com.intellij.xdebugger.impl.ui.tree.ValueMarkup;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
@@ -37,11 +42,11 @@ import java.awt.*;
 
 public class DebuggerTreeRenderer extends ColoredTreeCellRenderer {
 
-  private static final SimpleTextAttributes DEFAULT_ATTRIBUTES = new SimpleTextAttributes(Font.PLAIN, null);
-  private static final SimpleTextAttributes SPECIAL_NODE_ATTRIBUTES = new SimpleTextAttributes(Font.PLAIN, new JBColor(Color.lightGray, Gray._130));
-  private static final SimpleTextAttributes OBJECT_ID_HIGHLIGHT_ATTRIBUTES = new SimpleTextAttributes(Font.PLAIN, new JBColor(Color.lightGray, Gray._130));
+  private static final SimpleTextAttributes DEFAULT_ATTRIBUTES = new SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, null);
+  private static final SimpleTextAttributes SPECIAL_NODE_ATTRIBUTES = new SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, new JBColor(Color.lightGray, Gray._130));
+  private static final SimpleTextAttributes OBJECT_ID_HIGHLIGHT_ATTRIBUTES = new SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, new JBColor(Color.lightGray, Gray._130));
 
-  public void customizeCellRenderer(JTree tree, Object value, boolean selected, boolean expanded, boolean leaf, int row, boolean hasFocus) {
+  public void customizeCellRenderer(@NotNull JTree tree, Object value, boolean selected, boolean expanded, boolean leaf, int row, boolean hasFocus) {
     final DebuggerTreeNodeImpl node = (DebuggerTreeNodeImpl) value;
 
     if (node != null) {
@@ -104,6 +109,9 @@ public class DebuggerTreeRenderer extends ColoredTreeCellRenderer {
     else if (valueDescriptor instanceof ThrownExceptionValueDescriptorImpl) {
       nodeIcon = AllIcons.Nodes.ExceptionClass;
     }
+    else if (valueDescriptor instanceof MethodReturnValueDescriptorImpl) {
+      nodeIcon = AllIcons.Debugger.WatchLastReturnValue;
+    }
     else if (isParameter(valueDescriptor)) {
       nodeIcon = PlatformIcons.PARAMETER_ICON;
     }
@@ -124,12 +132,21 @@ public class DebuggerTreeRenderer extends ColoredTreeCellRenderer {
         nodeIcon = AllIcons.Debugger.Value;
       }
     }
+
+    // if watches in variables enabled, always use watch icon
+    if (valueDescriptor instanceof WatchItemDescriptor && nodeIcon != AllIcons.Debugger.Watch) {
+      XDebugSession session = XDebuggerManager.getInstance(valueDescriptor.getProject()).getCurrentSession();
+      if (session != null) {
+        XDebugSessionTab tab = ((XDebugSessionImpl)session).getSessionTab();
+        if (tab != null && tab.isWatchesInVariables()) {
+          nodeIcon = AllIcons.Debugger.Watch;
+        }
+      }
+    }
+
     final Icon valueIcon = valueDescriptor.getValueIcon();
     if (nodeIcon != null && valueIcon != null) {
-      final RowIcon composite = new RowIcon(2);
-      composite.setIcon(nodeIcon, 0);
-      composite.setIcon(valueIcon, 1);
-      nodeIcon = composite;
+      nodeIcon = new RowIcon(nodeIcon, valueIcon);
     }
     return nodeIcon;
   }

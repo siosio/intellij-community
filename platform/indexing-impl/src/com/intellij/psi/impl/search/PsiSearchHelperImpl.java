@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,8 @@ import com.intellij.concurrency.AsyncFuture;
 import com.intellij.concurrency.AsyncUtil;
 import com.intellij.concurrency.JobLauncher;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadActionProcessor;
+import com.intellij.openapi.application.ex.ApplicationEx;
 import com.intellij.openapi.application.ex.ApplicationUtil;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
@@ -43,18 +45,18 @@ import com.intellij.psi.search.*;
 import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.usageView.UsageInfo;
 import com.intellij.usageView.UsageInfoFactory;
-import com.intellij.util.CommonProcessors;
 import com.intellij.util.Function;
 import com.intellij.util.Processor;
+import com.intellij.util.Processors;
 import com.intellij.util.SmartList;
 import com.intellij.util.codeInsight.CommentUtilCore;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.MultiMap;
 import com.intellij.util.indexing.FileBasedIndex;
-import com.intellij.util.text.CharArrayUtil;
 import com.intellij.util.text.StringSearcher;
 import gnu.trove.THashMap;
 import gnu.trove.THashSet;
+import gnu.trove.TIntProcedure;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -97,9 +99,10 @@ public class PsiSearchHelperImpl implements PsiSearchHelper {
   @Override
   @NotNull
   public PsiElement[] findCommentsContainingIdentifier(@NotNull String identifier, @NotNull SearchScope searchScope) {
-    final List<PsiElement> results = Collections.synchronizedList(new ArrayList<PsiElement>());
-    processCommentsContainingIdentifier(identifier, searchScope, new CommonProcessors.CollectProcessor<PsiElement>(results));
-    return PsiUtilCore.toPsiElementArray(results);
+    final List<PsiElement> result = Collections.synchronizedList(new ArrayList<>());
+    Processor<PsiElement> processor = Processors.cancelableCollectProcessor(result);
+    processCommentsContainingIdentifier(identifier, searchScope, processor);
+    return PsiUtilCore.toPsiElementArray(result);
   }
 
   @Override
@@ -164,7 +167,8 @@ public class PsiSearchHelperImpl implements PsiSearchHelper {
     if (text.isEmpty()) {
       throw new IllegalArgumentException("Cannot search for elements with empty text");
     }
-    ProgressIndicator progress = getOrCreateIndicator();
+    final ProgressIndicator progress = getOrCreateIndicator();
+    final boolean processInjectedPsi = options.contains(Options.PROCESS_INJECTED_PSI);
     if (searchScope instanceof GlobalSearchScope) {
       StringSearcher searcher = new StringSearcher(text, options.contains(Options.CASE_SENSITIVE_SEARCH), true,
                                                    searchContext == UsageSearchContext.IN_STRINGS,
@@ -174,14 +178,33 @@ public class PsiSearchHelperImpl implements PsiSearchHelper {
                                                   (GlobalSearchScope)searchScope,
                                                   searcher,
                                                   searchContext, options.contains(Options.CASE_SENSITIVE_SEARCH), containerName, progress,
-                                                  options.contains(Options.PROCESS_INJECTED_PSI));
+                                                  processInjectedPsi);
     }
     LocalSearchScope scope = (LocalSearchScope)searchScope;
     PsiElement[] scopeElements = scope.getScope();
     final StringSearcher searcher = new StringSearcher(text, options.contains(Options.CASE_SENSITIVE_SEARCH), true,
                                                        searchContext == UsageSearchContext.IN_STRINGS,
                                                        options.contains(Options.PROCESS_ONLY_JAVA_IDENTIFIERS_IF_POSSIBLE));
-    Processor<PsiElement> localProcessor = localProcessor(processor, progress, options.contains(Options.PROCESS_INJECTED_PSI), searcher);
+    ReadActionProcessor<PsiElement> localProcessor = new ReadActionProcessor<PsiElement>() {
+      @Override
+      public boolean processInReadAction(PsiElement scopeElement) {
+        if (!scopeElement.isValid()) return true;
+        if (!scopeElement.isPhysical()) {
+          scopeElement = scopeElement.getNavigationElement();
+        }
+        if (scopeElement.getTextRange() == null) {
+          // clients can put whatever they want to the LocalSearchScope. Skip what we can't process.
+          LOG.debug("Element " + scopeElement + " of class " + scopeElement.getClass() + " has null range");
+          return true;
+        }
+        return LowLevelSearchUtil.processElementsContainingWordInElement(processor, scopeElement, searcher, processInjectedPsi, progress);
+      }
+
+      @Override
+      public String toString() {
+        return processor.toString();
+      }
+    };
     return JobLauncher.getInstance().invokeConcurrentlyUnderProgress(Arrays.asList(scopeElements), progress, true, true, localProcessor);
   }
 
@@ -192,7 +215,7 @@ public class PsiSearchHelperImpl implements PsiSearchHelper {
     return progress;
   }
 
-  private static boolean shouldProcessInjectedPsi(@NotNull SearchScope scope) {
+  public static boolean shouldProcessInjectedPsi(@NotNull SearchScope scope) {
     return !(scope instanceof LocalSearchScope) || !((LocalSearchScope)scope).isIgnoreInjectedPsi();
   }
 
@@ -201,16 +224,12 @@ public class PsiSearchHelperImpl implements PsiSearchHelper {
                                                       @NotNull final ProgressIndicator progress,
                                                       final boolean processInjectedPsi,
                                                       @NotNull final StringSearcher searcher) {
-    return new Processor<PsiElement>() {
-        @Override
-        public boolean process(final PsiElement scopeElement) {
-          return ApplicationManager.getApplication().runReadAction(new Computable<Boolean>() {
-            @Override
-            public Boolean compute() {
-              return LowLevelSearchUtil.processElementsContainingWordInElement(processor, scopeElement, searcher, processInjectedPsi, progress);
-            }
-          }).booleanValue();
-        }
+    return new ReadActionProcessor<PsiElement>() {
+      @Override
+      public boolean processInReadAction(PsiElement scopeElement) {
+        return scopeElement.isValid() &&
+               LowLevelSearchUtil.processElementsContainingWordInElement(processor, scopeElement, searcher, processInjectedPsi, progress);
+      }
 
       @Override
       public String toString() {
@@ -231,37 +250,39 @@ public class PsiSearchHelperImpl implements PsiSearchHelper {
       throw new AssertionError("You must not run search from within updating PSI activity. Please consider invokeLatering it instead.");
     }
     progress.pushState();
-    progress.setText(PsiBundle.message("psi.scanning.files.progress"));
+    boolean result;
+    try {
+      progress.setText(PsiBundle.message("psi.scanning.files.progress"));
 
-    String text = searcher.getPattern();
-    Set<VirtualFile> fileSet = new THashSet<VirtualFile>();
-    getFilesWithText(scope, searchContext, caseSensitively, text, progress, fileSet);
+      String text = searcher.getPattern();
+      Set<VirtualFile> fileSet = new THashSet<VirtualFile>();
+      getFilesWithText(scope, searchContext, caseSensitively, text, progress, fileSet);
 
-    progress.setText(PsiBundle.message("psi.search.for.word.progress", text));
+      progress.setText(PsiBundle.message("psi.search.for.word.progress", text));
 
-    final Processor<PsiElement> localProcessor = localProcessor(processor, progress, processInjectedPsi, searcher);
-    if (containerName != null) {
-      List<VirtualFile> intersectionWithContainerFiles = new ArrayList<VirtualFile>();
-      // intersectionWithContainerFiles holds files containing words from both `text` and `containerName`
-      getFilesWithText(scope, searchContext, caseSensitively, text+" "+containerName, progress, intersectionWithContainerFiles);
-      if (!intersectionWithContainerFiles.isEmpty()) {
-        int totalSize = fileSet.size();
-        boolean result = processPsiFileRoots(intersectionWithContainerFiles, totalSize, 0, progress,
-                                                         localProcessor);
+      final Processor<PsiElement> localProcessor = localProcessor(processor, progress, processInjectedPsi, searcher);
+      if (containerName != null) {
+        List<VirtualFile> intersectionWithContainerFiles = new ArrayList<VirtualFile>();
+        // intersectionWithContainerFiles holds files containing words from both `text` and `containerName`
+        getFilesWithText(scope, searchContext, caseSensitively, text+" "+containerName, progress, intersectionWithContainerFiles);
+        if (!intersectionWithContainerFiles.isEmpty()) {
+          int totalSize = fileSet.size();
+          result = processPsiFileRoots(intersectionWithContainerFiles, totalSize, 0, progress, localProcessor);
 
-        if (result) {
-          fileSet.removeAll(intersectionWithContainerFiles);
-          if (!fileSet.isEmpty()) {
-            result = processPsiFileRoots(new ArrayList<VirtualFile>(fileSet), totalSize, intersectionWithContainerFiles.size(), progress, localProcessor);
+          if (result) {
+            fileSet.removeAll(intersectionWithContainerFiles);
+            if (!fileSet.isEmpty()) {
+              result = processPsiFileRoots(new ArrayList<VirtualFile>(fileSet), totalSize, intersectionWithContainerFiles.size(), progress, localProcessor);
+            }
           }
+          return result;
         }
-        progress.popState();
-        return result;
       }
+      result = fileSet.isEmpty() || processPsiFileRoots(new ArrayList<VirtualFile>(fileSet), fileSet.size(), 0, progress, localProcessor);
     }
-
-    boolean result = fileSet.isEmpty() || processPsiFileRoots(new ArrayList<VirtualFile>(fileSet), fileSet.size(), 0, progress, localProcessor);
-    progress.popState();
+    finally {
+      progress.popState();
+    }
     return result;
   }
 
@@ -286,20 +307,17 @@ public class PsiSearchHelperImpl implements PsiSearchHelper {
       while (true) {
         List<VirtualFile> failedList = new SmartList<VirtualFile>();
         final List<VirtualFile> failedFiles = Collections.synchronizedList(failedList);
-        final Processor<VirtualFile> processor = new Processor<VirtualFile>() {
-          @Override
-          public boolean process(final VirtualFile vfile) {
-            try {
-              TooManyUsagesStatus.getFrom(progress).pauseProcessingIfTooManyUsages();
-              processVirtualFile(vfile, progress, localProcessor, canceled, counter, totalSize);
-            }
-            catch (ApplicationUtil.CannotRunReadActionException action) {
-              failedFiles.add(vfile);
-            }
-            return !canceled.get();
+        final Processor<VirtualFile> processor = vfile -> {
+          try {
+            TooManyUsagesStatus.getFrom(progress).pauseProcessingIfTooManyUsages();
+            processVirtualFile(vfile, progress, localProcessor, canceled, counter, totalSize);
           }
+          catch (ApplicationUtil.CannotRunReadActionException action) {
+            failedFiles.add(vfile);
+          }
+          return !canceled.get();
         };
-        if (ApplicationManager.getApplication().isWriteAccessAllowed()) {
+        if (ApplicationManager.getApplication().isWriteAccessAllowed() || ((ApplicationEx)ApplicationManager.getApplication()).isWriteActionPending()) {
           // no point in processing in separate threads - they are doomed to fail to obtain read action anyway
           completed &= ContainerUtil.process(files, processor);
         }
@@ -328,12 +346,7 @@ public class PsiSearchHelperImpl implements PsiSearchHelper {
                                   @NotNull final AtomicBoolean canceled,
                                   @NotNull AtomicInteger counter,
                                   int totalSize) throws ApplicationUtil.CannotRunReadActionException {
-    final PsiFile file = ApplicationUtil.tryRunReadAction(new Computable<PsiFile>() {
-      @Override
-      public PsiFile compute() {
-        return vfile.isValid() ? myManager.findFile(vfile) : null;
-      }
-    });
+    final PsiFile file = ApplicationUtil.tryRunReadAction(() -> vfile.isValid() ? myManager.findFile(vfile) : null);
     if (file != null && !(file instanceof PsiBinaryFile)) {
       // load contents outside read action
       if (FileDocumentManager.getInstance().getCachedDocument(vfile) == null) {
@@ -385,13 +398,7 @@ public class PsiSearchHelperImpl implements PsiSearchHelper {
                                 @NotNull Collection<VirtualFile> result) {
     myManager.startBatchFilesProcessingMode();
     try {
-      Processor<VirtualFile> processor = new CommonProcessors.CollectProcessor<VirtualFile>(result){
-        @Override
-        public boolean process(VirtualFile file) {
-          progress.checkCanceled();
-          return super.process(file);
-        }
-      };
+      Processor<VirtualFile> processor = Processors.cancelableCollectProcessor(result);
       boolean success = processFilesWithText(scope, searchContext, caseSensitively, text, processor);
       // success == false means exception in index
     }
@@ -408,12 +415,7 @@ public class PsiSearchHelperImpl implements PsiSearchHelper {
     List<IdIndexEntry> entries = getWordEntries(text, caseSensitively);
     if (entries.isEmpty()) return true;
 
-    Condition<Integer> contextMatches = new Condition<Integer>() {
-      @Override
-      public boolean value(Integer integer) {
-        return (integer.intValue() & searchContext) != 0;
-      }
-    };
+    Condition<Integer> contextMatches = integer -> (integer.intValue() & searchContext) != 0;
     return processFilesContainingAllKeys(myManager.getProject(), scope, contextMatches, entries, processor);
   }
 
@@ -467,56 +469,55 @@ public class PsiSearchHelperImpl implements PsiSearchHelper {
     final int patternLength = searcher.getPattern().length();
 
     progress.pushState();
-    progress.setText(PsiBundle.message("psi.search.in.non.java.files.progress"));
+    final Ref<Boolean> cancelled = Ref.create(Boolean.FALSE);
+    try {
+      progress.setText(PsiBundle.message("psi.search.in.non.java.files.progress"));
 
-    final SearchScope useScope = originalElement == null ? null : ApplicationManager.getApplication().runReadAction(new Computable<SearchScope>() {
-      @Override
-      public SearchScope compute() {
-        return getUseScope(originalElement);
-      }
-    });
-
-    final Ref<Boolean> cancelled = new Ref<Boolean>(Boolean.FALSE);
-    for (int i = 0; i < files.length; i++) {
-      progress.checkCanceled();
-      final PsiFile psiFile = files[i];
-      if (psiFile instanceof PsiBinaryFile) continue;
-
-      final CharSequence text = ApplicationManager.getApplication().runReadAction(new Computable<CharSequence>() {
+      final SearchScope useScope = originalElement == null ? null : ApplicationManager.getApplication().runReadAction(new Computable<SearchScope>() {
         @Override
-        public CharSequence compute() {
-          return psiFile.getViewProvider().getContents();
+        public SearchScope compute() {
+          return getUseScope(originalElement);
         }
       });
-      final char[] textArray = ApplicationManager.getApplication().runReadAction(new Computable<char[]>() {
-        @Override
-        public char[] compute() {
-          return CharArrayUtil.fromSequenceWithoutCopying(text);
-        }
-      });
-      int index = LowLevelSearchUtil.searchWord(text, textArray, 0, text.length(), searcher, progress);
-      while(index >= 0) {
-        final int finalIndex = index;
-        boolean isReferenceOK = ApplicationManager.getApplication().runReadAction(new Computable<Boolean>() {
+
+      for (int i = 0; i < files.length; i++) {
+        progress.checkCanceled();
+        final PsiFile psiFile = files[i];
+        if (psiFile instanceof PsiBinaryFile) continue;
+
+        final CharSequence text = ApplicationManager.getApplication().runReadAction(new Computable<CharSequence>() {
           @Override
-          public Boolean compute() {
-            PsiReference referenceAt = psiFile.findReferenceAt(finalIndex);
-            return referenceAt == null || useScope == null ||
-                   !PsiSearchScopeUtil.isInScope(useScope.intersectWith(initialScope), psiFile);
+          public CharSequence compute() {
+            return psiFile.getViewProvider().getContents();
           }
         });
-        if (isReferenceOK && !processor.process(psiFile, index, index + patternLength)) {
-          cancelled.set(Boolean.TRUE);
-          break;
-        }
 
-        index = LowLevelSearchUtil.searchWord(text, textArray, index + patternLength, text.length(), searcher, progress);
+        LowLevelSearchUtil.processTextOccurrences(text, 0, text.length(), searcher, progress, new TIntProcedure() {
+          @Override
+          public boolean execute(final int index) {
+            boolean isReferenceOK = ApplicationManager.getApplication().runReadAction(new Computable<Boolean>() {
+              @Override
+              public Boolean compute() {
+                PsiReference referenceAt = psiFile.findReferenceAt(index);
+                return referenceAt == null || useScope == null || !PsiSearchScopeUtil.isInScope(useScope.intersectWith(initialScope), psiFile);
+              }
+            });
+            if (isReferenceOK && !processor.process(psiFile, index, index + patternLength)) {
+              cancelled.set(Boolean.TRUE);
+              return false;
+            }
+
+            return true;
+          }
+        });
+        if (cancelled.get()) break;
+        progress.setFraction((double)(i + 1) / files.length);
       }
-      if (cancelled.get()) break;
-      progress.setFraction((double)(i + 1) / files.length);
+    }
+    finally {
+      progress.popState();
     }
 
-    progress.popState();
     return !cancelled.get();
   }
 
@@ -551,24 +552,19 @@ public class PsiSearchHelperImpl implements PsiSearchHelper {
   }
 
   private static class RequestWithProcessor {
-    @NotNull final PsiSearchRequest request;
-    @NotNull Processor<PsiReference> refProcessor;
+    @NotNull private final PsiSearchRequest request;
+    @NotNull private Processor<PsiReference> refProcessor;
 
-    private RequestWithProcessor(@NotNull PsiSearchRequest first, @NotNull Processor<PsiReference> second) {
-      request = first;
-      refProcessor = second;
+    private RequestWithProcessor(@NotNull PsiSearchRequest request, @NotNull Processor<PsiReference> processor) {
+      this.request = request;
+      refProcessor = processor;
     }
 
     private boolean uniteWith(@NotNull final RequestWithProcessor another) {
       if (request.equals(another.request)) {
         final Processor<PsiReference> myProcessor = refProcessor;
         if (myProcessor != another.refProcessor) {
-          refProcessor = new Processor<PsiReference>() {
-            @Override
-            public boolean process(PsiReference psiReference) {
-              return myProcessor.process(psiReference) && another.refProcessor.process(psiReference);
-            }
-          };
+          refProcessor = psiReference -> myProcessor.process(psiReference) && another.refProcessor.process(psiReference);
         }
         return true;
       }
@@ -697,18 +693,15 @@ public class PsiSearchHelperImpl implements PsiSearchHelper {
                                     int alreadyProcessedFiles) {
     List<VirtualFile> files = new ArrayList<VirtualFile>(candidateFiles.keySet());
 
-    return processPsiFileRoots(files, totalSize, alreadyProcessedFiles, progress, new Processor<PsiFile>() {
-      @Override
-      public boolean process(final PsiFile psiRoot) {
-        final VirtualFile vfile = psiRoot.getVirtualFile();
-        for (final RequestWithProcessor singleRequest : candidateFiles.get(vfile)) {
-          Processor<PsiElement> localProcessor = localProcessors.get(singleRequest);
-          if (!localProcessor.process(psiRoot)) {
-            return false;
-          }
+    return processPsiFileRoots(files, totalSize, alreadyProcessedFiles, progress, psiRoot -> {
+      final VirtualFile vfile = psiRoot.getVirtualFile();
+      for (final RequestWithProcessor singleRequest : candidateFiles.get(vfile)) {
+        Processor<PsiElement> localProcessor = localProcessors.get(singleRequest);
+        if (!localProcessor.process(psiRoot)) {
+          return false;
         }
-        return true;
       }
+      return true;
     });
   }
 
@@ -739,7 +732,20 @@ public class PsiSearchHelperImpl implements PsiSearchHelper {
       public boolean execute(@NotNull PsiElement element, int offsetInElement) {
         if (ignoreInjectedPsi && element instanceof PsiLanguageInjectionHost) return true;
 
-        return wrapped.processTextOccurrence(element, offsetInElement, consumer);
+        try {
+          return wrapped.processTextOccurrence(element, offsetInElement, consumer);
+        }
+        catch (ProcessCanceledException e) {
+          throw e;
+        }
+        catch (Exception e) {
+          LOG.error(e);
+          return true;
+        }
+        catch (Error e) {
+          LOG.error(e);
+          return true;
+        }
       }
 
       @Override
@@ -762,32 +768,28 @@ public class PsiSearchHelperImpl implements PsiSearchHelper {
       final GlobalSearchScope commonScope = uniteScopes(data);
       final Set<VirtualFile> intersectionWithContainerNameFiles = intersectionWithContainerNameFiles(commonScope, data, keys);
 
-      List<VirtualFile> files = new ArrayList<VirtualFile>();
-      Processor<VirtualFile> processor = new CommonProcessors.CollectProcessor<VirtualFile>(files);
+      List<VirtualFile> result = new ArrayList<VirtualFile>();
+      Processor<VirtualFile> processor = Processors.cancelableCollectProcessor(result);
       processFilesContainingAllKeys(myManager.getProject(), commonScope, null, keys, processor);
-      for (final VirtualFile file : files) {
+      for (final VirtualFile file : result) {
         progress.checkCanceled();
         for (final IdIndexEntry entry : keys) {
-          ApplicationManager.getApplication().runReadAction(new Runnable() {
-            @Override
-            public void run() {
-              FileBasedIndex.getInstance().processValues(IdIndex.NAME, entry, file, new FileBasedIndex.ValueProcessor<Integer>() {
-                @Override
-                public boolean process(VirtualFile file, Integer value) {
-                  int mask = value.intValue();
-                  for (RequestWithProcessor single : data) {
-                    final PsiSearchRequest request = single.request;
-                    if ((mask & request.searchContext) != 0 && ((GlobalSearchScope)request.searchScope).contains(file)) {
-                      MultiMap<VirtualFile, RequestWithProcessor> result =
-                        intersectionWithContainerNameFiles == null || !intersectionWithContainerNameFiles.contains(file) ? restResult : intersectionResult;
-                      result.putValue(file, single);
-                    }
+          DumbService.getInstance(myManager.getProject()).runReadActionInSmartMode(
+            (Runnable)() -> FileBasedIndex.getInstance().processValues(IdIndex.NAME, entry, file, new FileBasedIndex.ValueProcessor<Integer>() {
+              @Override
+              public boolean process(VirtualFile file1, Integer value) {
+                int mask = value.intValue();
+                for (RequestWithProcessor single : data) {
+                  final PsiSearchRequest request = single.request;
+                  if ((mask & request.searchContext) != 0 && ((GlobalSearchScope)request.searchScope).contains(file1)) {
+                    MultiMap<VirtualFile, RequestWithProcessor> result1 =
+                      intersectionWithContainerNameFiles == null || !intersectionWithContainerNameFiles.contains(file1) ? restResult : intersectionResult;
+                    result1.putValue(file1, single);
                   }
-                  return true;
                 }
-              }, commonScope);
-            }
-          });
+                return true;
+              }
+            }, commonScope));
         }
       }
     }
@@ -825,13 +827,9 @@ public class PsiSearchHelperImpl implements PsiSearchHelper {
     entries.addAll(keys); // should find words from both text and container names
 
     final short finalSearchContext = searchContext;
-    Condition<Integer> contextMatches = new Condition<Integer>() {
-      @Override
-      public boolean value(Integer context) {
-        return (context.intValue() & finalSearchContext) != 0;
-      }
-    };
-    processFilesContainingAllKeys(myManager.getProject(), commonScope, contextMatches, entries, new CommonProcessors.CollectProcessor<VirtualFile>(containerFiles));
+    Condition<Integer> contextMatches = context -> (context.intValue() & finalSearchContext) != 0;
+    Processor<VirtualFile> processor = Processors.cancelableCollectProcessor(containerFiles);
+    processFilesContainingAllKeys(myManager.getProject(), commonScope, contextMatches, entries, processor);
 
     return containerFiles;
   }
@@ -844,12 +842,7 @@ public class PsiSearchHelperImpl implements PsiSearchHelper {
 
   @NotNull
   private static GlobalSearchScope uniteScopes(@NotNull Collection<RequestWithProcessor> requests) {
-    Set<GlobalSearchScope> scopes = ContainerUtil.map2LinkedSet(requests, new Function<RequestWithProcessor, GlobalSearchScope>() {
-      @Override
-      public GlobalSearchScope fun(RequestWithProcessor r) {
-        return (GlobalSearchScope)r.request.searchScope;
-      }
-    });
+    Set<GlobalSearchScope> scopes = ContainerUtil.map2LinkedSet(requests, r -> (GlobalSearchScope)r.request.searchScope);
     return GlobalSearchScope.union(scopes.toArray(new GlobalSearchScope[scopes.size()]));
   }
 
@@ -873,12 +866,7 @@ public class PsiSearchHelperImpl implements PsiSearchHelper {
         }
       }
       for (final Processor<Processor<PsiReference>> customAction : collector.takeCustomSearchActions()) {
-        customs.add(new Computable<Boolean>() {
-          @Override
-          public Boolean compute() {
-            return customAction.process(processor);
-          }
-        });
+        customs.add(() -> customAction.process(processor));
       }
     }
 
@@ -954,17 +942,9 @@ public class PsiSearchHelperImpl implements PsiSearchHelper {
                                                        @NotNull final Collection<IdIndexEntry> keys,
                                                        @NotNull final Processor<VirtualFile> processor) {
     final FileIndexFacade index = FileIndexFacade.getInstance(project);
-    return DumbService.getInstance(project).runReadActionInSmartMode(new Computable<Boolean>() {
-      @Override
-      public Boolean compute() {
-        return FileBasedIndex.getInstance().processFilesContainingAllKeys(IdIndex.NAME, keys, scope, checker, new Processor<VirtualFile>() {
-          @Override
-          public boolean process(VirtualFile file) {
-            return !index.shouldBeFound(scope, file) || processor.process(file);
-          }
-        });
-      }
-    });
+    return DumbService.getInstance(project).runReadActionInSmartMode(
+      () -> FileBasedIndex.getInstance().processFilesContainingAllKeys(IdIndex.NAME, keys, scope, checker,
+                                                                        file -> !index.shouldBeFound(scope, file) || processor.process(file)));
   }
 
   @NotNull
@@ -977,12 +957,7 @@ public class PsiSearchHelperImpl implements PsiSearchHelper {
       }
     }
     if (words.isEmpty()) return Collections.emptyList();
-    return ContainerUtil.map2List(words, new Function<String, IdIndexEntry>() {
-      @Override
-      public IdIndexEntry fun(String word) {
-        return new IdIndexEntry(word, caseSensitively);
-      }
-    });
+    return ContainerUtil.map2List(words, word -> new IdIndexEntry(word, caseSensitively));
   }
 
   public static boolean processTextOccurrences(@NotNull final PsiElement element,

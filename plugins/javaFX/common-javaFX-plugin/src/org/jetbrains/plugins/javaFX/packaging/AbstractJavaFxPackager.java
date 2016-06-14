@@ -18,7 +18,6 @@ package org.jetbrains.plugins.javaFX.packaging;
 import com.intellij.execution.CommandLineUtil;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.ArrayUtilRt;
@@ -27,9 +26,7 @@ import com.intellij.util.PathUtilRt;
 import com.intellij.util.io.ZipUtil;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.List;
@@ -62,9 +59,15 @@ public abstract class AbstractJavaFxPackager {
 
   protected abstract String getDescription();
 
+  protected abstract String getVersion();
+
   protected abstract String getWidth();
 
   protected abstract String getHeight();
+
+  protected abstract String getHtmlTemplateFile();
+
+  protected abstract String getHtmlPlaceholderId();
 
   protected abstract String getHtmlParamFile();
 
@@ -76,6 +79,7 @@ public abstract class AbstractJavaFxPackager {
 
   protected abstract void registerJavaFxPackagerError(final String message);
 
+  protected abstract JavaFxApplicationIcons getIcons();
 
   public void buildJavaFxArtifact(final String homePath) {
     if (!checkNotEmpty(getAppClass(), "Application class")) return;
@@ -106,7 +110,7 @@ public abstract class AbstractJavaFxPackager {
       buf.append("<target name=\"build artifact\" xmlns:fx=\"javafx:com.sun.javafx.tools.ant\">");
       final String artifactFileName = getArtifactRootName();
       final List<JavaFxAntGenerator.SimpleTag> tags =
-        JavaFxAntGenerator.createJarAndDeployTasks(this, artifactFileName, getArtifactName(), tempUnzippedArtifactOutput.getPath());
+        JavaFxAntGenerator.createJarAndDeployTasks(this, artifactFileName, getArtifactName(), tempUnzippedArtifactOutput.getPath(), tempDirectory.getPath(), null);
       for (JavaFxAntGenerator.SimpleTag tag : tags) {
         tag.generate(buf);
       }
@@ -137,11 +141,7 @@ public abstract class AbstractJavaFxPackager {
         final String fileName = file.getName();
         if (ArrayUtilRt.find(generatedItems, fileName) < 0) {
           final File destination = new File(tempUnzippedArtifactOutput, fileName);
-          if (file.isFile()) {
-            FileUtil.copy(file, destination);
-          } else {
-            FileUtil.copyDir(file, destination, true);
-          }
+          FileUtil.copyFileOrDir(file, destination);
         }
       }
     }
@@ -289,13 +289,7 @@ public abstract class AbstractJavaFxPackager {
     try {
       File tempFile = FileUtil.createTempFile("build", ".xml");
       tempFile.deleteOnExit();
-      OutputStream outputStream = new FileOutputStream(tempFile.getAbsolutePath());
-      try {
-        outputStream.write(buildText.getBytes(Charset.defaultCharset()));
-      }
-      finally {
-        outputStream.close();
-      }
+      FileUtil.writeToFile(tempFile, buildText.getBytes(Charset.defaultCharset()));
       commands.add(tempFile.getCanonicalPath());
     }
     catch (IOException e) {

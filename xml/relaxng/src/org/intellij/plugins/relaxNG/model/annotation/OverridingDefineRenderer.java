@@ -21,6 +21,7 @@ import com.intellij.icons.AllIcons;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.editor.markup.GutterIconRenderer;
+import com.intellij.openapi.project.DumbAware;
 import com.intellij.pom.Navigatable;
 import com.intellij.psi.PsiElement;
 import com.intellij.ui.awt.RelativePoint;
@@ -36,7 +37,7 @@ import java.awt.event.MouseEvent;
 import java.util.Collection;
 import java.util.Set;
 
-class OverridingDefineRenderer extends GutterIconRenderer {
+class OverridingDefineRenderer extends GutterIconRenderer implements DumbAware {
 
   private final Set<Define> mySet;
   private final String myMessage;
@@ -82,12 +83,7 @@ class OverridingDefineRenderer extends GutterIconRenderer {
       OpenSourceUtil.navigate(true, n);
     } else {
       final Define[] array = set.toArray(new Define[set.size()]);
-      NavigationUtil.getPsiElementPopup(ContainerUtil.map(array, new Function<Define, PsiElement>() {
-        @Override
-        public PsiElement fun(Define define) {
-          return define.getPsiElement();
-        }
-      }, PsiElement.EMPTY_ARRAY), title).show(new RelativePoint((MouseEvent)e.getInputEvent()));
+      NavigationUtil.getPsiElementPopup(ContainerUtil.map(array, define -> define.getPsiElement(), PsiElement.EMPTY_ARRAY), title).show(new RelativePoint((MouseEvent)e.getInputEvent()));
     }
   }
 

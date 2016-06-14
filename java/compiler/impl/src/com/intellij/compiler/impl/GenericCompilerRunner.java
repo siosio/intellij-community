@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@ package com.intellij.compiler.impl;
 
 import com.intellij.compiler.impl.generic.GenericCompilerCache;
 import com.intellij.compiler.impl.generic.GenericCompilerPersistentData;
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.application.Result;
 import com.intellij.openapi.application.RunResult;
@@ -111,7 +110,7 @@ public class GenericCompilerRunner {
 
     final Set<String> targetsToRemove = new HashSet<String>(data.getAllTargets());
     new ReadAction() {
-      protected void run(final Result result) {
+      protected void run(@NotNull final Result result) {
         for (T target : instance.getAllTargets()) {
           targetsToRemove.remove(target.getId());
         }
@@ -126,17 +125,14 @@ public class GenericCompilerRunner {
         }
 
         final List<Key> keys = new ArrayList<Key>();
-        CompilerUtil.runInContext(myContext, "Processing obsolete targets...", new ThrowableRunnable<IOException>() {
-          @Override
-          public void run() throws IOException {
-            cache.processSources(id, new CommonProcessors.CollectProcessor<Key>(keys));
-            List<GenericCompilerCacheState<Key, SourceState, OutputState>> obsoleteSources = new ArrayList<GenericCompilerCacheState<Key,SourceState,OutputState>>();
-            for (Key key : keys) {
-              final GenericCompilerCache.PersistentStateData<SourceState, OutputState> state = cache.getState(id, key);
-              obsoleteSources.add(new GenericCompilerCacheState<Key,SourceState,OutputState>(key, state.mySourceState, state.myOutputState));
-            }
-            instance.processObsoleteTarget(target, obsoleteSources);
+        CompilerUtil.runInContext(myContext, "Processing obsolete targets...", () -> {
+          cache.processSources(id, new CommonProcessors.CollectProcessor<Key>(keys));
+          List<GenericCompilerCacheState<Key, SourceState, OutputState>> obsoleteSources = new ArrayList<GenericCompilerCacheState<Key,SourceState,OutputState>>();
+          for (Key key : keys) {
+            final GenericCompilerCache.PersistentStateData<SourceState, OutputState> state = cache.getState(id, key);
+            obsoleteSources.add(new GenericCompilerCacheState<Key,SourceState,OutputState>(key, state.mySourceState, state.myOutputState));
           }
+          instance.processObsoleteTarget(target, obsoleteSources);
         });
         checkForErrorsOrCanceled();
         for (Key key : keys) {
@@ -187,28 +183,25 @@ public class GenericCompilerRunner {
     final THashSet<Key> keySet = new THashSet<Key>(new SourceItemHashingStrategy<Key>(compiler));
     final Ref<IOException> exception = Ref.create(null);
     final Map<Item, SourceState> sourceStates = new HashMap<Item,SourceState>();
-    DumbService.getInstance(myProject).runReadActionInSmartMode(new Runnable() {
-      @Override
-      public void run() {
-        try {
-          for (Item item : items) {
-            final Key key = item.getKey();
-            keySet.add(key);
-            if (item.isExcluded()) continue;
+    DumbService.getInstance(myProject).runReadActionInSmartMode(() -> {
+      try {
+        for (Item item : items) {
+          final Key key = item.getKey();
+          keySet.add(key);
+          if (item.isExcluded()) continue;
 
-            final GenericCompilerCache.PersistentStateData<SourceState, OutputState> data = cache.getState(targetId, key);
-            SourceState sourceState = data != null ? data.mySourceState : null;
-            final OutputState outputState = data != null ? data.myOutputState : null;
-            if (myForceCompile || sourceState == null || !item.isSourceUpToDate(sourceState)
-                               || outputState == null || !item.isOutputUpToDate(outputState)) {
-              sourceStates.put(item, item.computeSourceState());
-              toProcess.add(new GenericCompilerProcessingItem<Item,SourceState,OutputState>(item, sourceState, outputState));
-            }
+          final GenericCompilerCache.PersistentStateData<SourceState, OutputState> data = cache.getState(targetId, key);
+          SourceState sourceState = data != null ? data.mySourceState : null;
+          final OutputState outputState = data != null ? data.myOutputState : null;
+          if (myForceCompile || sourceState == null || !item.isSourceUpToDate(sourceState)
+                             || outputState == null || !item.isOutputUpToDate(outputState)) {
+            sourceStates.put(item, item.computeSourceState());
+            toProcess.add(new GenericCompilerProcessingItem<Item,SourceState,OutputState>(item, sourceState, outputState));
           }
         }
-        catch (IOException e) {
-          exception.set(e);
-        }
+      }
+      catch (IOException e) {
+        exception.set(e);
       }
     });
     if (!exception.isNull()) {
@@ -216,14 +209,11 @@ public class GenericCompilerRunner {
     }
 
     final List<Key> toRemove = new ArrayList<Key>();
-    cache.processSources(targetId, new Processor<Key>() {
-      @Override
-      public boolean process(Key key) {
-        if (!keySet.contains(key)) {
-          toRemove.add(key);
-        }
-        return true;
+    cache.processSources(targetId, key -> {
+      if (!keySet.contains(key)) {
+        toRemove.add(key);
       }
+      return true;
     });
 
     if (LOG.isDebugEnabled()) {
@@ -271,39 +261,36 @@ public class GenericCompilerRunner {
     });
     checkForErrorsOrCanceled();
 
-    CompilerUtil.runInContext(myContext, CompilerBundle.message("progress.updating.caches"), new ThrowableRunnable<IOException>() {
-      @Override
-      public void run() throws IOException {
-        for (Key key : toRemove) {
-          cache.remove(targetId, key);
-        }
-        CompilerUtil.refreshIOFiles(filesToRefresh);
-        CompilerUtil.refreshIODirectories(dirsToRefresh);
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("refreshed " + filesToRefresh.size() + " files and " + dirsToRefresh.size() + " dirs");
-          for (int i = 0; i < getItemsCountToShowInLog(filesToRefresh.size()); i++) {
-            LOG.debug("file: " + filesToRefresh.get(i));
-          }
-          for (int i = 0; i < getItemsCountToShowInLog(dirsToRefresh.size()); i++) {
-            LOG.debug("dir: " + dirsToRefresh.get(i));
-          }
-        }
-
-        final RunResult runResult = new ReadAction() {
-          protected void run(final Result result) throws Throwable {
-            for (Item item : processedItems) {
-              SourceState sourceState = sourceStates.get(item);
-              if (sourceState == null) {
-                sourceState = item.computeSourceState();
-              }
-              cache.putState(targetId, item.getKey(), sourceState, item.computeOutputState());
-            }
-          }
-        }.executeSilently();
-        Throwable throwable = runResult.getThrowable();
-        if (throwable instanceof IOException) throw (IOException) throwable;
-        else if (throwable != null) throw new RuntimeException(throwable);
+    CompilerUtil.runInContext(myContext, CompilerBundle.message("progress.updating.caches"), () -> {
+      for (Key key : toRemove) {
+        cache.remove(targetId, key);
       }
+      CompilerUtil.refreshIOFiles(filesToRefresh);
+      CompilerUtil.refreshIODirectories(dirsToRefresh);
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("refreshed " + filesToRefresh.size() + " files and " + dirsToRefresh.size() + " dirs");
+        for (int i = 0; i < getItemsCountToShowInLog(filesToRefresh.size()); i++) {
+          LOG.debug("file: " + filesToRefresh.get(i));
+        }
+        for (int i = 0; i < getItemsCountToShowInLog(dirsToRefresh.size()); i++) {
+          LOG.debug("dir: " + dirsToRefresh.get(i));
+        }
+      }
+
+      final RunResult runResult = new ReadAction() {
+        protected void run(@NotNull final Result result) throws Throwable {
+          for (Item item : processedItems) {
+            SourceState sourceState = sourceStates.get(item);
+            if (sourceState == null) {
+              sourceState = item.computeSourceState();
+            }
+            cache.putState(targetId, item.getKey(), sourceState, item.computeOutputState());
+          }
+        }
+      }.executeSilently();
+      Throwable throwable = runResult.getThrowable();
+      if (throwable instanceof IOException) throw (IOException) throwable;
+      else if (throwable != null) throw new RuntimeException(throwable);
     });
 
     return true;

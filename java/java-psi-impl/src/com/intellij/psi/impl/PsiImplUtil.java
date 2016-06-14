@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package com.intellij.psi.impl;
 
 import com.intellij.codeInsight.AnnotationTargetUtil;
+import com.intellij.codeInsight.AnnotationUtil;
 import com.intellij.lang.ASTNode;
 import com.intellij.lang.FileASTNode;
 import com.intellij.openapi.application.ApplicationManager;
@@ -192,8 +193,7 @@ public class PsiImplUtil {
                                                     @NotNull final PsiElement place) {
     final boolean fromBody = lastParent instanceof PsiCodeBlock;
     final PsiTypeParameterList typeParameterList = method.getTypeParameterList();
-    final PsiParameterList parameterList = method.getParameterList();
-    return processDeclarationsInMethodLike(method, processor, state, place, fromBody, typeParameterList, parameterList);
+    return processDeclarationsInMethodLike(method, processor, state, place, fromBody, typeParameterList);
   }
 
   public static boolean processDeclarationsInLambda(@NotNull final PsiLambdaExpression lambda,
@@ -202,17 +202,15 @@ public class PsiImplUtil {
                                                     final PsiElement lastParent,
                                                     @NotNull final PsiElement place) {
     final boolean fromBody = lastParent != null && lastParent == lambda.getBody();
-    final PsiParameterList parameterList = lambda.getParameterList();
-    return processDeclarationsInMethodLike(lambda, processor, state, place, fromBody, null, parameterList);
+    return processDeclarationsInMethodLike(lambda, processor, state, place, fromBody, null);
   }
 
-  private static boolean processDeclarationsInMethodLike(@NotNull final PsiElement element,
+  private static boolean processDeclarationsInMethodLike(@NotNull final PsiParameterListOwner element,
                                                          @NotNull final PsiScopeProcessor processor,
                                                          @NotNull final ResolveState state,
                                                          @NotNull final PsiElement place,
                                                          final boolean fromBody,
-                                                         @Nullable final PsiTypeParameterList typeParameterList,
-                                                         @NotNull final PsiParameterList parameterList) {
+                                                         @Nullable final PsiTypeParameterList typeParameterList) {
     processor.handleEvent(PsiScopeProcessor.Event.SET_DECLARATION_HOLDER, element);
 
     if (typeParameterList != null) {
@@ -223,7 +221,7 @@ public class PsiImplUtil {
     }
 
     if (fromBody) {
-      final PsiParameter[] parameters = parameterList.getParameters();
+      final PsiParameter[] parameters = element.getParameterList().getParameters();
       for (PsiParameter parameter : parameters) {
         if (!processor.execute(parameter, state)) return false;
       }
@@ -239,11 +237,9 @@ public class PsiImplUtil {
     final ElementClassHint hint = processor.getHint(ElementClassHint.KEY);
     if (hint != null && !hint.shouldProcess(ElementClassHint.DeclarationKind.VARIABLE)) return true;
 
-    final List<PsiResourceVariable> resources = resourceList.getResourceVariables();
-    @SuppressWarnings({"SuspiciousMethodCalls"})
-    final int lastIdx = lastParent instanceof PsiResourceVariable ? resources.indexOf(lastParent) : resources.size();
-    for (int i = 0; i < lastIdx; i++) {
-      if (!processor.execute(resources.get(i), state)) return false;
+    for (PsiResourceListElement resource : resourceList) {
+      if (resource == lastParent) break;
+      if (resource instanceof PsiResourceVariable && !processor.execute(resource, state)) return false;
     }
 
     return true;
@@ -325,50 +321,26 @@ public class PsiImplUtil {
     return null;
   }
 
-  @Nullable
+  /** @deprecated use {@link AnnotationTargetUtil#findAnnotationTarget(PsiAnnotation, TargetType...)} (to be removed ion IDEA 17) */
+  @SuppressWarnings("unused")
   public static TargetType findApplicableTarget(@NotNull PsiAnnotation annotation, @NotNull TargetType... types) {
-    if (types.length != 0) {
-      PsiJavaCodeReferenceElement ref = annotation.getNameReferenceElement();
-      if (ref != null) {
-        PsiElement annotationType = ref.resolve();
-        if (annotationType instanceof PsiClass) {
-          return findApplicableTarget((PsiClass)annotationType, types);
-        }
-      }
-    }
-
-    return TargetType.UNKNOWN;
+    return AnnotationTargetUtil.findAnnotationTarget(annotation, types);
   }
 
-  @Nullable
+  /** @deprecated use {@link AnnotationTargetUtil#findAnnotationTarget(PsiClass, TargetType...)} (to be removed ion IDEA 17) */
+  @SuppressWarnings("unused")
   public static TargetType findApplicableTarget(@NotNull PsiClass annotationType, @NotNull TargetType... types) {
-    if (types.length != 0) {
-      Set<TargetType> targets = getAnnotationTargets(annotationType);
-      if (targets != null) {
-        for (TargetType type : types) {
-          if (type != TargetType.UNKNOWN && targets.contains(type)) {
-            return type;
-          }
-        }
-        return null;
-      }
-    }
-
-    return TargetType.UNKNOWN;
+    return AnnotationTargetUtil.findAnnotationTarget(annotationType, types);
   }
 
-  @Nullable
+  /** @deprecated use {@link AnnotationTargetUtil#getAnnotationTargets(PsiClass)} (to be removed ion IDEA 17) */
+  @SuppressWarnings("unused")
   public static Set<TargetType> getAnnotationTargets(@NotNull PsiClass annotationType) {
-    if (!annotationType.isAnnotationType()) return null;
-    PsiModifierList modifierList = annotationType.getModifierList();
-    if (modifierList == null) return null;
-    PsiAnnotation target = modifierList.findAnnotation(CommonClassNames.JAVA_LANG_ANNOTATION_TARGET);
-    if (target == null) return AnnotationTargetUtil.DEFAULT_TARGETS;  // if omitted it is applicable to all but Java 8 TYPE_USE/TYPE_PARAMETERS targets
-
-    return AnnotationTargetUtil.extractRequiredAnnotationTargets(target.findAttributeValue(null));
+    return AnnotationTargetUtil.getAnnotationTargets(annotationType);
   }
 
-  @NotNull
+  /** @deprecated use {@link AnnotationTargetUtil#getTargetsForLocation(PsiAnnotationOwner)} (to be removed ion IDEA 17) */
+  @SuppressWarnings("unused")
   public static TargetType[] getTargetsForLocation(@Nullable PsiAnnotationOwner owner) {
     return AnnotationTargetUtil.getTargetsForLocation(owner);
   }
@@ -388,6 +360,10 @@ public class PsiImplUtil {
     }
   }
 
+  /**
+   * Types should be proceed by the callers themselves
+   */
+  @Deprecated
   public static PsiType normalizeWildcardTypeByPosition(@NotNull PsiType type, @NotNull PsiExpression expression) {
     PsiUtilCore.ensureValid(expression);
     PsiUtil.ensureValidType(type);
@@ -412,21 +388,6 @@ public class PsiImplUtil {
   }
 
   private static PsiType doNormalizeWildcardByPosition(PsiType type, @NotNull PsiExpression expression, PsiExpression topLevel) {
-    if (type instanceof PsiCapturedWildcardType) {
-      final PsiWildcardType wildcardType = ((PsiCapturedWildcardType)type).getWildcard();
-      if (expression instanceof PsiReferenceExpression && LambdaUtil.isLambdaReturnExpression(expression)) {
-        return type;
-      }
-
-      if (PsiUtil.isAccessedForWriting(topLevel)) {
-        return wildcardType.isSuper() ? wildcardType.getBound() : PsiCapturedWildcardType.create(wildcardType, expression);
-      }
-      else {
-        final PsiType upperBound = ((PsiCapturedWildcardType)type).getUpperBound();
-        return upperBound instanceof PsiWildcardType ? doNormalizeWildcardByPosition(upperBound, expression, topLevel) : upperBound;
-      }
-    }
-
 
     if (type instanceof PsiWildcardType) {
       final PsiWildcardType wildcardType = (PsiWildcardType)type;
@@ -463,7 +424,10 @@ public class PsiImplUtil {
     if (isInServerPage(file)) return maximalUseScope;
 
     PsiClass aClass = member.getContainingClass();
-    if (aClass instanceof PsiAnonymousClass) {
+    if (aClass instanceof PsiAnonymousClass && !(aClass instanceof PsiEnumConstantInitializer &&
+                                                 member instanceof PsiMethod &&
+                                                 member.hasModifierProperty(PsiModifier.PUBLIC) &&
+                                                 ((PsiMethod)member).findSuperMethods().length > 0)) {
       //member from anonymous class can be called from outside the class
       PsiElement methodCallExpr = PsiUtil.isLanguageLevel8OrHigher(aClass) ? PsiTreeUtil.getTopmostParentOfType(aClass, PsiStatement.class) 
                                                                            : PsiTreeUtil.getParentOfType(aClass, PsiMethodCallExpression.class);
@@ -506,8 +470,7 @@ public class PsiImplUtil {
   }
 
   public static boolean isDeprecatedByAnnotation(@NotNull PsiModifierListOwner owner) {
-    PsiModifierList modifierList = owner.getModifierList();
-    return modifierList != null && modifierList.findAnnotation("java.lang.Deprecated") != null;
+    return AnnotationUtil.findAnnotation(owner, CommonClassNames.JAVA_LANG_DEPRECATED) != null;
   }
 
   public static boolean isDeprecatedByDocTag(@NotNull PsiDocCommentOwner owner) {
@@ -564,22 +527,16 @@ public class PsiImplUtil {
 
   @Nullable
   public static ASTNode skipWhitespaceAndComments(final ASTNode node) {
-    return skipWhitespaceCommentsAndTokens(node, TokenSet.EMPTY);
+    return TreeUtil.skipWhitespaceAndComments(node, true);
   }
 
   @Nullable
   public static ASTNode skipWhitespaceCommentsAndTokens(final ASTNode node, TokenSet alsoSkip) {
-    ASTNode element = node;
-    while (true) {
-      if (element == null) return null;
-      if (!isWhitespaceOrComment(element) && !alsoSkip.contains(element.getElementType())) break;
-      element = element.getTreeNext();
-    }
-    return element;
+    return TreeUtil.skipWhitespaceCommentsAndTokens(node, alsoSkip, true);
   }
 
   public static boolean isWhitespaceOrComment(ASTNode element) {
-    return element.getPsi() instanceof PsiWhiteSpace || element.getPsi() instanceof PsiComment;
+    return TreeUtil.isWhitespaceOrComment(element);
   }
 
   @Nullable
@@ -659,11 +616,19 @@ public class PsiImplUtil {
   }
 
   public static boolean isTypeAnnotation(@Nullable PsiElement element) {
-    return element instanceof PsiAnnotation &&
-           findApplicableTarget((PsiAnnotation)element, TargetType.TYPE_USE) == TargetType.TYPE_USE;
+    return element instanceof PsiAnnotation && AnnotationTargetUtil.isTypeAnnotation((PsiAnnotation)element);
   }
 
-  @Nullable
+  public static void collectTypeUseAnnotations(@NotNull PsiModifierList modifierList, @NotNull List<PsiAnnotation> annotations) {
+    for (PsiAnnotation annotation : modifierList.getAnnotations()) {
+      if (AnnotationTargetUtil.isTypeAnnotation(annotation)) {
+        annotations.add(annotation);
+      }
+    }
+  }
+
+  /** @deprecated use {@link #collectTypeUseAnnotations(PsiModifierList, List)} (to be removed in IDEA 16) */
+  @SuppressWarnings("unused")
   public static List<PsiAnnotation> getTypeUseAnnotations(@NotNull PsiModifierList modifierList) {
     SmartList<PsiAnnotation> result = null;
 
@@ -683,7 +648,7 @@ public class PsiImplUtil {
     PsiElement left = PsiTreeUtil.skipSiblingsBackward(typeElement, PsiComment.class, PsiWhiteSpace.class, PsiTypeParameterList.class);
     if (left instanceof PsiModifierList) {
       for (PsiAnnotation annotation : ((PsiModifierList)left).getAnnotations()) {
-        if (isTypeAnnotation(annotation)) {
+        if (AnnotationTargetUtil.isTypeAnnotation(annotation)) {
           annotation.putUserData(TYPE_ANNO_MARK, Boolean.TRUE);
         }
       }

@@ -15,7 +15,11 @@
  */
 package com.intellij.openapi.project;
 
+import com.intellij.openapi.diagnostic.Attachment;
+import com.intellij.openapi.diagnostic.ExceptionWithAttachments;
 import com.intellij.openapi.util.Computable;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Thrown on accessing indices when they're not ready, in so-called dumb mode. Possible fixes:
@@ -46,10 +50,23 @@ import com.intellij.openapi.util.Computable;
  * @see DumbService
  * @see DumbAware
  */
-public class IndexNotReadyException extends RuntimeException {
+public class IndexNotReadyException extends RuntimeException implements ExceptionWithAttachments {
+  @Nullable private final Throwable myStartTrace;
 
+  public IndexNotReadyException() {
+    this(null);
+  }
+
+  public IndexNotReadyException(@Nullable Throwable startTrace) {
+    super("Please change caller according to " + IndexNotReadyException.class.getName() + " documentation");
+    myStartTrace = startTrace;
+  }
+
+  @NotNull
   @Override
-  public String getMessage() {
-    return "Please change caller according to " + IndexNotReadyException.class.getName() + " documentation";
+  public Attachment[] getAttachments() {
+    return myStartTrace == null
+           ? Attachment.EMPTY_ARRAY
+           : new Attachment[]{new Attachment("indexingStart", myStartTrace)};
   }
 }

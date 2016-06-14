@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,11 +17,15 @@
 package com.intellij.openapi.vcs;
 
 import com.intellij.lifecycle.PeriodicalTasksCloser;
-import com.intellij.openapi.components.*;
+import com.intellij.openapi.components.PersistentStateComponent;
+import com.intellij.openapi.components.State;
+import com.intellij.openapi.components.Storage;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.SimpleModificationTracker;
 import com.intellij.openapi.util.TextRange;
+import com.intellij.util.io.URLUtil;
 import com.intellij.util.xmlb.XmlSerializerUtil;
-import org.jetbrains.annotations.NonNls;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -33,16 +37,10 @@ import java.util.regex.Pattern;
 /**
  * @author yole
  */
-@State(
-  name = "IssueNavigationConfiguration",
-  storages = {
-    @Storage(file = StoragePathMacros.PROJECT_FILE),
-    @Storage(file = StoragePathMacros.PROJECT_CONFIG_DIR + "/vcs.xml", scheme = StorageScheme.DIRECTORY_BASED)
-  }
-)
-public class IssueNavigationConfiguration implements PersistentStateComponent<IssueNavigationConfiguration> {
-  @NonNls private static final Pattern ourHtmlPattern =
-    Pattern.compile("(http:|https:)\\/\\/([^\\s()](?!&(gt|lt|nbsp)+;))+[^\\p{Pe}\\p{Pc}\\p{Pd}\\p{Ps}\\p{Po}\\s]/?");
+@State(name = "IssueNavigationConfiguration", storages = @Storage("vcs.xml"))
+public class IssueNavigationConfiguration extends SimpleModificationTracker
+  implements PersistentStateComponent<IssueNavigationConfiguration> {
+  private static final Logger LOG = Logger.getInstance(IssueNavigationConfiguration.class);
 
   public static IssueNavigationConfiguration getInstance(Project project) {
     return PeriodicalTasksCloser.getInstance().safeGetService(project, IssueNavigationConfiguration.class);
@@ -56,6 +54,7 @@ public class IssueNavigationConfiguration implements PersistentStateComponent<Is
 
   public void setLinks(final List<IssueNavigationLink> links) {
     myLinks = new ArrayList<IssueNavigationLink>(links);
+    incModificationCount();
   }
 
   public IssueNavigationConfiguration getState() {
@@ -87,23 +86,27 @@ public class IssueNavigationConfiguration implements PersistentStateComponent<Is
       if (!(o instanceof LinkMatch)) {
         return 0;
       }
-      LinkMatch rhs = (LinkMatch) o;
-      return myRange.getStartOffset() - rhs.getRange().getStartOffset();
+      return myRange.getStartOffset() - ((LinkMatch)o).getRange().getStartOffset();
     }
   }
 
-  public List<LinkMatch> findIssueLinks(String text) {
+  public List<LinkMatch> findIssueLinks(CharSequence text) {
     final List<LinkMatch> result = new ArrayList<LinkMatch>();
-    for(IssueNavigationLink link: myLinks) {
+    for (IssueNavigationLink link : myLinks) {
       Pattern issuePattern = link.getIssuePattern();
       Matcher m = issuePattern.matcher(text);
-      while(m.find()) {
-        String replacement = issuePattern.matcher(m.group(0)).replaceFirst(link.getLinkRegexp());
-        addMatch(result, new TextRange(m.start(), m.end()), replacement);
+      while (m.find()) {
+        try {
+          String replacement = issuePattern.matcher(m.group(0)).replaceFirst(link.getLinkRegexp());
+          addMatch(result, new TextRange(m.start(), m.end()), replacement);
+        }
+        catch (Exception e) {
+          LOG.debug("Malformed regex replacement. IssueLink: " + link + "; text: " + text, e);
+        }
       }
     }
-    Matcher m = ourHtmlPattern.matcher(text);
-    while(m.find()) {
+    Matcher m = URLUtil.URL_PATTERN.matcher(text);
+    while (m.find()) {
       addMatch(result, new TextRange(m.start(), m.end()), m.group());
     }
     Collections.sort(result);
@@ -111,7 +114,7 @@ public class IssueNavigationConfiguration implements PersistentStateComponent<Is
   }
 
   private static void addMatch(final List<LinkMatch> result, final TextRange range, final String replacement) {
-    for (Iterator<LinkMatch> iterator = result.iterator(); iterator.hasNext();) {
+    for (Iterator<LinkMatch> iterator = result.iterator(); iterator.hasNext(); ) {
       LinkMatch oldMatch = iterator.next();
       if (range.contains(oldMatch.getRange())) {
         iterator.remove();

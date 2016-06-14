@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,35 +15,53 @@
  */
 package com.intellij.openapi.options;
 
-import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.WriteExternalException;
-import org.jdom.Document;
-import org.jdom.JDOMException;
+import org.jdom.Element;
 import org.jdom.Parent;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
-import java.io.IOException;
-
-/**
- * Please extend {@link BaseSchemeProcessor} to avoid compatibility issues
- */
-public interface SchemeProcessor<T extends ExternalizableScheme> {
-  @Deprecated
-  T readScheme(@NotNull Document schemeContent) throws InvalidDataException, IOException, JDOMException;
-
-  Parent writeScheme(@NotNull T scheme) throws WriteExternalException;
-
-  @Deprecated
+public abstract class SchemeProcessor<T extends ExternalizableScheme> {
   /**
-   * @deprecated Implement {@link BaseSchemeProcessor#getState(ExternalizableScheme)}
+   * Element will not be modified, it is safe to return non-cloned instance.
    */
-  boolean shouldBeSaved(@NotNull T scheme);
+  public abstract Parent writeScheme(@NotNull T scheme) throws WriteExternalException;
 
-  void initScheme(@NotNull T scheme);
+  public void initScheme(@NotNull T scheme) {
+  }
 
-  void onSchemeAdded(@NotNull T scheme);
+  public void onSchemeAdded(@NotNull T scheme) {
+  }
 
-  void onSchemeDeleted(@NotNull T scheme);
+  public void onSchemeDeleted(@NotNull T scheme) {
+  }
 
-  void onCurrentSchemeChanged(final Scheme oldCurrentScheme);
+  /**
+   * Scheme switched.
+   */
+  public void onCurrentSchemeChanged(@Nullable Scheme oldScheme) {
+  }
+
+  @Nullable
+  protected T readScheme(@NotNull Element element) throws Exception {
+    throw new AbstractMethodError();
+  }
+
+  /**
+   * @param duringLoad If occurred during {@link SchemesManager#loadSchemes()} call
+   * Returns null if element is not valid.
+   */
+  @Nullable
+  public T readScheme(@NotNull Element element, boolean duringLoad) throws Exception {
+    return readScheme(element);
+  }
+
+  public enum State {
+    UNCHANGED, NON_PERSISTENT, POSSIBLY_CHANGED
+  }
+
+  @NotNull
+  public State getState(@NotNull T scheme) {
+    return State.POSSIBLY_CHANGED;
+  }
 }

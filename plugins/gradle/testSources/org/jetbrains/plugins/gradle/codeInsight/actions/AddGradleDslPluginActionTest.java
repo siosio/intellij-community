@@ -15,7 +15,7 @@
  */
 package org.jetbrains.plugins.gradle.codeInsight.actions;
 
-import com.intellij.testFramework.IdeaTestCase;
+import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.testFramework.PlatformTestUtil;
 import com.intellij.testFramework.fixtures.CodeInsightTestUtil;
 import com.intellij.testFramework.fixtures.LightPlatformCodeInsightFixtureTestCase;
@@ -28,10 +28,6 @@ import java.io.File;
  */
 public class AddGradleDslPluginActionTest extends LightPlatformCodeInsightFixtureTestCase {
 
-  public AddGradleDslPluginActionTest() {
-    IdeaTestCase.initPlatformPrefix();
-  }
-
   public void testApplyPlugin() throws Exception {
     doTest("testApplyPlugin.gradle", "java");
   }
@@ -43,12 +39,7 @@ public class AddGradleDslPluginActionTest extends LightPlatformCodeInsightFixtur
 
   private void doTest(String file, String pluginName) {
     AddGradleDslPluginAction.TEST_THREAD_LOCAL.set(pluginName);
-    CodeInsightTestUtil.doActionTest(new AddGradleDslPluginAction(), file, myFixture);
-  }
-
-  @Override
-  public void setUp() throws Exception {
-    super.setUp();
+    WriteCommandAction.runWriteCommandAction(getProject(), () -> CodeInsightTestUtil.doActionTest(new AddGradleDslPluginAction(), file, myFixture));
   }
 
   @Override

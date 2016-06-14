@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -94,16 +94,13 @@ public class ScopeChooserConfigurable extends MasterDetailsComponent implements 
   protected ArrayList<AnAction> createActions(final boolean fromPopup) {
     final ArrayList<AnAction> result = new ArrayList<AnAction>();
     result.add(new MyAddAction(fromPopup));
-    result.add(new MyDeleteAction(forAll(new Condition<Object>() {
-      @Override
-      public boolean value(final Object o) {
-        if (o instanceof MyNode) {
-          final NamedConfigurable namedConfigurable = ((MyNode)o).getConfigurable();
-          final Object editableObject = namedConfigurable != null ? namedConfigurable.getEditableObject() : null;
-          return editableObject instanceof NamedScope;
-        }
-        return false;
+    result.add(new MyDeleteAction(forAll(o -> {
+      if (o instanceof MyNode) {
+        final NamedConfigurable namedConfigurable = ((MyNode)o).getConfigurable();
+        final Object editableObject = namedConfigurable != null ? namedConfigurable.getEditableObject() : null;
+        return editableObject instanceof NamedScope;
       }
+      return false;
     })));
     result.add(new MyCopyAction());
     result.add(new MySaveAsAction());
@@ -130,6 +127,10 @@ public class ScopeChooserConfigurable extends MasterDetailsComponent implements 
       }
     });
 
+    if (getScopesState().myOrder.size() != myRoot.getChildCount()) {
+      loadStateOrder();
+    }
+
     super.reset();
   }
 
@@ -148,7 +149,7 @@ public class ScopeChooserConfigurable extends MasterDetailsComponent implements 
   private void checkForPredefinedNames() throws ConfigurationException {
     final Set<String> predefinedScopes = new HashSet<String>();
     for (CustomScopesProvider scopesProvider : myProject.getExtensions(CustomScopesProvider.CUSTOM_SCOPES_PROVIDER)) {
-      for (NamedScope namedScope : scopesProvider.getCustomScopes()) {
+      for (NamedScope namedScope : scopesProvider.getFilteredScopes()) {
         predefinedScopes.add(namedScope.getName());
       }
     }

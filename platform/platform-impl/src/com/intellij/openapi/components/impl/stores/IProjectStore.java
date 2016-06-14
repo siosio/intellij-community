@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,23 +16,14 @@
 package com.intellij.openapi.components.impl.stores;
 
 import com.intellij.openapi.components.StorageScheme;
-import com.intellij.openapi.components.TrackingPathMacroSubstitutor;
-import com.intellij.openapi.project.impl.ProjectImpl;
-import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-/**
- * @see com.intellij.openapi.project.ex.ProjectEx#getStateStore()
- */
-public interface IProjectStore extends IComponentStore.Reloadable {
-  boolean checkVersion();
-
-  void setProjectFilePath(@NotNull String filePath);
-
-  @Nullable
-  VirtualFile getProjectBaseDir();
-
+public interface IProjectStore extends IComponentStore {
+  /**
+   * System-independent path.
+   */
   @Nullable
   String getProjectBasePath();
 
@@ -40,25 +31,25 @@ public interface IProjectStore extends IComponentStore.Reloadable {
   String getProjectName();
 
   @NotNull
-  TrackingPathMacroSubstitutor[] getSubstitutors();
-
-  @NotNull
   StorageScheme getStorageScheme();
 
-  @Nullable
-  String getPresentableUrl();
-
-  @Nullable
-  VirtualFile getProjectFile();
-
+  /**
+   * System-independent path.
+   */
   @NotNull
   String getProjectFilePath();
 
-  @Nullable
-  VirtualFile getWorkspaceFile();
-
+  /**
+   * System-independent path.
+   */
   @Nullable
   String getWorkspaceFilePath();
 
-  void loadProjectFromTemplate(@NotNull ProjectImpl project);
+  void loadProjectFromTemplate(@NotNull Project project);
+
+  void clearStorages();
+
+  boolean isOptimiseTestLoadSpeed();
+
+  void setOptimiseTestLoadSpeed(boolean optimiseTestLoadSpeed);
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -115,19 +115,16 @@ public class FileTypeConfigurable extends BaseConfigurable implements Searchable
     }
     myOriginalToEditedMap.clear();
 
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      @Override
-      public void run() {
-        if (!myManager.isIgnoredFilesListEqualToCurrent(myFileTypePanel.myIgnoreFilesField.getText())) {
-          myManager.setIgnoredFilesList(myFileTypePanel.myIgnoreFilesField.getText());
-        }
-        myManager.setPatternsTable(myTempFileTypes, myTempPatternsTable);
-        for (FileNameMatcher matcher : myReassigned.keySet()) {
-          myManager.getRemovedMappings().put(matcher, Pair.create(myReassigned.get(matcher), true));
-        }
-
-        TemplateDataLanguagePatterns.getInstance().setAssocTable(myTempTemplateDataLanguages);
+    ApplicationManager.getApplication().runWriteAction(() -> {
+      if (!myManager.isIgnoredFilesListEqualToCurrent(myFileTypePanel.myIgnoreFilesField.getText())) {
+        myManager.setIgnoredFilesList(myFileTypePanel.myIgnoreFilesField.getText());
       }
+      myManager.setPatternsTable(myTempFileTypes, myTempPatternsTable);
+      for (FileNameMatcher matcher : myReassigned.keySet()) {
+        myManager.getRemovedMappings().put(matcher, Pair.create(myReassigned.get(matcher), true));
+      }
+
+      TemplateDataLanguagePatterns.getInstance().setAssocTable(myTempTemplateDataLanguages);
     });
   }
 
@@ -277,7 +274,9 @@ public class FileTypeConfigurable extends BaseConfigurable implements Searchable
                                                FileTypesBundle.message("filetype.edit.add.pattern.reassign.button"),
                                                CommonBundle.getCancelButtonText(), Messages.getQuestionIcon())) {
             myTempPatternsTable.removeAssociation(matcher, registeredFileType);
-            myTempTemplateDataLanguages.removeAssociation(matcher, oldLanguage);
+            if (oldLanguage != null) {
+              myTempTemplateDataLanguages.removeAssociation(matcher, oldLanguage);
+            }
             myReassigned.put(matcher, registeredFileType);
           }
           else {
@@ -289,7 +288,9 @@ public class FileTypeConfigurable extends BaseConfigurable implements Searchable
       if (item != null) {
         final FileNameMatcher oldMatcher = FileTypeManager.parseFromString(item);
         myTempPatternsTable.removeAssociation(oldMatcher, type);
-        myTempTemplateDataLanguages.removeAssociation(oldMatcher, oldLanguage);
+        if (oldLanguage != null) {
+          myTempTemplateDataLanguages.removeAssociation(oldMatcher, oldLanguage);
+        }
       }
       myTempPatternsTable.addAssociation(matcher, type);
       myTempTemplateDataLanguages.addAssociation(matcher, dialog.getTemplateDataLanguage());
@@ -297,7 +298,7 @@ public class FileTypeConfigurable extends BaseConfigurable implements Searchable
       updateExtensionList();
       final int index = myPatterns.getListModel().indexOf(matcher.getPresentableString());
       if (index >= 0) {
-        ListScrollingUtil.selectItem(myPatterns.myPatternsList, index);
+        ScrollingUtil.selectItem(myPatterns.myPatternsList, index);
       }
       myPatterns.myPatternsList.requestFocus();
     }
@@ -416,7 +417,7 @@ public class FileTypeConfigurable extends BaseConfigurable implements Searchable
         .disableUpDownActions();
 
       add(toolbarDecorator.createPanel(), BorderLayout.CENTER);
-      setBorder(IdeBorderFactory.createTitledBorder(FileTypesBundle.message("filetypes.recognized.group"), false));
+      setBorder(IdeBorderFactory.createTitledBorder(FileTypesBundle.message("filetype.recognized.group"), false));
 
       mySpeedSearch = new MySpeedSearch(myFileTypesList);
     }
@@ -440,24 +441,18 @@ public class FileTypeConfigurable extends BaseConfigurable implements Searchable
       }
 
       private void initConvertors() {
-        final PairConvertor<Object, String, Boolean> simpleConvertor = new PairConvertor<Object, String, Boolean>() {
-          @Override
-          public Boolean convert(Object element, String s) {
-            String value = element.toString();
-            if (element instanceof FileType) {
-               value = ((FileType)element).getDescription();
-            }
-            return getComparator().matchingFragments(s, value) != null;
+        final PairConvertor<Object, String, Boolean> simpleConvertor = (element, s) -> {
+          String value = element.toString();
+          if (element instanceof FileType) {
+             value = ((FileType)element).getDescription();
           }
+          return getComparator().matchingFragments(s, value) != null;
         };
-        final PairConvertor<Object, String, Boolean> byExtensionsConvertor = new PairConvertor<Object, String, Boolean>() {
-          @Override
-          public Boolean convert(Object element, String s) {
-            if (element instanceof FileType && myCurrentType != null) {
-              return myCurrentType.equals(element);
-            }
-            return false;
+        final PairConvertor<Object, String, Boolean> byExtensionsConvertor = (element, s) -> {
+          if (element instanceof FileType && myCurrentType != null) {
+            return myCurrentType.equals(element);
           }
+          return false;
         };
         myOrderedConvertors.add(simpleConvertor);
         myOrderedConvertors.add(byExtensionsConvertor);
@@ -500,7 +495,7 @@ public class FileTypeConfigurable extends BaseConfigurable implements Searchable
           listModel.addElement(type);
         }
       }
-      ListScrollingUtil.ensureSelectionExists(myFileTypesList);
+      ScrollingUtil.ensureSelectionExists(myFileTypesList);
     }
 
     public int getSelectedIndex() {
@@ -567,12 +562,12 @@ public class FileTypeConfigurable extends BaseConfigurable implements Searchable
     }
 
     public void ensureSelectionExists() {
-      ListScrollingUtil.ensureSelectionExists(myPatternsList);
+      ScrollingUtil.ensureSelectionExists(myPatternsList);
     }
 
     public void addPatternAndSelect(String pattern) {
       addPattern(pattern);
-      ListScrollingUtil.selectItem(myPatternsList, getListModel().getSize() - 1);
+      ScrollingUtil.selectItem(myPatternsList, getListModel().getSize() - 1);
     }
 
     public void select(final String pattern) {
@@ -581,7 +576,7 @@ public class FileTypeConfigurable extends BaseConfigurable implements Searchable
         if (at instanceof String) {
           final FileNameMatcher matcher = FileTypeManager.parseFromString((String)at);
           if (FileNameMatcherEx.acceptsCharSequence(matcher, pattern)) {
-            ListScrollingUtil.selectItem(myPatternsList, i);
+            ScrollingUtil.selectItem(myPatternsList, i);
             return;
           }
         }

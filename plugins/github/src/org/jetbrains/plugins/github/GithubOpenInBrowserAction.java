@@ -20,6 +20,7 @@ import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.SelectionModel;
+import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
@@ -30,10 +31,9 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.ChangeListManager;
+import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.vcsUtil.VcsUtil;
-import git4idea.GitLocalBranch;
-import git4idea.GitRemoteBranch;
 import git4idea.GitRevisionNumber;
 import git4idea.GitUtil;
 import git4idea.history.GitHistoryUtils;
@@ -132,19 +132,11 @@ public class GithubOpenInBrowserAction extends DumbAwareAction {
       return null;
     }
 
-    final String rootPath = repository.getRoot().getPath();
-    final String path = virtualFile.getPath();
-    if (!path.startsWith(rootPath)) {
-      GithubNotifications
-        .showError(project, CANNOT_OPEN_IN_BROWSER, "File is not under repository root", "Root: " + rootPath + ", file: " + path);
+    String relativePath = VfsUtilCore.getRelativePath(virtualFile, repository.getRoot());
+    if (relativePath == null) {
+      GithubNotifications.showError(project, CANNOT_OPEN_IN_BROWSER, "File is not under repository root",
+                                    "Root: " + repository.getRoot().getPresentableUrl() + ", file: " + virtualFile.getPresentableUrl());
       return null;
-    }
-
-    String relativePath = path.substring(rootPath.length());
-
-    String branch = getCurrentBranchNameOnRemote(repository);
-    if (branch != null) {
-      return makeUrlToOpen(editor, relativePath, branch, githubRemoteUrl);
     }
 
     String hash = getCurrentFileRevisionHash(project, virtualFile);
@@ -152,7 +144,7 @@ public class GithubOpenInBrowserAction extends DumbAwareAction {
       return makeUrlToOpen(editor, relativePath, hash, githubRemoteUrl);
     }
 
-    GithubNotifications.showError(project, CANNOT_OPEN_IN_BROWSER, "Can't find related tracked branch or hash.");
+    GithubNotifications.showError(project, CANNOT_OPEN_IN_BROWSER, "Can't get last revision.");
     return null;
   }
 
@@ -170,7 +162,7 @@ public class GithubOpenInBrowserAction extends DumbAwareAction {
       builder.append(githubRepoUrl).append("/tree/").append(branch);
     }
     else {
-      builder.append(githubRepoUrl).append("/blob/").append(branch).append(relativePath);
+      builder.append(githubRepoUrl).append("/blob/").append(branch).append('/').append(relativePath);
     }
 
     if (editor != null && editor.getDocument().getLineCount() >= 1) {
@@ -182,39 +174,29 @@ public class GithubOpenInBrowserAction extends DumbAwareAction {
       if (editor.getDocument().getLineStartOffset(end - 1) == selectionEnd) {
         end -= 1;
       }
-      builder.append("#L").append(begin).append('-').append(end);
+      builder.append("#L").append(begin).append("-L").append(end);
     }
 
     return builder.toString();
   }
 
   @Nullable
-  private static String getCurrentBranchNameOnRemote(@NotNull GitRepository repository) {
-    GitLocalBranch currentBranch = repository.getCurrentBranch();
-    if (currentBranch == null) {
-      return null;
-    }
-
-    GitRemoteBranch tracked = currentBranch.findTrackedBranch(repository);
-    if (tracked == null) {
-      return null;
-    }
-
-    return tracked.getNameForRemoteOperations();
-  }
-
-  @Nullable
   private static String getCurrentFileRevisionHash(@NotNull final Project project, @NotNull final VirtualFile file) {
     final Ref<GitRevisionNumber> ref = new Ref<GitRevisionNumber>();
-    ProgressManager.getInstance().run(new Task.Modal(project, "Getting last revision", false) {
+    ProgressManager.getInstance().run(new Task.Modal(project, "Getting last revision", true) {
       @Override
       public void run(@NotNull ProgressIndicator indicator) {
         try {
-          ref.set((GitRevisionNumber)GitHistoryUtils.getCurrentRevision(project, VcsUtil.getFilePath(file), null));
+          ref.set((GitRevisionNumber)GitHistoryUtils.getCurrentRevision(project, VcsUtil.getFilePath(file), "HEAD"));
         }
         catch (VcsException e) {
           LOG.warn(e);
         }
+      }
+
+      @Override
+      public void onCancel() {
+        throw new ProcessCanceledException();
       }
     });
     if (ref.isNull()) return null;

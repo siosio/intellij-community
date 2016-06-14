@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,8 +27,8 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
-// do not run on build server
-@Bombed(year = 3000, month = Calendar.FEBRUARY, day = 1)
+@SuppressWarnings("unused")
+@Bombed(user = "cdr", year = 3000, month = Calendar.FEBRUARY, day = 1, description = "do not run on build server")
 public abstract class MavenPerformanceTest extends MavenImportingTestCase {
   @Override
   protected void setUp() throws Exception {
@@ -39,54 +39,29 @@ public abstract class MavenPerformanceTest extends MavenImportingTestCase {
   }
 
   public void testReading() throws Exception {
-    measure(4000, new Runnable() {
-      @Override
-      public void run() {
-        waitForReadingCompletion();
-      }
-    });
+    measure(4000, () -> waitForReadingCompletion());
   }
 
   public void testImporting() throws Exception {
     waitForReadingCompletion();
-    measure(8, new Runnable() {
-      @Override
-      public void run() {
-        myProjectsManager.importProjects();
-      }
-    });
+    measure(8, () -> myProjectsManager.importProjects());
   }
 
   public void testReImporting() throws Exception {
     waitForReadingCompletion();
     myProjectsManager.importProjects();
-    measure(2, new Runnable() {
-      @Override
-      public void run() {
-        myProjectsManager.importProjects();
-      }
-    });
+    measure(2, () -> myProjectsManager.importProjects());
   }
 
   public void testResolving() throws Exception {
     waitForReadingCompletion();
     List<MavenProject> mavenProjects = myProjectsManager.getProjects();
-    Collections.sort(mavenProjects, new Comparator<MavenProject>() {
-      @Override
-      public int compare(MavenProject o1, MavenProject o2) {
-        return o1.getPath().compareToIgnoreCase(o2.getPath());
-      }
-    });
+    Collections.sort(mavenProjects, (o1, o2) -> o1.getPath().compareToIgnoreCase(o2.getPath()));
 
     myProjectsManager.unscheduleAllTasksInTests();
 
     myProjectsManager.scheduleResolveInTests(mavenProjects.subList(0, 100));
-    measure(50000, new Runnable() {
-      @Override
-      public void run() {
-        myProjectsManager.waitForResolvingCompletion();
-      }
-    });
+    measure(50000, () -> myProjectsManager.waitForResolvingCompletion());
   }
 
   private static void measure(long expected, Runnable r) {

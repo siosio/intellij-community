@@ -33,6 +33,7 @@ import com.intellij.remoteServer.configuration.deployment.DeploymentSourceType;
 import com.intellij.remoteServer.impl.configuration.RemoteServerListConfigurable;
 import com.intellij.ui.*;
 import com.intellij.util.ui.FormBuilder;
+import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -92,12 +93,8 @@ public class DeployToServerSettingsEditor<S extends ServerConfiguration, D exten
       }
     });
 
-    mySourceListModel = new SortedComboBoxModel<DeploymentSource>(new Comparator<DeploymentSource>() {
-      @Override
-      public int compare(DeploymentSource o1, DeploymentSource o2) {
-        return o1.getPresentableName().compareToIgnoreCase(o2.getPresentableName());
-      }
-    });
+    mySourceListModel = new SortedComboBoxModel<DeploymentSource>(
+      (o1, o2) -> o1.getPresentableName().compareToIgnoreCase(o2.getPresentableName()));
     mySourceListModel.addAll(deploymentConfigurator.getAvailableDeploymentSources());
     mySourceComboBox = new ComboBox(mySourceListModel);
     mySourceComboBox.setRenderer(new ListCellRendererWrapper<DeploymentSource>() {
@@ -202,7 +199,7 @@ public class DeployToServerSettingsEditor<S extends ServerConfiguration, D exten
     return FormBuilder.createFormBuilder()
       .addLabeledComponent("Server:", myServerComboBox)
       .addLabeledComponent("Deployment:", mySourceComboBox)
-      .addComponent(myDeploymentSettingsComponent)
+      .addComponentFillVertically(myDeploymentSettingsComponent, UIUtil.DEFAULT_VGAP)
       .getPanel();
   }
 }

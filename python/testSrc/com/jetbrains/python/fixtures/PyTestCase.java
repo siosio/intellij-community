@@ -17,6 +17,8 @@ package com.jetbrains.python.fixtures;
 
 import com.google.common.base.Joiner;
 import com.intellij.codeInsight.intention.IntentionAction;
+import com.intellij.codeInsight.lookup.LookupElement;
+import com.intellij.codeInsight.lookup.LookupEx;
 import com.intellij.codeInspection.LocalQuickFix;
 import com.intellij.codeInspection.ex.QuickFixWrapper;
 import com.intellij.execution.actions.ConfigurationContext;
@@ -49,7 +51,6 @@ import com.intellij.psi.codeStyle.CommonCodeStyleSettings;
 import com.intellij.psi.search.searches.ReferencesSearch;
 import com.intellij.refactoring.RefactoringActionHandler;
 import com.intellij.testFramework.LightProjectDescriptor;
-import com.intellij.testFramework.PlatformTestCase;
 import com.intellij.testFramework.TestDataPath;
 import com.intellij.testFramework.UsefulTestCase;
 import com.intellij.testFramework.fixtures.*;
@@ -62,6 +63,8 @@ import com.intellij.util.IncorrectOperationException;
 import com.jetbrains.python.PythonHelpersLocator;
 import com.jetbrains.python.PythonLanguage;
 import com.jetbrains.python.PythonTestUtil;
+import com.jetbrains.python.documentation.PyDocumentationSettings;
+import com.jetbrains.python.documentation.docstrings.DocStringFormat;
 import com.jetbrains.python.formatter.PyCodeStyleSettings;
 import com.jetbrains.python.psi.LanguageLevel;
 import com.jetbrains.python.psi.PyClass;
@@ -104,12 +107,7 @@ public abstract class PyTestCase extends UsefulTestCase {
    * Reformats currently configured file.
    */
   protected final void reformatFile() {
-    WriteCommandAction.runWriteCommandAction(null, new Runnable() {
-      @Override
-      public void run() {
-        doPerformFormatting();
-      }
-    });
+    WriteCommandAction.runWriteCommandAction(null, () -> doPerformFormatting());
   }
 
   private void doPerformFormatting() throws IncorrectOperationException {
@@ -121,7 +119,6 @@ public abstract class PyTestCase extends UsefulTestCase {
   @Override
   protected void setUp() throws Exception {
     super.setUp();
-    initPlatformPrefix();
     IdeaTestFixtureFactory factory = IdeaTestFixtureFactory.getFixtureFactory();
     TestFixtureBuilder<IdeaProjectTestFixture> fixtureBuilder = factory.createLightFixtureBuilder(getProjectDescriptor());
     final IdeaProjectTestFixture fixture = fixtureBuilder.getFixture();
@@ -184,6 +181,18 @@ public abstract class PyTestCase extends UsefulTestCase {
     }
     finally {
       setLanguageLevel(null);
+    }
+  }
+
+  protected void runWithDocStringFormat(@NotNull DocStringFormat format, @NotNull Runnable runnable) {
+    final PyDocumentationSettings settings = PyDocumentationSettings.getInstance(myFixture.getModule());
+    final DocStringFormat oldFormat = settings.getFormat();
+    settings.setFormat(format);
+    try {
+      runnable.run();
+    }
+    finally {
+      settings.setFormat(oldFormat);
     }
   }
 
@@ -307,19 +316,11 @@ public abstract class PyTestCase extends UsefulTestCase {
    * @param file file to clear
    */
   protected void clearFile(@NotNull final PsiFile file) {
-    CommandProcessor.getInstance().executeCommand(myFixture.getProject(), new Runnable() {
-      @Override
-      public void run() {
-        ApplicationManager.getApplication().runWriteAction(new Runnable() {
-          @Override
-          public void run() {
-            for (final PsiElement element : file.getChildren()) {
-              element.delete();
-            }
-          }
-        });
+    CommandProcessor.getInstance().executeCommand(myFixture.getProject(), () -> ApplicationManager.getApplication().runWriteAction(() -> {
+      for (final PsiElement element : file.getChildren()) {
+        element.delete();
       }
-    }, null, null);
+    }), null, null);
   }
 
   /**
@@ -345,10 +346,6 @@ public abstract class PyTestCase extends UsefulTestCase {
       myFixture.copyDirectoryToProject(path, String.format("%s%s%s", "temp_for_project_conf", File.pathSeparator, path));
     final Ref<Module> moduleRef = new Ref<Module>(myFixture.getModule());
     configurator.configureProject(myFixture.getProject(), newPath, moduleRef);
-  }
-
-  public static void initPlatformPrefix() {
-    PlatformTestCase.autodetectPlatformPrefix();
   }
 
   public static String getHelpersPath() {
@@ -403,12 +400,7 @@ public abstract class PyTestCase extends UsefulTestCase {
    * @see IdeActions
    */
   protected final void pressButton(@NotNull final String action) {
-    CommandProcessor.getInstance().executeCommand(myFixture.getProject(), new Runnable() {
-      @Override
-      public void run() {
-        myFixture.performEditorAction(action);
-      }
-    }, "", null);
+    CommandProcessor.getInstance().executeCommand(myFixture.getProject(), () -> myFixture.performEditorAction(action), "", null);
   }
 
   @NotNull
@@ -417,13 +409,44 @@ public abstract class PyTestCase extends UsefulTestCase {
   }
 
   @NotNull
-  protected PyCodeStyleSettings getPythonCodeStyle() {
+  protected PyCodeStyleSettings getPythonCodeStyleSettings() {
     return getCodeStyleSettings().getCustomSettings(PyCodeStyleSettings.class);
   }
 
   @NotNull
   protected CodeStyleSettings getCodeStyleSettings() {
     return CodeStyleSettingsManager.getSettings(myFixture.getProject());
+  }
+
+  @NotNull
+  protected CommonCodeStyleSettings.IndentOptions getIndentOptions() {
+    //noinspection ConstantConditions
+    return getCommonCodeStyleSettings().getIndentOptions();
+  }
+
+  /**
+   * When you have more than one completion variant, you may use this method providing variant to choose.
+   * It only works for one caret (multiple carets not supported) and since it puts tab after completion, be sure to limit
+   * line somehow (i.e. with comment).
+   * <br/>
+   * Example: "user.n[caret]." There are "name" and "nose" fields.
+   * By calling this function with "nose" you will end with "user.nose  ".
+   */
+  protected final void completeCaretWithMultipleVariants(@NotNull final String... desiredVariants) {
+    final LookupElement[] lookupElements = myFixture.completeBasic();
+    final LookupEx lookup = myFixture.getLookup();
+    if (lookupElements != null && lookupElements.length > 1) {
+      // More than one element returned, check directly because completion can't work in this case
+      for (final LookupElement element : lookupElements) {
+        final String suggestedString = element.getLookupString();
+        if (Arrays.asList(desiredVariants).contains(suggestedString)) {
+          myFixture.getLookup().setCurrentItem(element);
+          lookup.setCurrentItem(element);
+          myFixture.completeBasicAllCarets('\t');
+          return;
+        }
+      }
+    }
   }
 }
 

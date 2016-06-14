@@ -24,7 +24,6 @@ import com.intellij.JavaTestUtil;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
-import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiField;
 import com.intellij.psi.PsiMethod;
@@ -90,6 +89,16 @@ public class ExtractClassTest extends MultiFileTestCase{
   public void testFieldReference() throws Exception {
     doTestMethod("foo", "Field 'myField' needs getter");
   }
+  
+  public void testIncrement() throws Exception {
+    try {
+      BaseRefactoringProcessor.ConflictsInTestsException.setTestIgnore(true);
+      doTestField(null, false);
+    }
+    finally {
+      BaseRefactoringProcessor.ConflictsInTestsException.setTestIgnore(false);
+    }
+  }
 
   public void testVarargs() throws Exception {
     doTestMethod();
@@ -104,6 +113,10 @@ public class ExtractClassTest extends MultiFileTestCase{
   }
 
   public void testFieldInitializers() throws Exception {
+    doTestField(null);
+  }
+
+  public void testNonNormalizedFields() throws Exception {
     doTestField(null);
   }
 
@@ -182,11 +195,37 @@ public class ExtractClassTest extends MultiFileTestCase{
     });
   }
 
-  private static void doTest(final PsiClass aClass, final ArrayList<PsiMethod> methods, final ArrayList<PsiField> fields, final String conflicts,
+  public void testInnerClass() throws Exception {
+    doTest((rootDir, rootAfter) -> {
+      PsiClass aClass = myJavaFacade.findClass("Test", GlobalSearchScope.projectScope(myProject));
+
+      assertNotNull("Class Test not found", aClass);
+
+      final ArrayList<PsiField> fields = new ArrayList<>();
+      fields.add(aClass.findFieldByName("myT", false));
+
+      doTest(aClass, new ArrayList<>(), fields, null, true, true);
+    });
+  }
+
+  private static void doTest(final PsiClass aClass,
+                             final ArrayList<PsiMethod> methods,
+                             final ArrayList<PsiField> fields,
+                             final String conflicts,
                              boolean generateGettersSetters) {
+    doTest(aClass, methods, fields, conflicts, generateGettersSetters, false);
+  }
+
+  private static void doTest(final PsiClass aClass,
+                             final ArrayList<PsiMethod> methods,
+                             final ArrayList<PsiField> fields,
+                             final String conflicts,
+                             boolean generateGettersSetters,
+                             boolean inner) {
     try {
       ExtractClassProcessor processor = new ExtractClassProcessor(aClass, fields, methods, new ArrayList<>(), StringUtil.getPackageName(aClass.getQualifiedName()), null,
                                                                   "Extracted", null, generateGettersSetters, Collections.<MemberInfo>emptyList());
+      processor.setExtractInnerClass(inner);
       processor.run();
       LocalFileSystem.getInstance().refresh(false);
       FileDocumentManager.getInstance().saveAllDocuments();

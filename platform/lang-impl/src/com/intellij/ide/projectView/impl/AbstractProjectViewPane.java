@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,9 +14,6 @@
  * limitations under the License.
  */
 
-/**
- * @author cdr
- */
 package com.intellij.ide.projectView.impl;
 
 import com.intellij.ide.DataManager;
@@ -79,7 +76,7 @@ import java.util.List;
 import java.util.Map;
 
 public abstract class AbstractProjectViewPane implements DataProvider, Disposable, BusyObject {
-  public static ExtensionPointName<AbstractProjectViewPane> EP_NAME = ExtensionPointName.create("com.intellij.projectViewPane");
+  public static final ExtensionPointName<AbstractProjectViewPane> EP_NAME = ExtensionPointName.create("com.intellij.projectViewPane");
 
   @NotNull
   protected final Project myProject;
@@ -124,6 +121,7 @@ public abstract class AbstractProjectViewPane implements DataProvider, Disposabl
       }
     };
     WolfTheProblemSolver.getInstance(project).addProblemListener(problemListener, this);
+    Disposer.register(project, this);
   }
 
   protected final void fireTreeChangeListener() {
@@ -219,20 +217,12 @@ public abstract class AbstractProjectViewPane implements DataProvider, Disposabl
 
   private void doSelectModuleOrGroup(final Object toSelect, final boolean requestFocus) {
     ToolWindowManager windowManager=ToolWindowManager.getInstance(myProject);
-    final Runnable runnable = new Runnable() {
-      @Override
-      public void run() {
-        ProjectView projectView = ProjectView.getInstance(myProject);
-        if (requestFocus) {
-          projectView.changeView(getId(), getSubId());
-        }
-        ((BaseProjectTreeBuilder)getTreeBuilder()).selectInWidth(toSelect, requestFocus, new Condition<AbstractTreeNode>(){
-          @Override
-          public boolean value(final AbstractTreeNode node) {
-            return node instanceof AbstractModuleNode || node instanceof ModuleGroupNode || node instanceof AbstractProjectNode;
-          }
-        });
+    final Runnable runnable = () -> {
+      ProjectView projectView = ProjectView.getInstance(myProject);
+      if (requestFocus) {
+        projectView.changeView(getId(), getSubId());
       }
+      ((BaseProjectTreeBuilder)getTreeBuilder()).selectInWidth(toSelect, requestFocus, node -> node instanceof AbstractModuleNode || node instanceof ModuleGroupNode || node instanceof AbstractProjectNode);
     };
     if (requestFocus) {
       windowManager.getToolWindow(ToolWindowId.PROJECT_VIEW).activate(runnable);
@@ -602,7 +592,7 @@ public abstract class AbstractProjectViewPane implements DataProvider, Disposabl
 
   protected void enableDnD() {
     if (!ApplicationManager.getApplication().isHeadlessEnvironment()) {
-      myDropTarget = new ProjectViewDropTarget(myTree, new Retriever(){
+      myDropTarget = new ProjectViewDropTarget(myTree, new Retriever() {
         @Override
         public PsiElement getPsiElement(@Nullable TreeNode node) {
           return getPSIElement(getElementFromTreeNode(node));
@@ -612,13 +602,29 @@ public abstract class AbstractProjectViewPane implements DataProvider, Disposabl
         public Module getModule(TreeNode treeNode) {
           return getNodeModule(getElementFromTreeNode(treeNode));
         }
-      }, myProject);
+      }, myProject) {
+        @Override
+        public void cleanUpOnLeave() {
+          beforeDnDLeave();
+          super.cleanUpOnLeave();
+        }
+
+        @Override
+        public boolean update(DnDEvent event) {
+          beforeDnDUpdate();
+          return super.update(event);
+        }
+      };
       myDragSource = new MyDragSource();
       myDndManager = DnDManager.getInstance();
       myDndManager.registerSource(myDragSource, myTree);
       myDndManager.registerTarget(myDropTarget, myTree);
     }
   }
+
+  protected void beforeDnDUpdate() { }
+
+  protected void beforeDnDLeave() { }
 
   public void setTreeBuilder(final AbstractTreeBuilder treeBuilder) {
     if (treeBuilder != null) {
@@ -706,7 +712,7 @@ public abstract class AbstractProjectViewPane implements DataProvider, Disposabl
   @NotNull
   @Override
   public ActionCallback getReady(@NotNull Object requestor) {
-    if (myTreeBuilder == null || myTreeBuilder.isDisposed()) return new ActionCallback.Rejected();
+    if (myTreeBuilder == null || myTreeBuilder.isDisposed()) return ActionCallback.REJECTED;
     return myTreeBuilder.getUi().getReady(requestor);
   }
 }

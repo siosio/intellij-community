@@ -24,16 +24,13 @@ import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
-import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.util.ConcurrencyUtil;
 import com.intellij.util.Consumer;
-import com.intellij.util.ThrowableConsumer;
 import com.intellij.util.ThrowableConvertor;
 import com.intellij.util.containers.Convertor;
 import git4idea.DialogManager;
@@ -50,7 +47,6 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.github.api.GithubApiUtil;
 import org.jetbrains.plugins.github.api.GithubConnection;
-import org.jetbrains.plugins.github.api.GithubFullPath;
 import org.jetbrains.plugins.github.api.GithubUserDetailed;
 import org.jetbrains.plugins.github.exceptions.GithubAuthenticationException;
 import org.jetbrains.plugins.github.exceptions.GithubOperationCanceledException;
@@ -59,6 +55,8 @@ import org.jetbrains.plugins.github.ui.GithubBasicLoginDialog;
 import org.jetbrains.plugins.github.ui.GithubLoginDialog;
 
 import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.UnknownHostException;
 import java.util.List;
 import java.util.concurrent.ScheduledFuture;
@@ -101,34 +99,6 @@ public class GithubUtil {
     catch (GithubAuthenticationException e) {
       getValidAuthData(project, authHolder, indicator, auth);
       return runTask(project, authHolder, indicator, task);
-    }
-  }
-
-  public static void runTask(@NotNull Project project,
-                             @NotNull GithubAuthDataHolder authHolder,
-                             @NotNull final ProgressIndicator indicator,
-                             @NotNull ThrowableConsumer<GithubConnection, IOException> task) throws IOException {
-    GithubAuthData auth = authHolder.getAuthData();
-    try {
-      final GithubConnection connection = new GithubConnection(auth, true);
-      ScheduledFuture<?> future = null;
-
-      try {
-        future = addCancellationListener(indicator, connection);
-        task.consume(connection);
-      }
-      finally {
-        connection.close();
-        if (future != null) future.cancel(true);
-      }
-    }
-    catch (GithubTwoFactorAuthenticationException e) {
-      getTwoFactorAuthData(project, authHolder, indicator, auth);
-      runTask(project, authHolder, indicator, task);
-    }
-    catch (GithubAuthenticationException e) {
-      getValidAuthData(project, authHolder, indicator, auth);
-      runTask(project, authHolder, indicator, task);
     }
   }
 
@@ -197,22 +167,16 @@ public class GithubUtil {
   @NotNull
   private static ScheduledFuture<?> addCancellationListener(@NotNull final ProgressIndicator indicator,
                                                             @NotNull final GithubConnection connection) {
-    return addCancellationListener(new Runnable() {
-      @Override
-      public void run() {
-        if (indicator.isCanceled()) connection.abort();
-      }
+    return addCancellationListener(() -> {
+      if (indicator.isCanceled()) connection.abort();
     });
   }
 
   @NotNull
   private static ScheduledFuture<?> addCancellationListener(@NotNull final ProgressIndicator indicator,
                                                             @NotNull final Thread thread) {
-    return addCancellationListener(new Runnable() {
-      @Override
-      public void run() {
-        if (indicator.isCanceled()) thread.interrupt();
-      }
+    return addCancellationListener(() -> {
+      if (indicator.isCanceled()) thread.interrupt();
     });
   }
 
@@ -220,30 +184,23 @@ public class GithubUtil {
                                       @NotNull final GithubAuthDataHolder authHolder,
                                       @NotNull final ProgressIndicator indicator,
                                       @NotNull final GithubAuthData oldAuth) throws GithubOperationCanceledException {
-    authHolder.runTransaction(oldAuth, new ThrowableComputable<GithubAuthData, GithubOperationCanceledException>() {
-      @Override
-      @NotNull
-      public GithubAuthData compute() throws GithubOperationCanceledException {
-        final GithubAuthData[] authData = new GithubAuthData[1];
-        final boolean[] ok = new boolean[1];
-        ApplicationManager.getApplication().invokeAndWait(new Runnable() {
-          @Override
-          public void run() {
-            final GithubLoginDialog dialog = new GithubLoginDialog(project, oldAuth);
-            DialogManager.show(dialog);
-            ok[0] = dialog.isOK();
+    authHolder.runTransaction(oldAuth, () -> {
+      final GithubAuthData[] authData = new GithubAuthData[1];
+      final boolean[] ok = new boolean[1];
+      ApplicationManager.getApplication().invokeAndWait(() -> {
+        final GithubLoginDialog dialog = new GithubLoginDialog(project, oldAuth);
+        DialogManager.show(dialog);
+        ok[0] = dialog.isOK();
 
-            if (ok[0]) {
-              authData[0] = dialog.getAuthData();
-              GithubSettings.getInstance().setAuthData(authData[0], dialog.isSavePasswordSelected());
-            }
-          }
-        }, indicator.getModalityState());
-        if (!ok[0]) {
-          throw new GithubOperationCanceledException("Can't get valid credentials");
+        if (ok[0]) {
+          authData[0] = dialog.getAuthData();
+          GithubSettings.getInstance().setAuthData(authData[0], dialog.isSavePasswordSelected());
         }
-        return authData[0];
+      }, indicator.getModalityState());
+      if (!ok[0]) {
+        throw new GithubOperationCanceledException("Can't get valid credentials");
       }
+      return authData[0];
     });
   }
 
@@ -252,33 +209,26 @@ public class GithubUtil {
                                                   @NotNull final ProgressIndicator indicator,
                                                   @NotNull final GithubAuthData oldAuth,
                                                   @NotNull final String host) throws GithubOperationCanceledException {
-    authHolder.runTransaction(oldAuth, new ThrowableComputable<GithubAuthData, GithubOperationCanceledException>() {
-      @Override
-      @NotNull
-      public GithubAuthData compute() throws GithubOperationCanceledException {
-        final GithubAuthData[] authData = new GithubAuthData[1];
-        final boolean[] ok = new boolean[1];
-        ApplicationManager.getApplication().invokeAndWait(new Runnable() {
-          @Override
-          public void run() {
-            final GithubLoginDialog dialog = new GithubBasicLoginDialog(project, oldAuth, host);
-            DialogManager.show(dialog);
-            ok[0] = dialog.isOK();
-            if (ok[0]) {
-              authData[0] = dialog.getAuthData();
+    authHolder.runTransaction(oldAuth, () -> {
+      final GithubAuthData[] authData = new GithubAuthData[1];
+      final boolean[] ok = new boolean[1];
+      ApplicationManager.getApplication().invokeAndWait(() -> {
+        final GithubLoginDialog dialog = new GithubBasicLoginDialog(project, oldAuth, host);
+        DialogManager.show(dialog);
+        ok[0] = dialog.isOK();
+        if (ok[0]) {
+          authData[0] = dialog.getAuthData();
 
-              final GithubSettings settings = GithubSettings.getInstance();
-              if (settings.getAuthType() != GithubAuthData.AuthType.TOKEN) {
-                GithubSettings.getInstance().setAuthData(authData[0], dialog.isSavePasswordSelected());
-              }
-            }
+          final GithubSettings settings = GithubSettings.getInstance();
+          if (settings.getAuthType() != GithubAuthData.AuthType.TOKEN) {
+            GithubSettings.getInstance().setAuthData(authData[0], dialog.isSavePasswordSelected());
           }
-        }, indicator.getModalityState());
-        if (!ok[0]) {
-          throw new GithubOperationCanceledException("Can't get valid credentials");
         }
-        return authData[0];
+      }, indicator.getModalityState());
+      if (!ok[0]) {
+        throw new GithubOperationCanceledException("Can't get valid credentials");
       }
+      return authData[0];
     });
   }
 
@@ -286,35 +236,28 @@ public class GithubUtil {
                                            @NotNull final GithubAuthDataHolder authHolder,
                                            @NotNull final ProgressIndicator indicator,
                                            @NotNull final GithubAuthData oldAuth) throws GithubOperationCanceledException {
-    authHolder.runTransaction(oldAuth, new ThrowableComputable<GithubAuthData, GithubOperationCanceledException>() {
-      @Override
-      @NotNull
-      public GithubAuthData compute() throws GithubOperationCanceledException {
-        if (authHolder.getAuthData().getAuthType() != GithubAuthData.AuthType.BASIC) {
-          throw new GithubOperationCanceledException("Two factor authentication can be used only with Login/Password");
-        }
-
-        GithubApiUtil.askForTwoFactorCodeSMS(new GithubConnection(oldAuth, false));
-
-        final Ref<String> codeRef = new Ref<String>();
-        ApplicationManager.getApplication().invokeAndWait(new Runnable() {
-          @Override
-          public void run() {
-            codeRef.set(Messages.showInputDialog(project, "Authentication Code", "Github Two-Factor Authentication", null));
-          }
-        }, indicator.getModalityState());
-        if (codeRef.isNull()) {
-          throw new GithubOperationCanceledException("Can't get two factor authentication code");
-        }
-
-        GithubSettings settings = GithubSettings.getInstance();
-        if (settings.getAuthType() == GithubAuthData.AuthType.BASIC &&
-            StringUtil.equalsIgnoreCase(settings.getLogin(), oldAuth.getBasicAuth().getLogin())) {
-          settings.setValidGitAuth(false);
-        }
-
-        return oldAuth.copyWithTwoFactorCode(codeRef.get());
+    authHolder.runTransaction(oldAuth, () -> {
+      if (authHolder.getAuthData().getAuthType() != GithubAuthData.AuthType.BASIC) {
+        throw new GithubOperationCanceledException("Two factor authentication can be used only with Login/Password");
       }
+
+      GithubApiUtil.askForTwoFactorCodeSMS(new GithubConnection(oldAuth, false));
+
+      final Ref<String> codeRef = new Ref<String>();
+      ApplicationManager.getApplication().invokeAndWait(() -> {
+        codeRef.set(Messages.showInputDialog(project, "Authentication Code", "Github Two-Factor Authentication", null));
+      }, indicator.getModalityState());
+      if (codeRef.isNull()) {
+        throw new GithubOperationCanceledException("Can't get two factor authentication code");
+      }
+
+      GithubSettings settings = GithubSettings.getInstance();
+      if (settings.getAuthType() == GithubAuthData.AuthType.BASIC &&
+          StringUtil.equalsIgnoreCase(settings.getLogin(), oldAuth.getBasicAuth().getLogin())) {
+        settings.setValidGitAuth(false);
+      }
+
+      return oldAuth.copyWithTwoFactorCode(codeRef.get());
     });
   }
 
@@ -343,6 +286,13 @@ public class GithubUtil {
       throw new GithubAuthenticationException("Target host not defined");
     }
 
+    try {
+      new URI(auth.getHost());
+    }
+    catch (URISyntaxException e) {
+      throw new GithubAuthenticationException("Invalid host URL");
+    }
+
     switch (auth.getAuthType()) {
       case BASIC:
         GithubAuthData.BasicAuth basicAuth = auth.getBasicAuth();
@@ -365,29 +315,15 @@ public class GithubUtil {
     return testConnection(project, authHolder, indicator);
   }
 
-  public static <T> T computeValueInModal(@NotNull Project project,
-                                          @NotNull String caption,
-                                          @NotNull final ThrowableConvertor<ProgressIndicator, T, IOException> task) throws IOException {
-    final Ref<T> dataRef = new Ref<T>();
-    final Ref<Throwable> exceptionRef = new Ref<Throwable>();
-    ProgressManager.getInstance().run(new Task.Modal(project, caption, true) {
-      public void run(@NotNull ProgressIndicator indicator) {
-        try {
-          dataRef.set(task.convert(indicator));
-        }
-        catch (Throwable e) {
-          exceptionRef.set(e);
-        }
+  public static <T> T computeValueInModalIO(@NotNull Project project,
+                                            @NotNull String caption,
+                                            @NotNull final ThrowableConvertor<ProgressIndicator, T, IOException> task) throws IOException {
+    return ProgressManager.getInstance().run(new Task.WithResult<T, IOException>(project, caption, true) {
+      @Override
+      protected T compute(@NotNull ProgressIndicator indicator) throws IOException {
+        return task.convert(indicator);
       }
     });
-    if (!exceptionRef.isNull()) {
-      Throwable e = exceptionRef.get();
-      if (e instanceof IOException) throw ((IOException)e);
-      if (e instanceof RuntimeException) throw ((RuntimeException)e);
-      if (e instanceof Error) throw ((Error)e);
-      throw new RuntimeException(e);
-    }
-    return dataRef.get();
   }
 
   public static <T> T computeValueInModal(@NotNull Project project,
@@ -400,54 +336,25 @@ public class GithubUtil {
                                           @NotNull String caption,
                                           boolean canBeCancelled,
                                           @NotNull final Convertor<ProgressIndicator, T> task) {
-    final Ref<T> dataRef = new Ref<T>();
-    final Ref<Throwable> exceptionRef = new Ref<Throwable>();
-    ProgressManager.getInstance().run(new Task.Modal(project, caption, canBeCancelled) {
-      public void run(@NotNull ProgressIndicator indicator) {
-        try {
-          dataRef.set(task.convert(indicator));
-        }
-        catch (Throwable e) {
-          exceptionRef.set(e);
-        }
+    return ProgressManager.getInstance().run(new Task.WithResult<T, RuntimeException>(project, caption, canBeCancelled) {
+      @Override
+      protected T compute(@NotNull ProgressIndicator indicator) {
+        return task.convert(indicator);
       }
     });
-    if (!exceptionRef.isNull()) {
-      Throwable e = exceptionRef.get();
-      if (e instanceof RuntimeException) throw ((RuntimeException)e);
-      if (e instanceof Error) throw ((Error)e);
-      throw new RuntimeException(e);
-    }
-    return dataRef.get();
-  }
-
-  public static void computeValueInModal(@NotNull Project project,
-                                         @NotNull String caption,
-                                         @NotNull final Consumer<ProgressIndicator> task) {
-    computeValueInModal(project, caption, true, task);
   }
 
   public static void computeValueInModal(@NotNull Project project,
                                          @NotNull String caption,
                                          boolean canBeCancelled,
                                          @NotNull final Consumer<ProgressIndicator> task) {
-    final Ref<Throwable> exceptionRef = new Ref<Throwable>();
-    ProgressManager.getInstance().run(new Task.Modal(project, caption, canBeCancelled) {
-      public void run(@NotNull ProgressIndicator indicator) {
-        try {
-          task.consume(indicator);
-        }
-        catch (Throwable e) {
-          exceptionRef.set(e);
-        }
+    ProgressManager.getInstance().run(new Task.WithResult<Void, RuntimeException>(project, caption, canBeCancelled) {
+      @Override
+      protected Void compute(@NotNull ProgressIndicator indicator) {
+        task.consume(indicator);
+        return null;
       }
     });
-    if (!exceptionRef.isNull()) {
-      Throwable e = exceptionRef.get();
-      if (e instanceof RuntimeException) throw ((RuntimeException)e);
-      if (e instanceof Error) throw ((Error)e);
-      throw new RuntimeException(e);
-    }
   }
 
   public static <T> T runInterruptable(@NotNull final ProgressIndicator indicator,
@@ -458,34 +365,6 @@ public class GithubUtil {
       future = addCancellationListener(indicator, thread);
 
       return task.compute();
-    }
-    finally {
-      if (future != null) future.cancel(true);
-      Thread.interrupted();
-    }
-  }
-
-  public static <T> T runInterruptable(@NotNull final ProgressIndicator indicator, @NotNull Computable<T> task) {
-    ScheduledFuture<?> future = null;
-    try {
-      final Thread thread = Thread.currentThread();
-      future = addCancellationListener(indicator, thread);
-
-      return task.compute();
-    }
-    finally {
-      if (future != null) future.cancel(true);
-      Thread.interrupted();
-    }
-  }
-
-  public static void runInterruptable(@NotNull final ProgressIndicator indicator, @NotNull Runnable task) {
-    ScheduledFuture<?> future = null;
-    try {
-      final Thread thread = Thread.currentThread();
-      future = addCancellationListener(indicator, thread);
-
-      task.run();
     }
     finally {
       if (future != null) future.cancel(true);
@@ -537,18 +416,6 @@ public class GithubUtil {
           }
         }
         return gitRemote.getFirstUrl();
-      }
-    }
-    return null;
-  }
-
-  @Nullable
-  public static GitRemote findGithubRemote(@NotNull GitRepository gitRepository, @NotNull GithubFullPath path) {
-    for (GitRemote remote : gitRepository.getRemotes()) {
-      for (String url : remote.getUrls()) {
-        if (path.equals(GithubUrlUtil.getUserAndRepositoryFromRemoteUrl(url))) {
-          return remote;
-        }
       }
     }
     return null;

@@ -18,6 +18,7 @@ package git4idea.merge;
 import com.intellij.notification.Notification;
 import com.intellij.notification.NotificationListener;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
@@ -26,11 +27,9 @@ import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vcs.VcsNotifier;
 import com.intellij.openapi.vcs.merge.MergeDialogCustomizer;
 import com.intellij.openapi.vcs.merge.MergeProvider;
-import com.intellij.openapi.vcs.update.RefreshVFsSynchronously;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.ui.UIUtil;
 import git4idea.GitPlatformFacade;
 import git4idea.GitUtil;
 import git4idea.GitVcs;
@@ -39,29 +38,32 @@ import git4idea.commands.GitCommandResult;
 import git4idea.repo.GitRepository;
 import git4idea.repo.GitRepositoryManager;
 import git4idea.util.StringScanner;
+import org.jetbrains.annotations.CalledInBackground;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.event.HyperlinkEvent;
 import java.io.File;
 import java.util.*;
 
+import static com.intellij.dvcs.DvcsUtil.findVirtualFilesWithRefresh;
+import static com.intellij.dvcs.DvcsUtil.sortVirtualFilesByPresentation;
+import static com.intellij.util.ObjectUtils.assertNotNull;
+
 /**
- *
  * The class is highly customizable, since the procedure of resolving conflicts is very common in Git operations.
- * @author Kirill Likhodedov
  */
 public class GitConflictResolver {
 
   private static final Logger LOG = Logger.getInstance(GitConflictResolver.class);
 
+  @NotNull private final Collection<VirtualFile> myRoots;
+  @NotNull private final Params myParams;
+
   @NotNull protected final Project myProject;
   @NotNull private final Git myGit;
-  @NotNull private final GitPlatformFacade myPlatformFacade;
-  private final Collection<VirtualFile> myRoots;
-  private final Params myParams;
-
   @NotNull private final GitRepositoryManager myRepositoryManager;
-  private final AbstractVcsHelper myVcsHelper;
+  @NotNull private final AbstractVcsHelper myVcsHelper;
+  @NotNull private final GitVcs myVcs;
 
   /**
    * Customizing parameters - mostly String notification texts, etc.
@@ -72,7 +74,7 @@ public class GitConflictResolver {
     private String myErrorNotificationAdditionalDescription = "";
     private String myMergeDescription = "";
     private MergeDialogCustomizer myMergeDialogCustomizer = new MergeDialogCustomizer() {
-      @Override public String getMultipleFileMergeDescription(Collection<VirtualFile> files) {
+      @Override public String getMultipleFileMergeDescription(@NotNull Collection<VirtualFile> files) {
         return myMergeDescription;
       }
     };
@@ -104,18 +106,27 @@ public class GitConflictResolver {
       myMergeDialogCustomizer = mergeDialogCustomizer;
       return this;
     }
-    
+
   }
 
-  public GitConflictResolver(@NotNull Project project, @NotNull Git git, @NotNull GitPlatformFacade platformFacade,
+  /**
+   * @deprecated To remove in IDEA 2017. Use {@link #GitConflictResolver(Project, Git, Collection, Params)}.
+   */
+  @SuppressWarnings("UnusedParameters")
+  @Deprecated
+  public GitConflictResolver(@NotNull Project project, @NotNull Git git, @NotNull GitPlatformFacade facade,
                              @NotNull Collection<VirtualFile> roots, @NotNull Params params) {
+    this(project, git, roots, params);
+  }
+
+  public GitConflictResolver(@NotNull Project project, @NotNull Git git, @NotNull Collection<VirtualFile> roots, @NotNull Params params) {
     myProject = project;
     myGit = git;
-    myPlatformFacade = platformFacade;
     myRoots = roots;
     myParams = params;
-    myRepositoryManager = myPlatformFacade.getRepositoryManager(myProject);
-    myVcsHelper = myPlatformFacade.getVcsHelper(project);
+    myRepositoryManager = GitUtil.getRepositoryManager(myProject);
+    myVcsHelper = AbstractVcsHelper.getInstance(project);
+    myVcs = assertNotNull(GitVcs.getInstance(myProject));
   }
 
   /**
@@ -153,6 +164,7 @@ public class GitConflictResolver {
    * In the basic implementation no action is performed, {@code true} is returned.
    * @return Return value is returned from {@link #merge()}
    */
+  @CalledInBackground
   protected boolean proceedAfterAllMerged() throws VcsException {
     return true;
   }
@@ -211,7 +223,7 @@ public class GitConflictResolver {
         }
       }
     } catch (VcsException e) {
-      if (((GitVcs)myPlatformFacade.getVcs(myProject)).getExecutableValidator().checkExecutableAndNotifyIfNeeded()) {
+      if (myVcs.getExecutableValidator().checkExecutableAndNotifyIfNeeded()) {
         notifyException(e);
       }
     }
@@ -219,14 +231,11 @@ public class GitConflictResolver {
 
   }
 
-  private void showMergeDialog(final Collection<VirtualFile> initiallyUnmergedFiles) {
-    UIUtil.invokeAndWaitIfNeeded(new Runnable() {
-      @Override public void run() {
-        final MergeProvider mergeProvider = myParams.reverse ?
-                                            new GitMergeProvider(myProject, true) : new GitMergeProvider(myProject, false);
-        myVcsHelper.showMergeDialog(new ArrayList<VirtualFile>(initiallyUnmergedFiles), mergeProvider, myParams.myMergeDialogCustomizer);
-      }
-    });
+  private void showMergeDialog(@NotNull final Collection<VirtualFile> initiallyUnmergedFiles) {
+    ApplicationManager.getApplication().invokeAndWait(() -> {
+      MergeProvider mergeProvider = new GitMergeProvider(myProject, myParams.reverse);
+      myVcsHelper.showMergeDialog(new ArrayList<>(initiallyUnmergedFiles), mergeProvider, myParams.myMergeDialogCustomizer);
+    }, ModalityState.defaultModalityState());
   }
 
   private void notifyException(VcsException e) {
@@ -320,7 +329,7 @@ public class GitConflictResolver {
           return new File(root.getPath(), path);
         }
       });
-      return ContainerUtil.sorted(RefreshVFsSynchronously.refreshFiles(files), GitUtil.VIRTUAL_FILE_COMPARATOR);
+      return sortVirtualFilesByPresentation(findVirtualFilesWithRefresh(files));
     }
   }
 

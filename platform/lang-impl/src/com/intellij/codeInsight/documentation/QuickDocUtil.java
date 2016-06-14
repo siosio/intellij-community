@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,10 @@
  */
 package com.intellij.codeInsight.documentation;
 
+import com.intellij.concurrency.SensitiveProgressWrapper;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.progress.ProgressIndicator;
+import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.JBPopup;
 import com.intellij.openapi.util.text.StringUtil;
@@ -30,6 +33,10 @@ import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.concurrent.TimeUnit;
+
+import static com.intellij.openapi.progress.util.ProgressIndicatorUtils.runInReadActionWithWriteActionPriority;
+
 /**
  * @author gregsh
  */
@@ -37,24 +44,16 @@ public class QuickDocUtil {
 
   public static void updateQuickDocAsync(@NotNull final PsiElement element, @NotNull final Producer<String> docProducer) {
     final Project project = element.getProject();
-    ApplicationManager.getApplication().executeOnPooledThread(new Runnable() {
-      @Override
-      public void run() {
-        updateQuickDoc(project, element, docProducer.produce());
-      }
-    });
+    ApplicationManager.getApplication().executeOnPooledThread(() -> updateQuickDoc(project, element, docProducer.produce()));
   }
 
   public static void updateQuickDoc(@NotNull final Project project, @NotNull final PsiElement element, @Nullable final String documentation) {
     if (StringUtil.isEmpty(documentation)) return;
     // modal dialogs with fragment editors fix: can't guess proper modality state here
-    UIUtil.invokeLaterIfNeeded(new Runnable() {
-      @Override
-      public void run() {
-        DocumentationComponent component = getActiveDocComponent(project);
-        if (component != null) {
-          component.replaceText(documentation, element);
-        }
+    UIUtil.invokeLaterIfNeeded(() -> {
+      DocumentationComponent component = getActiveDocComponent(project);
+      if (component != null) {
+        component.replaceText(documentation, element);
       }
     });
   }
@@ -77,4 +76,36 @@ public class QuickDocUtil {
     }
     return component;
   }
+
+
+  /**
+   * Repeatedly tries to run given task in read action without blocking write actions (for this to work effectively the action should invoke 
+   * {@link ProgressManager#checkCanceled()} or {@link ProgressIndicator#checkCanceled()} often enough).
+   *
+   * @param action task to run
+   * @param timeout timeout in milliseconds 
+   * @param pauseBetweenRetries pause between retries in milliseconds 
+   * @param progressIndicator optional progress indicator, which can be used to cancel the action externally
+   * @return <code>true</code> if the action succeeded to run without interruptions, <code>false</code> otherwise 
+   */
+  static boolean runInReadActionWithWriteActionPriorityWithRetries(@NotNull final Runnable action,
+                                                                   long timeout, long pauseBetweenRetries,
+                                                                   @Nullable ProgressIndicator progressIndicator) {
+    boolean result;
+    long deadline = System.currentTimeMillis() + timeout;
+    while (!(result = runInReadActionWithWriteActionPriority(action, progressIndicator == null ? null : 
+                                                                     new SensitiveProgressWrapper(progressIndicator))) &&
+           (progressIndicator == null || !progressIndicator.isCanceled()) && 
+            System.currentTimeMillis() < deadline) {
+      try {
+        TimeUnit.MILLISECONDS.sleep(pauseBetweenRetries);
+      }
+      catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        return false;
+      }
+    }
+    return result;
+  }
+
 }

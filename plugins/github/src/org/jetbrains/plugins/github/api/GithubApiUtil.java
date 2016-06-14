@@ -17,7 +17,6 @@ package org.jetbrains.plugins.github.api;
 
 import com.google.gson.*;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.util.containers.ContainerUtil;
@@ -140,12 +139,7 @@ public class GithubApiUtil {
 
         for (int i = 1; i < 100; i++) {
           final String newNote = note + "_" + i;
-          if (ContainerUtil.find(tokens, new Condition<GithubAuthorization>() {
-            @Override
-            public boolean value(GithubAuthorization authorization) {
-              return newNote.equals(authorization.getNote());
-            }
-          }) == null) {
+          if (!ContainerUtil.exists(tokens, authorization -> newNote.equals(authorization.getNote()))) {
             return getNewScopedToken(connection, scopes, newNote).getToken();
           }
         }
@@ -493,11 +487,13 @@ public class GithubApiUtil {
   public static List<GithubIssue> getIssuesQueried(@NotNull GithubConnection connection,
                                                    @NotNull String user,
                                                    @NotNull String repo,
+                                                   @Nullable String assignedUser,
                                                    @Nullable String query,
                                                    boolean withClosed) throws IOException {
     try {
       String state = withClosed ? "" : " state:open";
-      query = URLEncoder.encode("repo:" + user + "/" + repo + " " + query + state, CharsetToolkit.UTF8);
+      String assignee = StringUtil.isEmptyOrSpaces(assignedUser) ? "" : " assignee:" + assignedUser;
+      query = URLEncoder.encode("repo:" + user + "/" + repo + state + assignee + " " + query, CharsetToolkit.UTF8);
       String path = "/search/issues?q=" + query;
 
       //TODO: Use bodyHtml for issues - GitHub does not support this feature for SearchApi yet

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -181,8 +181,14 @@ public class PsiJavaParserFacadeImpl implements PsiJavaParserFacade {
 
   @NotNull
   @Override
-  public PsiDocComment createDocCommentFromText(@NotNull final String text) throws IncorrectOperationException {
-    final PsiMethod method = createMethodFromText(text.trim() + "void m();", null);
+  public PsiDocComment createDocCommentFromText(@NotNull String docCommentText) throws IncorrectOperationException {
+    return createDocCommentFromText(docCommentText, null);
+  }
+
+  @NotNull
+  @Override
+  public PsiDocComment createDocCommentFromText(@NotNull String text, @Nullable PsiElement context) throws IncorrectOperationException {
+    final PsiMethod method = createMethodFromText(text.trim() + "void m();", context);
     final PsiDocComment comment = method.getDocComment();
     if (comment == null) {
       throw new IncorrectOperationException("Incorrect comment '" + text + "'");
@@ -377,13 +383,18 @@ public class PsiJavaParserFacadeImpl implements PsiJavaParserFacade {
   }
 
   @NotNull
-  @Override
-  public PsiType createPrimitiveType(@NotNull final String text, @NotNull final PsiAnnotation[] annotations) throws IncorrectOperationException {
-    final PsiPrimitiveType primitiveType = getPrimitiveType(text);
+  public PsiType createPrimitiveTypeFromText(@NotNull String text) throws IncorrectOperationException {
+    PsiPrimitiveType primitiveType = getPrimitiveType(text);
     if (primitiveType == null) {
       throw new IncorrectOperationException("Incorrect primitive type '" + text + "'");
     }
-    return annotations.length == 0 ? primitiveType : new PsiPrimitiveType(text, annotations);
+    return primitiveType;
+  }
+
+  @NotNull
+  @Override
+  public PsiType createPrimitiveType(@NotNull String text, @NotNull PsiAnnotation[] annotations) throws IncorrectOperationException {
+    return createPrimitiveTypeFromText(text).annotate(TypeAnnotationProvider.Static.create(annotations));
   }
 
   public static PsiPrimitiveType getPrimitiveType(final String text) {

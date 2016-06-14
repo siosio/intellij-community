@@ -1,5 +1,6 @@
 package org.jetbrains.plugins.ipnb.editor.panels.code;
 
+import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.JBColor;
 import org.jetbrains.annotations.NotNull;
@@ -12,18 +13,22 @@ import javax.swing.text.SimpleAttributeSet;
 import javax.swing.text.StyleConstants;
 import javax.swing.text.StyleContext;
 import java.awt.*;
+import java.util.List;
 
 public class IpnbErrorPanel extends IpnbCodeOutputPanel<IpnbErrorOutputCell> {
   public IpnbErrorPanel(@NotNull final IpnbErrorOutputCell cell) {
-    super(cell);
+    super(cell, null);
   }
 
   @Override
   protected JComponent createViewPanel() {
-    final String[] text = myCell.getText();
+    final List<String> text = myCell.getText();
     if (text == null) return new JLabel();
     ColorPane ansiColoredPane = new ColorPane();
-    ansiColoredPane.appendANSI(StringUtil.join(text));
+    final Font font = ansiColoredPane.getFont();
+    final Font newFont = new Font(font.getName(), font.getStyle(), EditorColorsManager.getInstance().getGlobalScheme().getEditorFontSize());
+    ansiColoredPane.setFont(newFont);
+    ansiColoredPane.appendANSI(StringUtil.join(text, ""));
     ansiColoredPane.setBackground(IpnbEditorUtil.getBackground());
     ansiColoredPane.setEditable(false);
     return ansiColoredPane;

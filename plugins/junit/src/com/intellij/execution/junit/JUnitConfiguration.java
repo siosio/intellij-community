@@ -28,7 +28,6 @@ import com.intellij.execution.junit2.ui.properties.JUnitConsoleProperties;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.runners.ExecutionEnvironmentBuilder;
 import com.intellij.execution.testframework.TestSearchScope;
-import com.intellij.execution.testframework.sm.runner.SMRunnerConsolePropertiesProvider;
 import com.intellij.execution.testframework.sm.runner.SMTRunnerConsoleProperties;
 import com.intellij.openapi.components.PathMacroManager;
 import com.intellij.openapi.module.Module;
@@ -51,8 +50,7 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
 
-public class JUnitConfiguration extends ModuleBasedConfiguration<JavaRunConfigurationModule>
-  implements CommonJavaRunConfigurationParameters, RefactoringListenerProvider, SMRunnerConsolePropertiesProvider {
+public class JUnitConfiguration extends JavaTestConfigurationBase {
   public static final String DEFAULT_PACKAGE_NAME = ExecutionBundle.message("default.package.presentable.name");
 
   @NonNls public static final String TEST_CLASS = "class";
@@ -65,6 +63,7 @@ public class JUnitConfiguration extends ModuleBasedConfiguration<JavaRunConfigur
   @NonNls public static final String FORK_NONE = "none";
   @NonNls public static final String FORK_METHOD = "method";
   @NonNls public static final String FORK_KLASS = "class";
+  @NonNls public static final String FORK_REPEAT = "repeat";
   // See #26522
   @NonNls public static final String JUNIT_START_CLASS = "com.intellij.rt.execution.junit.JUnitStarter";
   @NonNls private static final String PATTERN_EL_NAME = "pattern";
@@ -112,6 +111,23 @@ public class JUnitConfiguration extends ModuleBasedConfiguration<JavaRunConfigur
       restoreOriginalModule(originalModule);
     }
   };
+  
+  final RefactoringListeners.Accessor<PsiClass> myCategory = new RefactoringListeners.Accessor<PsiClass>() {
+    @Override
+    public void setName(@NotNull final String qualifiedName) {
+      setCategory(qualifiedName);
+    }
+
+    @Override
+    public PsiClass getPsiElement() {
+      return getConfigurationModule().findClass(myData.getCategory());
+    }
+
+    @Override
+    public void setPsiElement(final PsiClass psiClass) {
+      setCategory(JavaExecutionUtil.getRuntimeQualifiedName(psiClass));
+    }
+  };
   public boolean ALTERNATIVE_JRE_PATH_ENABLED;
   public String ALTERNATIVE_JRE_PATH;
 
@@ -125,7 +141,7 @@ public class JUnitConfiguration extends ModuleBasedConfiguration<JavaRunConfigur
   }
 
   @Override
-  public RunProfileState getState(@NotNull final Executor executor, @NotNull final ExecutionEnvironment env) throws ExecutionException {
+  public TestObject getState(@NotNull final Executor executor, @NotNull final ExecutionEnvironment env) throws ExecutionException {
     return TestObject.fromString(myData.TEST_OBJECT, this, env);
   }
 
@@ -145,13 +161,13 @@ public class JUnitConfiguration extends ModuleBasedConfiguration<JavaRunConfigur
 
   @Override
   public RefactoringElementListener getRefactoringElementListener(final PsiElement element) {
-    final RefactoringElementListener listener = myData.getTestObject(this).getListener(element, this);
+    final RefactoringElementListener listener = getTestObject().getListener(element, this);
     return RunConfigurationExtension.wrapRefactoringElementListener(element, this, listener);
   }
 
   @Override
   public void checkConfiguration() throws RuntimeConfigurationException {
-    myData.getTestObject(this).checkConfiguration();
+    getTestObject().checkConfiguration();
     JavaRunConfigurationExtensionManager.checkConfigurationIsValid(this);
   }
 
@@ -161,7 +177,7 @@ public class JUnitConfiguration extends ModuleBasedConfiguration<JavaRunConfigur
       return Arrays.asList(ModuleManager.getInstance(getProject()).getModules());
     }
     try {
-      myData.getTestObject(this).checkConfiguration();
+      getTestObject().checkConfiguration();
     }
     catch (RuntimeConfigurationError e) {
       return Arrays.asList(ModuleManager.getInstance(getProject()).getModules());
@@ -171,11 +187,6 @@ public class JUnitConfiguration extends ModuleBasedConfiguration<JavaRunConfigur
     }
 
     return JavaRunConfigurationModule.getModulesForClass(getProject(), myData.getMainClassName());
-  }
-
-  @Override
-  protected ModuleBasedConfiguration createInstance() {
-    return new JUnitConfiguration(getName(), getProject(), myData.clone(), JUnitConfigurationType.getInstance().getConfigurationFactories()[0]);// throw new RuntimeException("Should not call");
   }
 
   @Override
@@ -280,6 +291,12 @@ public class JUnitConfiguration extends ModuleBasedConfiguration<JavaRunConfigur
   public void setMainClass(final PsiClass testClass) {
     final boolean shouldUpdateName = isGeneratedName();
     setModule(myData.setMainClass(testClass));
+    if (shouldUpdateName) setGeneratedName();
+  }
+
+  public void setCategory(String categoryName) {
+    final boolean shouldUpdateName = isGeneratedName();
+    myData.setCategoryName(categoryName);
     if (shouldUpdateName) setGeneratedName();
   }
 
@@ -457,6 +474,12 @@ public class JUnitConfiguration extends ModuleBasedConfiguration<JavaRunConfigur
     return new JUnitConsoleProperties(this, executor);
   }
 
+  @NotNull
+  @Override
+  public String getFrameworkPrefix() {
+    return "j";
+  }
+
   public static class Data implements Cloneable {
     public String PACKAGE_NAME;
     public String MAIN_CLASS_NAME;
@@ -584,6 +607,9 @@ public class JUnitConfiguration extends ModuleBasedConfiguration<JavaRunConfigur
         if (size == 0) return "Temp suite";
         final String fqName = myPattern.iterator().next();
         return (fqName.contains("*") ? fqName : StringUtil.getShortName(fqName)) + (size > 1 ? " and " + (size - 1) + " more" : "");
+      }
+      if (TEST_CATEGORY.equals(TEST_OBJECT)) {
+        return "@Category(" + (StringUtil.isEmpty(CATEGORY_NAME) ? "Invalid" : CATEGORY_NAME) + ")";
       }
       final String className = JavaExecutionUtil.getPresentableClassName(getMainClassName());
       if (TEST_METHOD.equals(TEST_OBJECT)) {

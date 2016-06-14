@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,41 +24,45 @@ import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 public class LightClassReference extends LightElement implements PsiJavaCodeReferenceElement {
   private final String myText;
   private final String myClassName;
   private final PsiElement myContext;
-  private final GlobalSearchScope myResolveScope;
+  @NotNull private final GlobalSearchScope myResolveScope;
   private final PsiClass myRefClass;
   private final PsiSubstitutor mySubstitutor;
 
   private LightReferenceParameterList myParameterList;
 
-  private LightClassReference(@NotNull PsiManager manager, @NotNull @NonNls String text, @NotNull @NonNls String className, PsiSubstitutor substitutor, @NotNull GlobalSearchScope resolveScope) {
+  private LightClassReference(@NotNull PsiManager manager,
+                              @NotNull @NonNls String text,
+                              @Nullable @NonNls String className,
+                              @Nullable PsiSubstitutor substitutor,
+                              @NotNull GlobalSearchScope resolveScope,
+                              @Nullable PsiElement context,
+                              @Nullable PsiClass refClass) {
     super(manager, JavaLanguage.INSTANCE);
     myText = text;
     myClassName = className;
     myResolveScope = resolveScope;
 
-    myContext = null;
-    myRefClass = null;
+    myContext = context;
+    myRefClass = refClass;
     mySubstitutor = substitutor;
   }
 
   public LightClassReference(@NotNull PsiManager manager, @NotNull @NonNls String text, @NotNull @NonNls String className, @NotNull GlobalSearchScope resolveScope) {
-    this (manager, text, className, null, resolveScope);
+    this(manager, text, className, null, resolveScope, null, null);
   }
 
-  public LightClassReference(@NotNull PsiManager manager, @NotNull @NonNls String text, @NotNull @NonNls String className, PsiSubstitutor substitutor, PsiElement context) {
-    super(manager, JavaLanguage.INSTANCE);
-    myText = text;
-    myClassName = className;
-    mySubstitutor = substitutor;
-    myContext = context;
-
-    myResolveScope = null;
-    myRefClass = null;
+  public LightClassReference(@NotNull PsiManager manager,
+                             @NotNull @NonNls String text,
+                             @NotNull @NonNls String className,
+                             PsiSubstitutor substitutor,
+                             @NotNull PsiElement context) {
+    this(manager, text, className, substitutor, context.getResolveScope(), context, null);
   }
 
   public LightClassReference(@NotNull PsiManager manager, @NotNull @NonNls String text, @NotNull PsiClass refClass) {
@@ -66,14 +70,7 @@ public class LightClassReference extends LightElement implements PsiJavaCodeRefe
   }
 
   public LightClassReference(@NotNull PsiManager manager, @NotNull @NonNls String text, @NotNull PsiClass refClass, PsiSubstitutor substitutor) {
-    super(manager, JavaLanguage.INSTANCE);
-    myText = text;
-    myRefClass = refClass;
-
-    myResolveScope = null;
-    myClassName = null;
-    myContext = null;
-    mySubstitutor = substitutor;
+    this(manager, text, null, substitutor, refClass.getResolveScope(), null, refClass);
   }
 
   @Override
@@ -179,11 +176,11 @@ public class LightClassReference extends LightElement implements PsiJavaCodeRefe
   @NotNull
   public String getCanonicalText() {
     String name = getQualifiedName();
-    if (name == null) return null;
+    if (name == null) return "";
     PsiType[] types = getTypeParameters();
     if (types.length == 0) return name;
 
-    StringBuffer buf = new StringBuffer();
+    StringBuilder buf = new StringBuilder();
     buf.append(name);
     buf.append('<');
     for (int i = 0; i < types.length; i++) {
@@ -202,7 +199,7 @@ public class LightClassReference extends LightElement implements PsiJavaCodeRefe
         return new LightClassReference(myManager, myText, myClassName, mySubstitutor, myContext);
       }
       else{
-        return new LightClassReference(myManager, myText, myClassName, mySubstitutor, myResolveScope);
+        return new LightClassReference(myManager, myText, myClassName, mySubstitutor, myResolveScope, null, null);
       }
     }
     else {
@@ -281,5 +278,11 @@ public class LightClassReference extends LightElement implements PsiJavaCodeRefe
   @Override
   public boolean isQualified() {
     return false;
+  }
+
+  @NotNull
+  @Override
+  public GlobalSearchScope getResolveScope() {
+    return myResolveScope;
   }
 }

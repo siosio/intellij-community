@@ -31,23 +31,11 @@ import org.jetbrains.annotations.NotNull;
  * Time: 1:29 PM
  */
 public class MessageBusUtil {
-  public static <T> void runOnSyncPublisher(final Project project, final Topic<T> topic, final Consumer<T> listener) {
-    final Application application = ApplicationManager.getApplication();
-    final Runnable runnable = createPublisherRunnable(project, topic, listener);
-    if (application.isDispatchThread()) {
-      runnable.run();
-    } else {
-      application.runReadAction(runnable);
-    }
-  }
 
   private static <T> Runnable createPublisherRunnable(final Project project, final Topic<T> topic, final Consumer<T> listener) {
-    return new Runnable() {
-      @Override
-      public void run() {
-        if (project.isDisposed()) throw new ProcessCanceledException();
-        listener.consume(project.getMessageBus().syncPublisher(topic));
-      }
+    return () -> {
+      if (project.isDisposed()) throw new ProcessCanceledException();
+      listener.consume(project.getMessageBus().syncPublisher(topic));
     };
   }
 

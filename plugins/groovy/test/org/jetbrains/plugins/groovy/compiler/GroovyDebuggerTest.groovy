@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,13 +39,16 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.fileTypes.FileType
 import com.intellij.openapi.roots.ModuleRootModificationUtil
 import com.intellij.openapi.util.Computable
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.psi.JavaPsiFacade
 import com.intellij.psi.PsiFile
 import com.intellij.psi.impl.DebugUtil
+import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.testFramework.PsiTestUtil
 import com.intellij.testFramework.TestLoggerFactory
 import com.intellij.testFramework.builders.JavaModuleFixtureBuilder
@@ -53,6 +56,8 @@ import com.intellij.testFramework.fixtures.impl.TempDirTestFixtureImpl
 import com.intellij.util.ExceptionUtil
 import com.intellij.util.SystemProperties
 import com.intellij.util.concurrency.Semaphore
+import org.jetbrains.plugins.groovy.GroovyFileType
+
 /**
  * @author peter
  */
@@ -255,6 +260,7 @@ class B {
       eval 'delegate.size()', '6'
       eval 'owner.name', 'B'
       eval 'this.name', 'B'
+      eval '[0, 1, 2, 3].collect { int numero -> numero.toString() }', '[0, 1, 2, 3]'
     }
   }
 
@@ -319,6 +325,32 @@ cl.parseClass('''$mcText''', 'MyClass.groovy').foo(2)
     }
   }
 
+  public void "test groovy source named java in lib source"() {
+    def tempDir = new TempDirTestFixtureImpl()
+    edt {
+      tempDir.setUp()
+      disposeOnTearDown({ tempDir.tearDown() } as Disposable)
+      tempDir.createFile("pkg/java.groovy", "class java {}")
+      PsiTestUtil.addLibrary(myModule, 'lib', tempDir.getFile('').path, [] as String[], [''] as String[])
+    }
+
+    def facade = JavaPsiFacade.getInstance(project)
+    assert !facade.findClass('java', GlobalSearchScope.allScope(project))
+    assert !facade.findPackage('').findClassByShortName('java', GlobalSearchScope.allScope(project))
+
+    def file = myFixture.addFileToProject("Foo.groovy", """\
+int a = 42
+int b = 3 //1
+    """)
+
+    addBreakpoint(file.virtualFile, 1)
+
+    runDebugger file, {
+      waitForBreakpoint()
+      eval 'a', '42'
+    }
+  }
+
   private SourcePosition getSourcePosition() {
     managed {
       EvaluationContextImpl context = evaluationContext()
@@ -357,6 +389,17 @@ foo()
     runDebugger file, {
       waitForBreakpoint()
       eval 'x', '5'
+    }
+  }
+  void "test non-identifier script name"() {
+    def file = myFixture.addFileToProject('foo-bar.groovy', '''\
+int x = 1
+println "hello"
+''')
+    addBreakpoint file.name, 1
+    runDebugger file, {
+      waitForBreakpoint()
+      eval 'x', '1'
     }
   }
 
@@ -435,6 +478,101 @@ new FooT().whoAmI()
       eval 'a', '1'
       eval 'b', '3'
       eval 'this', 'fooInstance'
+    }
+  }
+
+  public void "test evaluation in java context"() {
+    def starterFile = myFixture.addFileToProject 'Gr.groovy', '''
+new Main().foo()
+'''
+    def file = myFixture.addFileToProject 'Main.java', '''
+import java.util.Arrays;
+import java.util.List;
+
+public class Main {
+  void foo() {
+     List<Integer> a = Arrays.asList(1,2,3,4,5,6,7,8,9,10);
+     int x = 5; // 7
+  }
+}
+'''
+    make()
+
+    addBreakpoint file.virtualFile, 7
+    runDebugger starterFile, {
+      waitForBreakpoint()
+      eval 'a.find {it == 4}', '4', GroovyFileType.GROOVY_FILE_TYPE
+    }
+  }
+
+  public void "test evaluation in static java context"() {
+    def starterFile = myFixture.addFileToProject 'Gr.groovy', '''
+Main.test()
+'''
+    def file = myFixture.addFileToProject 'Main.java', '''
+import java.util.Arrays;
+import java.util.List;
+
+public class Main {
+  public static void test() {
+     List<Integer> a = Arrays.asList(1,2,3,4,5,6,7,8,9,10);
+     int x = 5; // 7
+  }
+}
+'''
+    make()
+
+    addBreakpoint file.virtualFile, 7
+    runDebugger starterFile, {
+      waitForBreakpoint()
+      eval 'a.find {it == 6}', '6', GroovyFileType.GROOVY_FILE_TYPE
+    }
+  }
+
+  public void "test evaluation with java references in java context"() {
+    def starterFile = myFixture.addFileToProject 'Gr.groovy', '''
+new Main().foo()
+'''
+    def file = myFixture.addFileToProject 'Main.java', '''
+import java.util.Arrays;
+import java.util.List;
+
+public class Main {
+  void foo() {
+     List<String> a = Arrays.asList("1","22","333");
+     int x = 5; // 7
+  }
+}
+'''
+    make()
+
+    addBreakpoint file.virtualFile, 7
+    runDebugger starterFile, {
+      waitForBreakpoint()
+      eval 'a.findAll {it.length() > 2}.size()', '1', GroovyFileType.GROOVY_FILE_TYPE
+    }
+  }
+
+  public void "test evaluation of params in java context"() {
+    def starterFile = myFixture.addFileToProject 'Gr.groovy', '''
+new Main().foo((String[])["a", "b", "c"])
+'''
+    def file = myFixture.addFileToProject 'Main.java', '''
+import java.util.Arrays;
+import java.util.List;
+
+public class Main {
+  void foo(String[] a) {
+     int x = 5; // 6
+  }
+}
+'''
+    make()
+
+    addBreakpoint file.virtualFile, 6
+    runDebugger starterFile, {
+      waitForBreakpoint()
+      eval 'a[1]', 'b', GroovyFileType.GROOVY_FILE_TYPE
     }
   }
 
@@ -518,11 +656,15 @@ new FooT().whoAmI()
   }
 
   private void eval(final String codeText, String expected) throws EvaluateException {
+    eval(codeText, expected, null);
+  }
+
+  private void eval(final String codeText, String expected, FileType fileType) throws EvaluateException {
     Semaphore semaphore = new Semaphore()
     semaphore.down()
 
     EvaluationContextImpl ctx
-    def item = new WatchItemDescriptor(project, new TextWithImportsImpl(CodeFragmentKind.EXPRESSION, codeText))
+    def item = new WatchItemDescriptor(project, new TextWithImportsImpl(CodeFragmentKind.EXPRESSION, codeText, "", fileType))
     managed {
       ctx = evaluationContext()
       item.setContext(ctx)

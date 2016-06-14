@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.ui.LabeledComponent;
 import com.intellij.openapi.ui.VerticalFlowLayout;
 import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.platform.DirectoryProjectGenerator;
 import com.intellij.ui.DocumentAdapter;
 import com.intellij.ui.HideableDecorator;
@@ -38,6 +39,7 @@ import com.jetbrains.python.configuration.VirtualEnvProjectFilter;
 import com.jetbrains.python.newProject.PyFrameworkProjectGenerator;
 import com.jetbrains.python.newProject.PythonProjectGenerator;
 import com.jetbrains.python.packaging.PyPackageManager;
+import com.jetbrains.python.packaging.PyPackageUtil;
 import com.jetbrains.python.sdk.PySdkUtil;
 import com.jetbrains.python.sdk.PythonSdkType;
 import icons.PythonIcons;
@@ -52,6 +54,7 @@ import java.awt.event.ActionListener;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.io.File;
+import java.util.ArrayList;
 import java.util.List;
 
 public class ProjectSpecificSettingsStep extends ProjectSettingsStepBase implements DumbAware {
@@ -133,11 +136,10 @@ public class ProjectSpecificSettingsStep extends ProjectSettingsStepBase impleme
   }
 
   @Nullable
-  @Override
   protected JPanel extendBasePanel() {
     if (myProjectGenerator instanceof PythonProjectGenerator)
       return ((PythonProjectGenerator)myProjectGenerator).extendBasePanel();
-    return super.extendBasePanel();
+    return null;
   }
 
   @Override
@@ -149,44 +151,56 @@ public class ProjectSpecificSettingsStep extends ProjectSettingsStepBase impleme
 
     final Sdk sdk = getSdk();
 
-    if (myProjectGenerator instanceof PythonProjectGenerator) {
-      final ValidationResult warningResult = ((PythonProjectGenerator)myProjectGenerator).warningValidation(sdk);
-      if (!warningResult.isOk()) {
-        setWarningText(warningResult.getErrorMessage());
-      }
+    if (sdk == null) {
+      setErrorText("No Python interpreter selected");
+      return false;
     }
-
-    final boolean isPy3k = sdk != null && PythonSdkType.getLanguageLevelForSdk(sdk).isPy3K();
-    if (sdk != null && PythonSdkType.isRemote(sdk) && !acceptsRemoteSdk(myProjectGenerator)) {
+    else if (PythonSdkType.isInvalid(sdk)){
+      setErrorText("Choose valid python interpreter");
+      return false;
+    }
+    final List<String> warningList = new ArrayList<>();
+    final boolean isPy3k = PythonSdkType.getLanguageLevelForSdk(sdk).isPy3K();
+    if (PythonSdkType.isRemote(sdk) && !acceptsRemoteSdk(myProjectGenerator)) {
       setErrorText("Please choose a local interpreter");
       return false;
     }
     else if (myProjectGenerator instanceof PyFrameworkProjectGenerator) {
       PyFrameworkProjectGenerator frameworkProjectGenerator = (PyFrameworkProjectGenerator)myProjectGenerator;
       String frameworkName = frameworkProjectGenerator.getFrameworkTitle();
-      if (sdk != null && !isFrameworkInstalled(sdk)) {
-        String warningText = frameworkName + " will be installed on selected interpreter";
-        myInstallFramework = true;
-        final PyPackageManager packageManager = PyPackageManager.getInstance(sdk);
-        boolean hasManagement = false;
-        try {
-          hasManagement = packageManager.hasManagement(PySdkUtil.isRemote(sdk));
+      if (!isFrameworkInstalled(sdk)) {
+        if (PyPackageUtil.packageManagementEnabled(sdk)) {
+          warningList.add(frameworkName + " will be installed on the selected interpreter");
+          myInstallFramework = true;
+          final PyPackageManager packageManager = PyPackageManager.getInstance(sdk);
+          boolean hasManagement = false;
+          try {
+            hasManagement = packageManager.hasManagement(PySdkUtil.isRemote(sdk));
+          }
+          catch (ExecutionException ignored) {
+          }
+          if (!hasManagement) {
+            warningList.add("Python packaging tools and " + warningList);
+          }
+        } else {
+          warningList.add(frameworkName + " is not installed on the selected interpreter");
         }
-        catch (ExecutionException ignored) {
+      }
+      if (myProjectGenerator instanceof PythonProjectGenerator) {
+        final ValidationResult warningResult = ((PythonProjectGenerator)myProjectGenerator).warningValidation(sdk);
+        if (!warningResult.isOk()) {
+          warningList.add(warningResult.getErrorMessage());
         }
-        if (!hasManagement) {
-          warningText = "Python packaging tools and " + warningText;
-        }
-        setWarningText(warningText);
+      }
+
+      if (!warningList.isEmpty()) {
+        final String warning = StringUtil.join(warningList, "<br/>");
+        setWarningText(warning);
       }
       if (isPy3k && !((PyFrameworkProjectGenerator)myProjectGenerator).supportsPython3()) {
         setErrorText(frameworkName + " is not supported for the selected interpreter");
         return false;
       }
-    }
-    if (sdk == null) {
-      setErrorText("No Python interpreter selected");
-      return false;
     }
     return true;
   }
@@ -215,12 +229,7 @@ public class ProjectSpecificSettingsStep extends ProjectSettingsStepBase impleme
     }
 
     final Sdk preferred = compatibleSdk;
-    mySdkCombo = new PythonSdkChooserCombo(project, sdks, new Condition<Sdk>() {
-      @Override
-      public boolean value(Sdk sdk) {
-        return sdk == preferred;
-      }
-    });
+    mySdkCombo = new PythonSdkChooserCombo(project, sdks, sdk -> sdk == preferred);
     mySdkCombo.setButtonIcon(PythonIcons.Python.InterpreterGear);
 
     final LabeledComponent<PythonSdkChooserCombo> labeled = LabeledComponent.create(mySdkCombo, "Interpreter");
@@ -251,9 +260,7 @@ public class ProjectSpecificSettingsStep extends ProjectSettingsStepBase impleme
       protected void textChanged(DocumentEvent e) {
         if (myProjectGenerator instanceof PythonProjectGenerator) {
           String path = myLocationField.getText().trim();
-          if (path.endsWith(File.separator)) {
-            path = path.substring(0, path.length() - File.separator.length());
-          }
+          path = StringUtil.trimEnd(path, File.separator);
           int ind = path.lastIndexOf(File.separator);
           if (ind != -1) {
             String projectName = path.substring(ind + 1, path.length());

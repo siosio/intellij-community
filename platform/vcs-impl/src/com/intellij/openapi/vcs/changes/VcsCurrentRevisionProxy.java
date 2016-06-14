@@ -28,30 +28,29 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
-import java.nio.charset.Charset;
 
-/**
- * @author yole
- */
 public class VcsCurrentRevisionProxy implements ContentRevision {
-  private final DiffProvider myDiffProvider;
-  private final VirtualFile myFile;
-  private final Project myProject;
-  private final VcsKey myVcsKey;
+  @NotNull private final DiffProvider myDiffProvider;
+  @NotNull private final VirtualFile myFile;
+  @NotNull private final Project myProject;
+  @NotNull private final VcsKey myVcsKey;
 
   @Nullable
-  public static VcsCurrentRevisionProxy create(final VirtualFile file, final Project project, final VcsKey vcsKey) {
-    final AbstractVcs vcs = ProjectLevelVcsManager.getInstance(project).findVcsByName(vcsKey.getName());
+  public static VcsCurrentRevisionProxy create(@NotNull VirtualFile file, @NotNull Project project) {
+    AbstractVcs vcs = ProjectLevelVcsManager.getInstance(project).getVcsFor(file);
     if (vcs != null) {
-      final DiffProvider diffProvider = vcs.getDiffProvider();
+      DiffProvider diffProvider = vcs.getDiffProvider();
       if (diffProvider != null) {
-        return new VcsCurrentRevisionProxy(diffProvider, file, project, vcsKey);
+        return new VcsCurrentRevisionProxy(diffProvider, file, project, vcs.getKeyInstanceMethod());
       }
     }
     return null;
   }
 
-  private VcsCurrentRevisionProxy(final DiffProvider diffProvider, final VirtualFile file, final Project project, final VcsKey vcsKey) {
+  private VcsCurrentRevisionProxy(@NotNull DiffProvider diffProvider,
+                                  @NotNull VirtualFile file,
+                                  @NotNull Project project,
+                                  @NotNull VcsKey vcsKey) {
     myDiffProvider = diffProvider;
     myFile = file;
     myProject = project;
@@ -78,12 +77,13 @@ public class VcsCurrentRevisionProxy implements ContentRevision {
     }
   }
 
+  @NotNull
   private ContentRevision getVcsRevision() throws VcsException {
     final FilePath file = getFile();
-    final Pair<VcsRevisionNumber, String> pair;
+    final Pair<VcsRevisionNumber, byte[]> pair;
     try {
-      pair = ContentRevisionCache.getOrLoadCurrentAsString(myProject, file, myVcsKey,
-                                                           new CurrentRevisionProvider() {
+      pair = ContentRevisionCache.getOrLoadCurrentAsBytes(myProject, file, myVcsKey,
+                                                          new CurrentRevisionProvider() {
                                                              @Override
                                                              public VcsRevisionNumber getCurrentRevision() throws VcsException {
                                                                return getCurrentRevisionNumber();
@@ -99,9 +99,15 @@ public class VcsCurrentRevisionProxy implements ContentRevision {
       throw new VcsException(e);
     }
 
-    return new ContentRevision() {
+    return new ByteBackedContentRevision() {
       @Override
       public String getContent() throws VcsException {
+        return ContentRevisionCache.getAsString(getContentAsBytes(), file, null);
+      }
+
+      @Nullable
+      @Override
+      public byte[] getContentAsBytes() throws VcsException {
         return pair.getSecond();
       }
 
@@ -119,21 +125,26 @@ public class VcsCurrentRevisionProxy implements ContentRevision {
     };
   }
 
+  @NotNull
   private VcsRevisionNumber getCurrentRevisionNumber() throws VcsException {
-    final VcsRevisionNumber currentRevision = myDiffProvider.getCurrentRevision(myFile);
+    VcsRevisionNumber currentRevision = myDiffProvider.getCurrentRevision(myFile);
+
     if (currentRevision == null) {
       throw new VcsException("Failed to fetch current revision");
     }
+
     return currentRevision;
   }
 
+  @NotNull
   private Pair<VcsRevisionNumber, byte[]> loadContent() throws VcsException {
-    final VcsRevisionNumber currentRevision = getCurrentRevisionNumber();
-    final ContentRevision contentRevision = myDiffProvider.createFileContent(currentRevision, myFile);
+    VcsRevisionNumber currentRevision = getCurrentRevisionNumber();
+    ContentRevision contentRevision = myDiffProvider.createFileContent(currentRevision, myFile);
+
     if (contentRevision == null) {
       throw new VcsException("Failed to create content for current revision");
     }
-    Charset charset = myFile.getCharset();
-    return Pair.create(currentRevision, contentRevision.getContent().getBytes(charset));
+
+    return Pair.create(currentRevision, contentRevision.getContent().getBytes(myFile.getCharset()));
   }
 }

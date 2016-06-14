@@ -37,35 +37,23 @@ public class FileTypeUsagesCollectorTest extends LightPlatformCodeInsightFixture
       assertEquals(1, usage.getValue());
     }
     assertEquals(
-      ContainerUtil.map2Set(fileTypes, new NotNullFunction<FileType, String>() {
-        @NotNull
-        @Override
-        public String fun(FileType fileType) {
-          return fileType.getName();
-        }
-      }),
-      ContainerUtil.map2Set(usages, new NotNullFunction<UsageDescriptor, String>() {
-        @NotNull
-        @Override
-        public String fun(UsageDescriptor usageDescriptor) {
-          return usageDescriptor.getKey();
-        }
-      })
+      ContainerUtil.map2Set(fileTypes, (NotNullFunction<FileType, String>)fileType -> fileType.getName()),
+      ContainerUtil.map2Set(usages, (NotNullFunction<UsageDescriptor, String>)usageDescriptor -> usageDescriptor.getKey())
     );
   }
 
   public void testEmptyProject() throws CollectUsagesException {
-    doTest(Arrays.asList(UnknownFileType.INSTANCE));
+    doTest(Arrays.asList());
   }
 
   public void testSingleFileProject() throws CollectUsagesException {
     myFixture.configureByText("a.txt", "");
-    doTest(Arrays.asList(UnknownFileType.INSTANCE, PlainTextFileType.INSTANCE));
+    doTest(Arrays.asList(PlainTextFileType.INSTANCE));
   }
 
   public void testSeveralSameFilesProject() throws CollectUsagesException {
     myFixture.configureByText("a.txt", "");
     myFixture.configureByText("b.txt", "");
-    doTest(Arrays.asList(UnknownFileType.INSTANCE, PlainTextFileType.INSTANCE));
+    doTest(Arrays.asList(PlainTextFileType.INSTANCE));
   }
 }

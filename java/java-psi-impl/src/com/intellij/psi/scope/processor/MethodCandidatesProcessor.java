@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ import java.util.List;
  * Date: 31.01.2003
  */
 public class MethodCandidatesProcessor extends MethodsProcessor{
-  protected boolean myHasAccessibleStaticCorrectCandidate = false;
+  protected boolean myHasAccessibleStaticCorrectCandidate;
 
   public MethodCandidatesProcessor(@NotNull PsiElement place, PsiFile placeFile, @NotNull PsiConflictResolver[] resolvers, @NotNull List<CandidateInfo> container) {
     super(resolvers, container, place, placeFile);
@@ -58,7 +58,10 @@ public class MethodCandidatesProcessor extends MethodsProcessor{
     if (isAccepted(method) && !(isInterfaceStaticMethodAccessibleThroughInheritance(method) && ImportsUtil.hasStaticImportOn(myPlace, method, true))) {
       if (!staticProblem && myAccessClass != null && method.hasModifierProperty(PsiModifier.STATIC)) {
         final PsiClass containingClass = method.getContainingClass();
-        if (containingClass != null && containingClass.isInterface() && !containingClass.equals(myAccessClass)) {
+        if (containingClass != null && 
+            containingClass.isInterface() &&
+            !(myAccessClass instanceof PsiTypeParameter) &&
+            !containingClass.equals(myAccessClass)) {
           staticProblem = true;
         }
       }
@@ -101,7 +104,7 @@ public class MethodCandidatesProcessor extends MethodsProcessor{
       public PsiType[] getArgumentTypes() {
         if (myExpressionTypes == null && argumentList != null) {
           final PsiType[] expressionTypes = getExpressionTypes(argumentList);
-          if (MethodCandidateInfo.isOverloadCheck()) {
+          if (MethodCandidateInfo.isOverloadCheck() || LambdaUtil.isLambdaParameterCheck()) {
             return expressionTypes;
           }
           myExpressionTypes = expressionTypes;

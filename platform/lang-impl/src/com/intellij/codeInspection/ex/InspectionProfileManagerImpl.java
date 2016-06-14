@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,26 +26,27 @@ import com.intellij.codeInspection.InspectionsBundle;
 import com.intellij.lang.annotation.HighlightSeverity;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
-import com.intellij.openapi.components.*;
+import com.intellij.openapi.components.PersistentStateComponent;
+import com.intellij.openapi.components.ServiceManager;
+import com.intellij.openapi.components.State;
+import com.intellij.openapi.components.Storage;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.colors.TextAttributesKey;
 import com.intellij.openapi.extensions.Extensions;
-import com.intellij.openapi.options.BaseSchemeProcessor;
 import com.intellij.openapi.options.Scheme;
+import com.intellij.openapi.options.SchemeProcessor;
 import com.intellij.openapi.options.SchemesManager;
 import com.intellij.openapi.options.SchemesManagerFactory;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.ui.Messages;
-import com.intellij.openapi.util.Comparing;
-import com.intellij.openapi.util.InvalidDataException;
-import com.intellij.openapi.util.WriteExternalException;
 import com.intellij.profile.Profile;
 import com.intellij.profile.codeInspection.InspectionProfileLoadUtil;
 import com.intellij.profile.codeInspection.InspectionProfileManager;
 import com.intellij.profile.codeInspection.InspectionProjectProfileManager;
 import com.intellij.profile.codeInspection.SeverityProvider;
 import com.intellij.util.ArrayUtil;
+import com.intellij.util.ObjectUtils;
 import com.intellij.util.messages.MessageBus;
 import com.intellij.util.ui.UIUtil;
 import org.jdom.Element;
@@ -63,14 +64,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @State(
   name = "InspectionProfileManager",
   storages = {
-    @Storage(file = StoragePathMacros.APP_CONFIG + "/editor.xml"),
-    @Storage(file = StoragePathMacros.APP_CONFIG + "/other.xml", deprecated = true)
+    @Storage("editor.xml"),
+    @Storage(value = "other.xml", deprecated = true)
   },
-  additionalExportFile = InspectionProfileManager.FILE_SPEC
+  additionalExportFile = InspectionProfileManager.INSPECTION_DIR
 )
 public class InspectionProfileManagerImpl extends InspectionProfileManager implements SeverityProvider, PersistentStateComponent<Element> {
+
   private final InspectionToolRegistrar myRegistrar;
-  private final SchemesManager<Profile, InspectionProfileImpl> mySchemesManager;
+  private final SchemesManager<Profile, InspectionProfileImpl> mySchemeManager;
   private final AtomicBoolean myProfilesAreInitialized = new AtomicBoolean(false);
   private final SeverityRegistrar mySeverityRegistrar;
 
@@ -84,7 +86,7 @@ public class InspectionProfileManagerImpl extends InspectionProfileManager imple
     myRegistrar = registrar;
     registerProvidedSeverities();
 
-    mySchemesManager = schemesManagerFactory.createSchemesManager(FILE_SPEC, new BaseSchemeProcessor<InspectionProfileImpl>() {
+    mySchemeManager = schemesManagerFactory.create(INSPECTION_DIR, new SchemeProcessor<InspectionProfileImpl>() {
       @NotNull
       @Override
       public InspectionProfileImpl readScheme(@NotNull Element element) {
@@ -93,13 +95,8 @@ public class InspectionProfileManagerImpl extends InspectionProfileManager imple
           profile.readExternal(element);
         }
         catch (Exception ignored) {
-          ApplicationManager.getApplication().invokeLater(new Runnable() {
-            @Override
-            public void run() {
-              Messages.showErrorDialog(InspectionsBundle.message("inspection.error.loading.message", 0, profile.getName()),
-                                       InspectionsBundle.message("inspection.errors.occurred.dialog.title"));
-            }
-          }, ModalityState.NON_MODAL);
+          ApplicationManager.getApplication().invokeLater(() -> Messages.showErrorDialog(InspectionsBundle.message("inspection.error.loading.message", 0, profile.getName()),
+                                                                                       InspectionsBundle.message("inspection.errors.occurred.dialog.title")), ModalityState.NON_MODAL);
         }
         return profile;
       }
@@ -107,7 +104,7 @@ public class InspectionProfileManagerImpl extends InspectionProfileManager imple
       @NotNull
       @Override
       public State getState(@NotNull InspectionProfileImpl scheme) {
-        return scheme.isProjectLevel() ? State.NON_PERSISTENT : (scheme.wasInitialized() ? State.POSSIBLY_CHANGED : State.UNCHANGED);
+        return scheme.isProjectLevel() ? State.NON_PERSISTENT : scheme.wasInitialized() ? State.POSSIBLY_CHANGED : State.UNCHANGED;
       }
 
       @Override
@@ -131,14 +128,14 @@ public class InspectionProfileManagerImpl extends InspectionProfileManager imple
       }
 
       @Override
-      public void onCurrentSchemeChanged(final Scheme oldCurrentScheme) {
-        Profile current = mySchemesManager.getCurrentScheme();
+      public void onCurrentSchemeChanged(@Nullable Scheme oldScheme) {
+        Profile current = mySchemeManager.getCurrentScheme();
         if (current != null) {
-          fireProfileChanged((Profile)oldCurrentScheme, current, null);
+          fireProfileChanged((Profile)oldScheme, current, null);
         }
         onProfilesChanged();
       }
-    }, RoamingType.PER_USER);
+    });
     mySeverityRegistrar = new SeverityRegistrar(messageBus);
   }
 
@@ -147,6 +144,7 @@ public class InspectionProfileManagerImpl extends InspectionProfileManager imple
     return new InspectionProfileImpl(name, InspectionToolRegistrar.getInstance(), this, baseProfile);
   }
 
+  // It should be public to be available from Upsource
   public static void registerProvidedSeverities() {
     for (SeveritiesProvider provider : Extensions.getExtensions(SeveritiesProvider.EP_NAME)) {
       for (HighlightInfoType t : provider.getSeveritiesHighlightInfoTypes()) {
@@ -163,7 +161,7 @@ public class InspectionProfileManagerImpl extends InspectionProfileManager imple
   @NotNull
   public Collection<Profile> getProfiles() {
     initProfiles();
-    return mySchemesManager.getAllSchemes();
+    return mySchemeManager.getAllSchemes();
   }
 
   private volatile boolean LOAD_PROFILES = !ApplicationManager.getApplication().isUnitTestMode();
@@ -176,22 +174,16 @@ public class InspectionProfileManagerImpl extends InspectionProfileManager imple
   @Override
   public void initProfiles() {
     if (myProfilesAreInitialized.getAndSet(true)) {
-      if (mySchemesManager.getAllSchemes().isEmpty()) {
+      if (mySchemeManager.getAllSchemes().isEmpty()) {
         createDefaultProfile();
       }
       return;
     }
     if (!LOAD_PROFILES) return;
 
-    mySchemesManager.loadSchemes();
-    Collection<Profile> profiles = mySchemesManager.getAllSchemes();
-    if (profiles.isEmpty()) {
+    mySchemeManager.loadSchemes();
+    if (mySchemeManager.getAllSchemes().isEmpty()) {
       createDefaultProfile();
-    }
-    else {
-      for (Profile profile : profiles) {
-        addProfile(profile);
-      }
     }
   }
 
@@ -208,20 +200,12 @@ public class InspectionProfileManagerImpl extends InspectionProfileManager imple
       try {
         return InspectionProfileLoadUtil.load(file, myRegistrar, this);
       }
-      catch (IOException e) {
-        throw e;
-      }
-      catch (JDOMException e) {
+      catch (IOException | JDOMException e) {
         throw e;
       }
       catch (Exception ignored) {
-        ApplicationManager.getApplication().invokeLater(new Runnable() {
-          @Override
-          public void run() {
-            Messages.showErrorDialog(InspectionsBundle.message("inspection.error.loading.message", 0, file),
-                                     InspectionsBundle.message("inspection.errors.occurred.dialog.title"));
-          }
-        }, ModalityState.NON_MODAL);
+        ApplicationManager.getApplication().invokeLater(() -> Messages.showErrorDialog(InspectionsBundle.message("inspection.error.loading.message", 0, file),
+                                                                                     InspectionsBundle.message("inspection.errors.occurred.dialog.title")), ModalityState.NON_MODAL);
       }
     }
     return getProfile(path, false);
@@ -229,7 +213,7 @@ public class InspectionProfileManagerImpl extends InspectionProfileManager imple
 
   @Override
   public void updateProfile(@NotNull Profile profile) {
-    mySchemesManager.addScheme(profile);
+    mySchemeManager.addScheme(profile);
     updateProfileImpl(profile);
   }
 
@@ -255,23 +239,13 @@ public class InspectionProfileManagerImpl extends InspectionProfileManager imple
   @Override
   public Element getState() {
     Element state = new Element("state");
-    try {
-      mySeverityRegistrar.writeExternal(state);
-    }
-    catch (WriteExternalException e) {
-      throw new RuntimeException(e);
-    }
+    mySeverityRegistrar.writeExternal(state);
     return state;
   }
 
   @Override
   public void loadState(Element state) {
-    try {
-      mySeverityRegistrar.readExternal(state);
-    }
-    catch (InvalidDataException e) {
-      throw new RuntimeException(e);
-    }
+    mySeverityRegistrar.readExternal(state);
   }
 
   public InspectionProfileConvertor getConverter() {
@@ -284,17 +258,13 @@ public class InspectionProfileManagerImpl extends InspectionProfileManager imple
   }
 
   @Override
-  public void setRootProfile(String rootProfile) {
-    Profile current = mySchemesManager.getCurrentScheme();
-    if (current != null && !Comparing.strEqual(rootProfile, current.getName())) {
-      fireProfileChanged(current, getProfile(rootProfile), null);
-    }
-    mySchemesManager.setCurrentSchemeName(rootProfile);
+  public void setRootProfile(@Nullable String profileName) {
+    mySchemeManager.setCurrentSchemeName(profileName);
   }
 
   @Override
   public Profile getProfile(@NotNull final String name, boolean returnRootProfileIfNamedIsAbsent) {
-    Profile found = mySchemesManager.findSchemeByName(name);
+    Profile found = mySchemeManager.findSchemeByName(name);
     if (found != null) return found;
     //profile was deleted
     if (returnRootProfileIfNamedIsAbsent) {
@@ -306,30 +276,36 @@ public class InspectionProfileManagerImpl extends InspectionProfileManager imple
   @NotNull
   @Override
   public Profile getRootProfile() {
-    Profile current = mySchemesManager.getCurrentScheme();
+    initProfiles();
+    Profile current = mySchemeManager.getCurrentScheme();
     if (current != null) return current;
     Collection<Profile> profiles = getProfiles();
     if (profiles.isEmpty()) return createSampleProfile(InspectionProfileImpl.DEFAULT_PROFILE_NAME, null);
     return profiles.iterator().next();
   }
 
+  @NotNull
+  public String getRootProfileName() {
+    return ObjectUtils.chooseNotNull(mySchemeManager.getCurrentSchemeName(), InspectionProfileImpl.DEFAULT_PROFILE_NAME);
+  }
+
   @Override
   public void deleteProfile(@NotNull final String profile) {
-    Profile found = mySchemesManager.findSchemeByName(profile);
+    Profile found = mySchemeManager.findSchemeByName(profile);
     if (found != null) {
-      mySchemesManager.removeScheme(found);
+      mySchemeManager.removeScheme(found);
     }
   }
 
   @Override
   public void addProfile(@NotNull final Profile profile) {
-    mySchemesManager.addScheme(profile);
+    mySchemeManager.addScheme(profile);
   }
 
   @Override
   @NotNull
   public String[] getAvailableProfileNames() {
-    return ArrayUtil.toStringArray(mySchemesManager.getAllSchemeNames());
+    return ArrayUtil.toStringArray(mySchemeManager.getAllSchemeNames());
   }
 
   @Override
@@ -344,12 +320,9 @@ public class InspectionProfileManagerImpl extends InspectionProfileManager imple
       synchronized (HighlightingSettingsPerFile.getInstance(project)) {
       }
 
-      UIUtil.invokeLaterIfNeeded(new Runnable() {
-        @Override
-        public void run() {
-          if (!project.isDisposed()) {
-            DaemonListeners.getInstance(project).updateStatusBar();
-          }
+      UIUtil.invokeLaterIfNeeded(() -> {
+        if (!project.isDisposed()) {
+          DaemonListeners.getInstance(project).updateStatusBar();
         }
       });
     }

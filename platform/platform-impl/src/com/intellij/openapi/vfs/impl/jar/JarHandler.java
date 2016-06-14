@@ -162,9 +162,9 @@ public class JarHandler extends ZipHandler {
       String mirrorName = getSnapshotName(originalFile.getName(), sha1.digest());
       mirrorFile = new File(jarDir, mirrorName);
 
-      if (mirrorDiffers(originalAttributes, FileSystemUtil.getAttributes(mirrorFile), true)) {
+      FileAttributes mirrorFileAttributes = FileSystemUtil.getAttributes(mirrorFile);
+      if (mirrorFileAttributes == null) {
         try {
-          FileUtil.delete(mirrorFile);
           FileUtil.rename(tempJarFile, mirrorFile);
           FileUtil.setLastModified(mirrorFile, originalAttributes.lastModified);
         }
@@ -177,11 +177,12 @@ public class JarHandler extends ZipHandler {
         FileUtil.delete(tempJarFile);
       }
 
-      info = new CacheLibraryInfo(mirrorFile.getName(), originalAttributes.lastModified, originalAttributes.length);
+      info = new CacheLibraryInfo(mirrorFile.getName(),  originalAttributes.lastModified, originalAttributes.length);
       CacheLibraryInfo.ourCachedLibraryInfo.put(path, info);
       return mirrorFile;
     }
     catch (IOException ex) {
+      CacheLibraryInfo.ourCachedLibraryInfo.markCorrupted();
       reportIOErrorWithJars(originalFile, mirrorFile != null ? mirrorFile : new File(jarDir, originalFile.getName()), ex);
       return originalFile;
     }
@@ -226,10 +227,12 @@ public class JarHandler extends ZipHandler {
       reportIOErrorWithJars(original, mirror, e);
       return original;
     }
-
-    if (progress != null) {
-      progress.popState();
+    finally {
+      if (progress != null) {
+        progress.popState();
+      }
     }
+
 
     return mirror;
   }
@@ -243,22 +246,29 @@ public class JarHandler extends ZipHandler {
     private static final int VERSION = 1 + (PersistentHashMapValueStorage.COMPRESSION_ENABLED ? 15 : 0);
 
     static {
-      File snapshotInfoFile = new File(new File(getJarsDir()), "snapshots_info");
+      File jarsDir = new File(getJarsDir());
+      File snapshotInfoFile = new File(jarsDir, "snapshots_info");
 
       int currentVersion = -1;
+      long currentVfsVersion = -1;
       File versionFile = getVersionFile(snapshotInfoFile);
       if (versionFile.exists()) {
         try {
           DataInputStream versionStream = new DataInputStream(new BufferedInputStream(new FileInputStream(versionFile)));
           try {
             currentVersion = DataInputOutputUtil.readINT(versionStream);
+            currentVfsVersion = DataInputOutputUtil.readTIME(versionStream);
           } finally {
             versionStream.close();
           }
         } catch (IOException ignore) {}
       }
 
-      if (currentVersion != VERSION) {
+      if (currentVfsVersion != FSRecords.getCreationTimestamp()) {
+        FileUtil.deleteWithRenaming(jarsDir);
+        jarsDir.mkdirs();
+        saveVersion(versionFile);
+      } else if (currentVersion != VERSION) {
         PersistentHashMap.deleteFilesStartingWith(snapshotInfoFile);
         saveVersion(versionFile);
       }
@@ -267,18 +277,18 @@ public class JarHandler extends ZipHandler {
       for (int i = 0; i < 2; ++i) {
         try {
           info = new PersistentHashMap<String, CacheLibraryInfo>(
-            snapshotInfoFile, new EnumeratorStringDescriptor(), new DataExternalizer<CacheLibraryInfo>() {
+            snapshotInfoFile, EnumeratorStringDescriptor.INSTANCE, new DataExternalizer<CacheLibraryInfo>() {
 
             @Override
             public void save(@NotNull DataOutput out, CacheLibraryInfo value) throws IOException {
               IOUtil.writeUTF(out, value.mySnapshotPath);
-              out.writeLong(value.myModificationTime);
-              out.writeLong(value.myFileLength);
+              DataInputOutputUtil.writeTIME(out, value.myModificationTime);
+              DataInputOutputUtil.writeLONG(out, value.myFileLength);
             }
 
             @Override
             public CacheLibraryInfo read(@NotNull DataInput in) throws IOException {
-              return new CacheLibraryInfo(IOUtil.readUTF(in), in.readLong(), in.readLong());
+              return new CacheLibraryInfo(IOUtil.readUTF(in), DataInputOutputUtil.readTIME(in), DataInputOutputUtil.readLONG(in));
             }
           }
           );
@@ -293,19 +303,9 @@ public class JarHandler extends ZipHandler {
 
       assert info != null;
       ourCachedLibraryInfo = info;
-      FlushingDaemon.everyFiveSeconds(new Runnable() {
-        @Override
-        public void run() {
-          flushCachedLibraryInfos();
-        }
-      });
+      FlushingDaemon.everyFiveSeconds(() -> flushCachedLibraryInfos());
 
-      ShutDownTracker.getInstance().registerShutdownTask(new Runnable() {
-        @Override
-        public void run() {
-          flushCachedLibraryInfos();
-        }
-      });
+      ShutDownTracker.getInstance().registerShutdownTask(() -> flushCachedLibraryInfos());
     }
 
     @NotNull
@@ -388,6 +388,7 @@ public class JarHandler extends ZipHandler {
         DataOutputStream versionOutputStream = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(versionFile)));
         try {
           DataInputOutputUtil.writeINT(versionOutputStream, VERSION);
+          DataInputOutputUtil.writeTIME(versionOutputStream, FSRecords.getCreationTimestamp());
         }
         finally {
           versionOutputStream.close();

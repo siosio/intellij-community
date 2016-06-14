@@ -69,12 +69,7 @@ public class GroupedLogMessage extends AbstractMessage {
 
   @NotNull
   @Override
-  public List<Attachment> getAttachments() {
-    return ContainerUtil.concat(getMessages(), new Function<AbstractMessage, Collection<? extends Attachment>>() {
-      @Override
-      public Collection<? extends Attachment> fun(AbstractMessage message) {
-        return message.getAttachments();
-      }
-    });
+  public List<Attachment> getAllAttachments() {
+    return ContainerUtil.concat(getMessages(), message -> message.getAllAttachments());
   }
 }

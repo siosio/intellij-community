@@ -145,13 +145,15 @@ class _BehaveRunner(_bdd_utils.BddRunner):
             elif element.status == 'passed':
                 self._test_passed(step_name, element.duration)
             elif element.status == 'failed':
-                try:
-                    trace = traceback.format_exc()
-                except Exception:
-                    trace = "".join(traceback.format_tb(element.exc_traceback))
+                # Correct way is to use element.errormessage
+                # but assertions do not have trace there (due to Behave internals)
+                # do, we collect it manually
+                trace = ""
+                if isinstance(element.exception, AssertionError):
+                    trace = u"".join([utils.to_unicode(l) for l in traceback.format_tb(element.exc_traceback)])
+
                 error_message = utils.to_unicode(element.error_message)
-                if "Traceback " in error_message:
-                    error_message = ""  # No reason to duplicate output (see PY-13647)
+
                 self._test_failed(step_name, error_message, trace, duration=element.duration)
             elif element.status == 'undefined':
                 self._test_undefined(step_name, element.location)
@@ -237,6 +239,9 @@ if __name__ == "__main__":
 
     command_args = list(filter(None, sys.argv[1:]))
     if command_args:
+        if "--junit" in command_args:
+            raise Exception("--junit report type for Behave is unsupported in PyCharm. \n "
+            "See: https://youtrack.jetbrains.com/issue/PY-14219")
         _bdd_utils.fix_win_drive(command_args[0])
     (base_dir, scenario_names, what_to_run) = _bdd_utils.get_what_to_run_by_env(os.environ)
 
@@ -269,5 +274,3 @@ if __name__ == "__main__":
     if what_to_run and not my_config.paths:
         raise Exception("Nothing to run in {0}".format(what_to_run))
     _BehaveRunner(my_config, base_dir).run()
-
-

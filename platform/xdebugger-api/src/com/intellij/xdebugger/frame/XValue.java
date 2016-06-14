@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,9 @@
 package com.intellij.xdebugger.frame;
 
 import com.intellij.util.ThreeState;
+import com.intellij.xdebugger.XDebuggerUtil;
+import com.intellij.xdebugger.XExpression;
+import com.intellij.xdebugger.evaluation.EvaluationMode;
 import com.intellij.xdebugger.evaluation.XInstanceEvaluator;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -49,8 +52,11 @@ public abstract class XValue extends XValueContainer {
    * Asynchronously calculates expression which evaluates to the current value
    */
   @NotNull
-  public Promise<String> calculateEvaluationExpression() {
-    return Promise.resolve(getEvaluationExpression());
+  public Promise<XExpression> calculateEvaluationExpression() {
+    String expression = getEvaluationExpression();
+    XExpression res =
+      expression != null ? XDebuggerUtil.getInstance().createExpression(expression, null, null, EvaluationMode.EXPRESSION) : null;
+    return Promise.resolve(res);
   }
 
   /**
@@ -62,7 +68,7 @@ public abstract class XValue extends XValueContainer {
   }
 
   /**
-   * @return {@link com.intellij.xdebugger.frame.XValueModifier} instance which can be used to modify the value
+   * @return {@link XValueModifier} instance which can be used to modify the value
    */
   @Nullable
   public XValueModifier getModifier() {

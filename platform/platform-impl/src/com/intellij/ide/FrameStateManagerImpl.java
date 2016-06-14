@@ -50,7 +50,7 @@ public class FrameStateManagerImpl extends FrameStateManager {
     myShouldSynchronize = false;
     mySyncAlarm = new Alarm();
 
-    app.getMessageBus().connect().subscribe(ApplicationActivationListener.TOPIC, new ApplicationActivationListener() {
+    app.getMessageBus().connect().subscribe(ApplicationActivationListener.TOPIC, new ApplicationActivationListener.Adapter() {
       @Override
       public void applicationActivated(IdeFrame ideFrame) {
         myActive.onReady();
@@ -64,13 +64,10 @@ public class FrameStateManagerImpl extends FrameStateManager {
       @Override
       public void applicationDeactivated(IdeFrame ideFrame) {
         mySyncAlarm.cancelAllRequests();
-        mySyncAlarm.addRequest(new Runnable() {
-          @Override
-          public void run() {
-            if (!app.isActive() && !app.isDisposed()) {
-              myShouldSynchronize = true;
-              fireDeactivationEvent();
-            }
+        mySyncAlarm.addRequest(() -> {
+          if (!app.isActive() && !app.isDisposed()) {
+            myShouldSynchronize = true;
+            fireDeactivationEvent();
           }
         }, 200);
       }

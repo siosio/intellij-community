@@ -629,4 +629,96 @@ public class JavaFormatterWrapTest extends AbstractJavaFormatterTest {
       "obj.call()"
     );
   }
+  
+  public void test_TryWithResource_NextLineIfWrapped() {
+    getSettings().RESOURCE_LIST_WRAP = CommonCodeStyleSettings.WRAP_AS_NEEDED;
+    getSettings().ALIGN_MULTILINE_RESOURCES = false;
+    getSettings().BRACE_STYLE = CommonCodeStyleSettings.NEXT_LINE_IF_WRAPPED;
+    doMethodTest(
+      "try (Foo foo = createAFoo(); Bar bar = createABar(foo); Bar bar = createABar(foo); Bar bar = createABar(foo); Bar bar = createABar(foo)) {\n" +
+      "    useThem();\n"                                                                                                                             +
+      "}",
+      "try (Foo foo = createAFoo(); Bar bar = createABar(foo); Bar bar = createABar(foo); Bar bar = createABar(foo);\n" +
+      "        Bar bar = createABar(foo))\n" +
+      "{\n" +
+      "    useThem();\n"                                                                                                                             +
+      "}"
+    );
+  }
+  
+  public void test_KeepSimpleLambdasInOneLine() {
+    getSettings().KEEP_SIMPLE_LAMBDAS_IN_ONE_LINE = true;
+    doMethodTest("      execute(  () -> {});", 
+                 "execute(() -> {});");
+    
+    getSettings().KEEP_SIMPLE_LAMBDAS_IN_ONE_LINE = false;
+    doMethodTest("execute(() -> {});", 
+                 "execute(() -> {\n" +
+                 "});");
+  }
+  
+  
+  public void testDisableWrapLongLinesInFormatterMarkers() {
+    getSettings().WRAP_LONG_LINES = true;
+    getSettings().getRootSettings().FORMATTER_TAGS_ENABLED = true;
+    getSettings().RIGHT_MARGIN = 80;
+    
+    doTextTest(
+      "package com.acme;\n" +
+      "\n" +
+      "public class Test {\n" +
+      "    @Override\n" +
+      "    public boolean equals(Object obj) {\n" +
+      "\n" +
+      "        String direction = \" \";\n" +
+      "        String humanId = \" \";\n" +
+      "        String instrument = \" \";\n" +
+      "        String price = \" \";\n" +
+      "        String quantity = \" \";\n" +
+      "        String stopLoss = \" \";\n" +
+      "        String thatsDirection = \"\";\n" +
+      "\n" +
+      "        return 0 < 0\n" +
+      "                + (direction != null && thatsDirection != null ? direction.equalsIgnoreCase(thatsDirection)          ? 1 : -100 : 0)\n" +
+      "                // @formatter:off\n" +
+      "                + (humanId      != null && thatsDirection  != null ? humanId.equalsIgnoreCase(thatsDirection)        ? 1 : -100 : 0)\n" +
+      "                + (instrument   != null && thatsDirection  != null ? instrument.equals(thatsDirection)               ? 1 : -100 : 0)\n" +
+      "                + (price        != null && thatsDirection  != null ? price.equals(thatsDirection)                    ? 1 : -100 : 0)\n" +
+      "                // @formatter:on\n" +
+      "                + (quantity     != null && thatsDirection  != null ? quantity.equals(thatsDirection)                 ? 1 : -100 : 0)\n" +
+      "                + (stopLoss     != null && thatsDirection  != null ? stopLoss.equals(thatsDirection)                 ? 1 : -100 : 0);\n" +
+      "    }\n" +
+      "}",
+      
+      "package com.acme;\n" +
+      "\n" +
+      "public class Test {\n" +
+      "    @Override\n" +
+      "    public boolean equals(Object obj) {\n" +
+      "\n" +
+      "        String direction = \" \";\n" +
+      "        String humanId = \" \";\n" +
+      "        String instrument = \" \";\n" +
+      "        String price = \" \";\n" +
+      "        String quantity = \" \";\n" +
+      "        String stopLoss = \" \";\n" +
+      "        String thatsDirection = \"\";\n" +
+      "\n" +
+      "        return 0 < 0\n" +
+      "                + (direction != null && thatsDirection != null ? direction\n" +
+      "                .equalsIgnoreCase(thatsDirection) ? 1 : -100 : 0)\n" +
+      "                // @formatter:off\n" +
+      "                + (humanId      != null && thatsDirection  != null ? humanId.equalsIgnoreCase(thatsDirection)        ? 1 : -100 : 0)\n" +
+      "                + (instrument   != null && thatsDirection  != null ? instrument.equals(thatsDirection)               ? 1 : -100 : 0)\n" +
+      "                + (price        != null && thatsDirection  != null ? price.equals(thatsDirection)                    ? 1 : -100 : 0)\n" +
+      "                // @formatter:on\n" +
+      "                + (quantity != null && thatsDirection != null ? quantity\n" +
+      "                .equals(thatsDirection) ? 1 : -100 : 0)\n" +
+      "                + (stopLoss != null && thatsDirection != null ? stopLoss\n" +
+      "                .equals(thatsDirection) ? 1 : -100 : 0);\n" +
+      "    }\n" +
+      "}"
+    );
+  }
+  
 }

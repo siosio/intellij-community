@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -174,14 +174,14 @@ public abstract class JavaClassElementType extends JavaStubElementType<PsiClassS
       StringRef qname = dataStream.readName();
       int languageLevelId = dataStream.readByte();
       StringRef sourceFileName = dataStream.readName();
-      PsiClassStubImpl classStub = new PsiClassStubImpl(type, parentStub, qname, name, null, flags);
+      PsiClassStubImpl classStub = new PsiClassStubImpl(type, parentStub, StringRef.toString(qname), StringRef.toString(name), null, flags);
       classStub.setLanguageLevel(LanguageLevel.values()[languageLevelId]);
       classStub.setSourceFileName(sourceFileName);
       return classStub;
     }
     else {
       StringRef baseRef = dataStream.readName();
-      return new PsiClassStubImpl(type, parentStub, null, null, baseRef, flags);
+      return new PsiClassStubImpl(type, parentStub, null, null, StringRef.toString(baseRef), flags);
     }
   }
 
@@ -208,7 +208,7 @@ public abstract class JavaClassElementType extends JavaStubElementType<PsiClassS
   }
 
   @Override
-  public String getId(final PsiClassStub stub) {
+  public String getId(@NotNull final PsiClassStub stub) {
     final String name = stub.getName();
     return name != null ? name : super.getId(stub);
   }

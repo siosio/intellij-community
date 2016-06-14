@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,9 +30,6 @@ import org.jetbrains.annotations.Nullable;
  * @author max
  */
 public abstract class PsiClassType extends PsiType {
-  /**
-   * The empty array of PSI class types which can be reused to avoid unnecessary allocations.
-   */
   public static final PsiClassType[] EMPTY_ARRAY = new PsiClassType[0];
   public static final ArrayFactory<PsiClassType> ARRAY_FACTORY = new ArrayFactory<PsiClassType>() {
     @NotNull
@@ -51,6 +48,17 @@ public abstract class PsiClassType extends PsiType {
   protected PsiClassType(LanguageLevel languageLevel, @NotNull PsiAnnotation[] annotations) {
     super(annotations);
     myLanguageLevel = languageLevel;
+  }
+
+  public PsiClassType(LanguageLevel languageLevel, @NotNull TypeAnnotationProvider provider) {
+    super(provider);
+    myLanguageLevel = languageLevel;
+  }
+
+  @NotNull
+  @Override
+  public PsiClassType annotate(@NotNull TypeAnnotationProvider provider) {
+    return (PsiClassType)super.annotate(provider);
   }
 
   /**
@@ -216,7 +224,7 @@ public abstract class PsiClassType extends PsiType {
   public abstract PsiClassType rawType();
 
   /**
-   * Overrides {@link com.intellij.psi.PsiType#getResolveScope()} to narrow specify @NotNull.
+   * Overrides {@link PsiType#getResolveScope()} to narrow specify @NotNull.
    */
   @Override
   @NotNull
@@ -292,6 +300,10 @@ public abstract class PsiClassType extends PsiType {
    */
   public static abstract class Stub extends PsiClassType {
     protected Stub(LanguageLevel languageLevel, @NotNull PsiAnnotation[] annotations) {
+      super(languageLevel, annotations);
+    }
+
+    public Stub(LanguageLevel languageLevel, @NotNull TypeAnnotationProvider annotations) {
       super(languageLevel, annotations);
     }
 

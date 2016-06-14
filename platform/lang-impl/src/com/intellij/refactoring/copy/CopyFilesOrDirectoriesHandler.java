@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,8 +20,11 @@ import com.intellij.ide.CopyPasteDelegator;
 import com.intellij.ide.util.EditorHelper;
 import com.intellij.ide.util.PlatformPackageUtil;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.command.CommandProcessor;
+import com.intellij.openapi.application.Result;
+import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.project.DumbModePermission;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.ui.Messages;
@@ -42,11 +45,11 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 
 public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase {
-
   private static Logger LOG = Logger.getInstance("com.intellij.refactoring.copy.CopyFilesOrDirectoriesHandler");
 
   @Override
@@ -100,6 +103,11 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase {
   }
 
   public static void copyAsFiles(PsiElement[] elements, @Nullable PsiDirectory defaultTargetDirectory, Project project) {
+    DumbService.allowStartingDumbModeInside(DumbModePermission.MAY_START_BACKGROUND, () ->
+      doCopyAsFiles(elements, defaultTargetDirectory, project));
+  }
+
+  private static void doCopyAsFiles(PsiElement[] elements, @Nullable PsiDirectory defaultTargetDirectory, Project project) {
     PsiDirectory targetDirectory = null;
     String newName = null;
     boolean openInEditor = true;
@@ -210,60 +218,42 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase {
       throw new IllegalArgumentException("no new name should be set; number of elements is: " + elements.length);
     }
 
-    final Project project = targetDirectory.getProject();
-    Runnable command = new Runnable() {
-      @Override
-      public void run() {
-        final Runnable action = new Runnable() {
-          @Override
-          public void run() {
-            try {
-              PsiFile firstFile = null;
-              final int[] choice = elements.length > 1 || elements[0] instanceof PsiDirectory ? new int[]{-1} : null;
-              for (PsiElement element : elements) {
-                PsiFile f = copyToDirectory((PsiFileSystemItem)element, newName, targetDirectory, choice);
-                if (firstFile == null) {
-                  firstFile = f;
-                }
-              }
-
-              if (firstFile != null && openInEditor) {
-                CopyHandler.updateSelectionInActiveProjectView(firstFile, project, doClone);
-                if (!(firstFile instanceof PsiBinaryFile)) {
-                  EditorHelper.openInEditor(firstFile);
-                  ApplicationManager.getApplication().invokeLater(new Runnable() {
-                    @Override
-                    public void run() {
-                      ToolWindowManager.getInstance(project).activateEditorComponent();
-                    }
-                  });
-                }
-              }
-            }
-            catch (final IncorrectOperationException ex) {
-              ApplicationManager.getApplication().invokeLater(new Runnable() {
-                @Override
-                public void run() {
-                  Messages.showErrorDialog(project, ex.getMessage(), RefactoringBundle.message("error.title"));
-                }
-              });
-            }
-            catch (final IOException ex) {
-              ApplicationManager.getApplication().invokeLater(new Runnable() {
-                @Override
-                public void run() {
-                  Messages.showErrorDialog(project, ex.getMessage(), RefactoringBundle.message("error.title"));
-                }
-              });
-            }
-          }
-        };
-        ApplicationManager.getApplication().runWriteAction(action);
-      }
-    };
+    if (!CommonRefactoringUtil.checkReadOnlyStatus(targetDirectory.getProject(), Collections.singleton(targetDirectory), false)) {
+      return;
+    }
 
     String title = RefactoringBundle.message(doClone ? "copy,handler.clone.files.directories" : "copy.handler.copy.files.directories");
-    CommandProcessor.getInstance().executeCommand(project, command, title, null);
+    new WriteCommandAction(targetDirectory.getProject(), title) {
+      @Override
+      protected void run(@NotNull Result result) {
+        try {
+          PsiFile firstFile = null;
+          final int[] choice = elements.length > 1 || elements[0] instanceof PsiDirectory ? new int[]{-1} : null;
+          for (PsiElement element : elements) {
+            PsiFile f = copyToDirectory((PsiFileSystemItem)element, newName, targetDirectory, choice);
+            if (firstFile == null) {
+              firstFile = f;
+            }
+          }
+
+          if (firstFile != null && openInEditor) {
+            CopyHandler.updateSelectionInActiveProjectView(firstFile, getProject(), doClone);
+            if (!(firstFile instanceof PsiBinaryFile)) {
+              EditorHelper.openInEditor(firstFile);
+              ApplicationManager.getApplication().invokeLater(() -> ToolWindowManager.getInstance(getProject()).activateEditorComponent());
+            }
+          }
+        }
+        catch (final IncorrectOperationException ex) {
+          ApplicationManager.getApplication().invokeLater(
+            () -> Messages.showErrorDialog(getProject(), ex.getMessage(), RefactoringBundle.message("error.title")));
+        }
+        catch (final IOException ex) {
+          ApplicationManager.getApplication().invokeLater(
+            () -> Messages.showErrorDialog(getProject(), ex.getMessage(), RefactoringBundle.message("error.title")));
+        }
+      }
+    }.execute();
   }
 
   /**
@@ -303,12 +293,8 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase {
       if (newName == null) newName = directory.getName();
       final PsiDirectory existing = targetDirectory.findSubdirectory(newName);
       final PsiDirectory subdirectory = existing == null ? targetDirectory.createSubdirectory(newName) : existing;
-      EncodingRegistry.doActionAndRestoreEncoding(directory.getVirtualFile(), new ThrowableComputable<VirtualFile, IOException>() {
-        @Override
-        public VirtualFile compute() {
-          return subdirectory.getVirtualFile();
-        }
-      });
+      EncodingRegistry.doActionAndRestoreEncoding(directory.getVirtualFile(),
+                                                  (ThrowableComputable<VirtualFile, IOException>)() -> subdirectory.getVirtualFile());
 
       PsiFile firstFile = null;
       PsiElement[] children = directory.getChildren();

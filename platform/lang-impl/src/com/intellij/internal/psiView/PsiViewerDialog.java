@@ -42,6 +42,7 @@ import com.intellij.openapi.editor.colors.EditorColors;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.event.*;
 import com.intellij.openapi.editor.ex.EditorEx;
+import com.intellij.openapi.editor.highlighter.EditorHighlighter;
 import com.intellij.openapi.editor.highlighter.EditorHighlighterFactory;
 import com.intellij.openapi.editor.markup.*;
 import com.intellij.openapi.extensions.Extensions;
@@ -55,10 +56,7 @@ import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.wm.IdeFocusManager;
-import com.intellij.psi.PsiElement;
-import com.intellij.psi.PsiFile;
-import com.intellij.psi.PsiFileFactory;
-import com.intellij.psi.PsiReference;
+import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.CodeStyleSettings;
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
 import com.intellij.psi.impl.DebugUtil;
@@ -235,12 +233,9 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
       doOKAction();
 
       if (!initOffset.isNull()) {
-        ApplicationManager.getApplication().invokeLater(new Runnable() {
-          @Override
-          public void run() {
-            myEditor.getCaretModel().moveToOffset(initOffset.get());
-            myEditor.getScrollingModel().scrollToCaret(ScrollType.MAKE_VISIBLE);
-          }
+        ApplicationManager.getApplication().invokeLater(() -> {
+          myEditor.getCaretModel().moveToOffset(initOffset.get());
+          myEditor.getScrollingModel().scrollToCaret(ScrollType.MAKE_VISIBLE);
         });
       }
     }
@@ -762,9 +757,10 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
           ext = myExtensionComboBox.getSelectedItem().toString().toLowerCase();
         }
         if (type instanceof LanguageFileType) {
-          final Language language = ((LanguageFileType)type).getLanguage();
           final Language dialect = (Language)myDialectComboBox.getSelectedItem();
-          return PsiFileFactory.getInstance(myProject).createFileFromText("Dummy." + ext, dialect == null ? language : dialect, text);
+          if (dialect != null) {
+            return PsiFileFactory.getInstance(myProject).createFileFromText("Dummy." + ext, dialect, text);
+          }
         }
         return PsiFileFactory.getInstance(myProject).createFileFromText("Dummy." + ext, type, text);
       }
@@ -914,13 +910,10 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
     if (myBlockTreeBuilder == null) return;
     if (currentBlockNode != null) {
       myIgnoreBlockTreeSelectionMarker++;
-      myBlockTreeBuilder.select(currentBlockNode, new Runnable() {
-        @Override
-        public void run() {
-          // hope this is always called!
-          assert myIgnoreBlockTreeSelectionMarker > 0;
-          myIgnoreBlockTreeSelectionMarker--;
-        }
+      myBlockTreeBuilder.select(currentBlockNode, () -> {
+        // hope this is always called!
+        assert myIgnoreBlockTreeSelectionMarker > 0;
+        myIgnoreBlockTreeSelectionMarker--;
       });
     }
     else {
@@ -1064,7 +1057,16 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
       final PsiReference[] references = element.getReferences();
       cache = new PsiElement[references.length];
       for (int i = 0; i < references.length; i++) {
-        cache[i] = references[i].resolve();
+        final PsiReference reference = references[i];
+        final PsiElement resolveResult;
+        if (reference instanceof PsiPolyVariantReference) {
+          final ResolveResult[] results = ((PsiPolyVariantReference)reference).multiResolve(true);
+          resolveResult = results.length == 0 ? null : results[0].getElement();
+        }
+        else {
+          resolveResult = reference.resolve();
+        }
+        cache[i] = resolveResult;
       }
       map.put(element, cache);
     }
@@ -1200,7 +1202,13 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
     else {
       return;
     }
-    myEditor.setHighlighter(EditorHighlighterFactory.getInstance().createEditorHighlighter(myProject, lightFile));
+    EditorHighlighter highlighter = EditorHighlighterFactory.getInstance().createEditorHighlighter(myProject, lightFile);
+    try {
+      myEditor.setHighlighter(highlighter);
+    }
+    catch (Throwable e) {
+      LOG.warn(e);
+    }
   }
 
   private class EditorListener extends CaretAdapter implements SelectionListener, DocumentListener {

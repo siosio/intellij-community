@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,10 +33,11 @@ public interface ApplicationEx extends Application {
   /**
    * Loads the application configuration from the specified path
    *
-   * @param optionsPath Path to /config folder
-   * @throws IOException
+   * @param configPath Path to /config folder
    */
-  void load(@Nullable String optionsPath) throws IOException;
+  void load(@Nullable String configPath);
+
+  void load() throws IOException;
 
   boolean isLoaded();
 
@@ -124,6 +125,7 @@ public interface ApplicationEx extends Application {
 
   void assertTimeConsuming();
 
+  @Deprecated // todo to be removed in IDEA 17
   void runEdtSafeAction(@NotNull Runnable runnable);
 
   /**

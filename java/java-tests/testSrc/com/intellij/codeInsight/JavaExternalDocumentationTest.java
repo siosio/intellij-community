@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,11 +25,13 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorFactory;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.JavadocOrderRootType;
 import com.intellij.openapi.roots.ModuleRootModificationUtil;
 import com.intellij.openapi.roots.OrderRootType;
 import com.intellij.openapi.roots.libraries.Library;
 import com.intellij.openapi.roots.libraries.LibraryTablesRegistrar;
+import com.intellij.openapi.ui.popup.JBPopup;
 import com.intellij.openapi.util.ActionCallback;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.io.FileUtil;
@@ -44,10 +46,12 @@ import com.intellij.testFramework.EditorTestUtil;
 import com.intellij.testFramework.PlatformTestCase;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.ide.BuiltInServerManager;
 
 import java.io.File;
 import java.io.InputStream;
 import java.net.URL;
+import java.net.URLConnection;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -83,16 +87,35 @@ public class JavaExternalDocumentationTest extends PlatformTestCase {
     Matcher imgMatcher = IMG_URL_PATTERN.matcher(text);
     assertTrue(imgMatcher.find());
     String relativeUrl = imgMatcher.group(1);
+
     URL imageUrl = new URL(new URL(baseUrl), relativeUrl);
-    try (InputStream stream = imageUrl.openStream()) {
+    URLConnection connection = imageUrl.openConnection();
+    BuiltInServerManager.getInstance().configureRequestToWebServer(connection);
+    try (InputStream stream = connection.getInputStream()) {
       assertEquals(228, FileUtil.loadBytes(stream).length);
     }
   }
-  
+
   // We're guessing style of references in javadoc by bytecode version of library class file
   // but displaying quick doc should work even if javadoc was generated using a JDK not corresponding to bytecode version
   public void testReferenceStyleDoesntMatchBytecodeVersion() throws Exception {
-    String actualText = getDocumentationText("@com.jetbrains.TestAnnotation(<caret>param = \"foo\") class Foo {}");
+    doTest("@com.jetbrains.TestAnnotation(<caret>param = \"foo\") class Foo {}");
+  }
+
+  public void testLinkWithReference() throws Exception {
+    doTest("class Foo { com.jetbrains.<caret>ClassWithRefLink field;}");
+  }
+
+  public void testLinkToPackageSummaryWithReference() throws Exception {
+    doTest("class Foo implements com.jetbrains.<caret>SimpleInterface {}");
+  }
+
+  public void testLinkBetweenMethods() throws Exception {
+    doTest("class Foo {{ new com.jetbrains.LinkBetweenMethods().<caret>m1(); }}");
+  }
+
+  private void doTest(String text) throws Exception {
+    String actualText = getDocumentationText(text);
     String expectedText = StringUtil.convertLineSeparators(FileUtil.loadFile(getDataFile(getTestName(false) + ".html")));
     assertEquals(expectedText, replaceBaseUrlWithPlaceholder(actualText));
   }
@@ -102,6 +125,7 @@ public class JavaExternalDocumentationTest extends PlatformTestCase {
   }
 
   private static void waitTillDone(ActionCallback actionCallback) throws InterruptedException {
+    if (actionCallback == null) return;
     long start = System.currentTimeMillis();
     while (System.currentTimeMillis() - start < 300000) {
       //noinspection BusyWait
@@ -115,9 +139,9 @@ public class JavaExternalDocumentationTest extends PlatformTestCase {
   private static File getDataFile(String name) {
     return new File(JavaTestUtil.getJavaTestDataPath() + "/codeInsight/documentation/" + name);
   }
-  
+
   @NotNull
-  private static VirtualFile getJarFile(String name) {
+  public static VirtualFile getJarFile(String name) {
     VirtualFile file = getVirtualFile(getDataFile(name));
     assertNotNull(file);
     VirtualFile jarFile = JarFileSystem.getInstance().getJarRootForLocalFile(file);
@@ -128,18 +152,23 @@ public class JavaExternalDocumentationTest extends PlatformTestCase {
   private String getDocumentationText(String sourceEditorText) throws Exception {
     int caretPosition = sourceEditorText.indexOf(EditorTestUtil.CARET_TAG);
     if (caretPosition >= 0) {
-      sourceEditorText = sourceEditorText.substring(0, caretPosition) + 
+      sourceEditorText = sourceEditorText.substring(0, caretPosition) +
                          sourceEditorText.substring(caretPosition + EditorTestUtil.CARET_TAG.length());
     }
     PsiFile psiFile = PsiFileFactory.getInstance(myProject).createFileFromText(JavaLanguage.INSTANCE, sourceEditorText);
-    Document document = PsiDocumentManager.getInstance(myProject).getDocument(psiFile);
+    return getDocumentationText(psiFile, caretPosition);
+  }
+
+  public static String getDocumentationText(@NotNull PsiFile psiFile, int caretPosition) throws InterruptedException {
+    Project project = psiFile.getProject();
+    Document document = PsiDocumentManager.getInstance(project).getDocument(psiFile);
     assertNotNull(document);
-    Editor editor = EditorFactory.getInstance().createEditor(document, myProject);
+    Editor editor = EditorFactory.getInstance().createEditor(document, project);
     try {
       if (caretPosition >= 0) {
         editor.getCaretModel().moveToOffset(caretPosition);
       }
-      DocumentationManager documentationManager = DocumentationManager.getInstance(myProject);
+      DocumentationManager documentationManager = DocumentationManager.getInstance(project);
       MockDocumentationComponent documentationComponent = new MockDocumentationComponent(documentationManager);
       try {
         documentationManager.setDocumentationComponent(documentationComponent);
@@ -148,6 +177,8 @@ public class JavaExternalDocumentationTest extends PlatformTestCase {
         return documentationComponent.getText();
       }
       finally {
+        JBPopup hint = documentationComponent.getHint();
+        if (hint != null) Disposer.dispose(hint);
         Disposer.dispose(documentationComponent);
       }
     }
@@ -156,14 +187,9 @@ public class JavaExternalDocumentationTest extends PlatformTestCase {
     }
   }
 
-  @Override
-  protected boolean isRunInWriteAction() {
-    return false;
-  }
-  
   private static class MockDocumentationComponent extends DocumentationComponent {
     private String myText;
-    
+
     public MockDocumentationComponent(DocumentationManager manager) {
       super(manager);
     }

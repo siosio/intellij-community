@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,7 +36,6 @@ import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileTypes.StdFileTypes;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -151,7 +150,7 @@ public class GenerationNode extends UserDataHolderBase {
 
     GenerationNode generationNode = this;
     if (generationNode != this) {
-      return generationNode.generate(callback, generator, Collections.<ZenCodingFilter>emptyList(), insertSurroundedText, segmentsLimit);
+      return generationNode.generate(callback, generator, Collections.emptyList(), insertSurroundedText, segmentsLimit);
     }
 
     boolean shouldNotReformatTemplate = false;
@@ -189,13 +188,13 @@ public class GenerationNode extends UserDataHolderBase {
       indentStr = StringUtil.repeatSymbol(' ', tabSize);
     }
 
-    LiveTemplateBuilder builder = new LiveTemplateBuilder(segmentsLimit);
+    LiveTemplateBuilder builder = new LiveTemplateBuilder(EmmetOptions.getInstance().isAddEditPointAtTheEndOfTemplate(), segmentsLimit);
     int end = -1;
     boolean hasChildren = myChildren.size() > 0;
 
     TemplateImpl parentTemplate;
     Map<String, String> predefinedValues;
-    if (myTemplateToken instanceof TemplateToken && generator instanceof XmlZenCodingGenerator) {
+    if (generator instanceof XmlZenCodingGenerator) {
       TemplateToken xmlTemplateToken = myTemplateToken;
       parentTemplate = invokeXmlTemplate(xmlTemplateToken, callback, generator, hasChildren);
       predefinedValues = buildPredefinedValues(xmlTemplateToken.getAttributes(), (XmlZenCodingGenerator)generator, hasChildren);
@@ -256,7 +255,7 @@ public class GenerationNode extends UserDataHolderBase {
     return builder.buildTemplate();
   }
 
-  private static TemplateImpl invokeTemplate(TemplateToken token,
+  private static TemplateImpl invokeTemplate(@NotNull TemplateToken token,
                                              boolean hasChildren,
                                              final CustomTemplateCallback callback,
                                              @Nullable ZenCodingGenerator generator) {
@@ -285,12 +284,7 @@ public class GenerationNode extends UserDataHolderBase {
 
     final XmlFile xmlFile = token.getFile();
     PsiFileFactory fileFactory = PsiFileFactory.getInstance(xmlFile.getProject());
-    String text = xmlFile.getText();
-    final PsiElement context = callback.getFile().getContext();
-    if (context != null && context.getText().startsWith("\"")) {
-      text = text.replace('"', '\'');
-    }
-    XmlFile dummyFile = (XmlFile)fileFactory.createFileFromText("dummy.html", HTMLLanguage.INSTANCE, text, false, true);
+    XmlFile dummyFile = (XmlFile)fileFactory.createFileFromText("dummy.html", HTMLLanguage.INSTANCE, xmlFile.getText(), false, true);
     final XmlTag tag = dummyFile.getRootTag();
     if (tag != null) {
 
@@ -353,7 +347,7 @@ public class GenerationNode extends UserDataHolderBase {
                                              Map<String, String> predefinedVarValues,
                                              String surroundedText,
                                              int segmentsLimit) {
-    LiveTemplateBuilder builder = new LiveTemplateBuilder(segmentsLimit);
+    LiveTemplateBuilder builder = new LiveTemplateBuilder(EmmetOptions.getInstance().isAddEditPointAtTheEndOfTemplate(), segmentsLimit);
     if (predefinedVarValues == null && surroundedText == null) {
       return template;
     }
@@ -462,12 +456,8 @@ public class GenerationNode extends UserDataHolderBase {
       attributes.remove(XmlEmmetParser.DEFAULT_ATTRIBUTE_NAME);
 
       // exclude user defined attributes
-      final List<XmlAttribute> xmlAttributes = ContainerUtil.filter(tag.getAttributes(), new Condition<XmlAttribute>() {
-        @Override
-        public boolean value(XmlAttribute attribute) {
-          return !attributes.containsKey(attribute.getLocalName());
-        }
-      });
+      final List<XmlAttribute> xmlAttributes = ContainerUtil.filter(tag.getAttributes(),
+                                                                    attribute -> !attributes.containsKey(attribute.getLocalName()));
       XmlAttribute defaultAttribute = findDefaultAttribute(xmlAttributes);
       if (defaultAttribute == null) {
         defaultAttribute = findImpliedAttribute(xmlAttributes);
@@ -534,7 +524,7 @@ public class GenerationNode extends UserDataHolderBase {
     // remove all implicit and default attributes
     for (XmlAttribute xmlAttribute : tag.getAttributes()) {
       final String xmlAttributeLocalName = xmlAttribute.getLocalName();
-      if (isImpliedAttribute(xmlAttributeLocalName) || isDefaultAttribute(xmlAttributeLocalName)) {
+      if (xmlAttribute.getValue() != null && (isImpliedAttribute(xmlAttributeLocalName) || isDefaultAttribute(xmlAttributeLocalName))) {
         xmlAttribute.delete();
       }
     }
@@ -562,13 +552,13 @@ public class GenerationNode extends UserDataHolderBase {
   }
 
   private static boolean isEmptyValue(String attributeValue) {
-    return StringUtil.isEmpty(attributeValue) || ATTRIBUTE_VARIABLE_PATTERN.matcher(attributeValue).matches();
+    return attributeValue != null && (attributeValue.isEmpty() || ATTRIBUTE_VARIABLE_PATTERN.matcher(attributeValue).matches());
   }
 
   @Nullable
   private static XmlAttribute findDefaultAttribute(@NotNull List<XmlAttribute> attributes) {
     for (XmlAttribute attribute : attributes) {
-      if (isDefaultAttribute(attribute.getLocalName())) {
+      if (attribute.getValueElement() != null && isDefaultAttribute(attribute.getLocalName())) {
         return attribute;
       }
     }
@@ -578,7 +568,7 @@ public class GenerationNode extends UserDataHolderBase {
   @Nullable
   private static XmlAttribute findImpliedAttribute(@NotNull List<XmlAttribute> attributes) {
     for (XmlAttribute attribute : attributes) {
-      if (isImpliedAttribute(attribute.getLocalName())) {
+      if (attribute.getValueElement() != null && isImpliedAttribute(attribute.getLocalName())) {
         return attribute;
       }
     }

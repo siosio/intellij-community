@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,14 +32,14 @@ public class ProjectPlaybackCall {
     try {
       File parentDir = FileUtil.createTempDirectory("funcTest", "");
       File sourceDir = context.getPathMacro().resolveFile(path, context.getBaseDir());
-      
+
       context.message("Cloning project: " + sourceDir.getAbsolutePath(), context.getCurrentLine());
       FileUtil.copyDir(sourceDir, parentDir);
       File projectDir = new File(parentDir, sourceDir.getName());
       return openProject(context, projectDir.getAbsolutePath());
     }
     catch (IOException e) {
-      return new AsyncResult.Rejected<String>("Cannot create temp directory for clone");
+      return AsyncResult.rejected("Cannot create temp directory for clone");
     }
   }
 
@@ -54,32 +54,21 @@ public class ProjectPlaybackCall {
     listener.set(new ProjectManagerAdapter() {
       @Override
       public void projectOpened(final Project project) {
-        StartupManager.getInstance(project).registerPostStartupActivity(new Runnable() {
-          @Override
-          public void run() {
-            pm.removeProjectManagerListener(listener.get());
-            DumbService.getInstance(project).runWhenSmart(new Runnable() {
-              @Override
-              public void run() {
-                result.setDone("Opened successfully: " + project.getPresentableUrl());
-              }
-            });
-          }
+        StartupManager.getInstance(project).registerPostStartupActivity(() -> {
+          pm.removeProjectManagerListener(listener.get());
+          DumbService.getInstance(project).runWhenSmart(() -> result.setDone("Opened successfully: " + project.getPresentableUrl()));
         });
       }
     });
     pm.addProjectManagerListener(listener.get());
 
-    UIUtil.invokeLaterIfNeeded(new Runnable() {
-      @Override
-      public void run() {
-        try {
-          pm.loadAndOpenProject(path);
-        }
-        catch (Exception e) {
-          context.error(e.getMessage(), context.getCurrentLine());
-          result.setRejected();
-        }
+    UIUtil.invokeLaterIfNeeded(() -> {
+      try {
+        pm.loadAndOpenProject(path);
+      }
+      catch (Exception e) {
+        context.error(e.getMessage(), context.getCurrentLine());
+        result.setRejected();
       }
     });
 

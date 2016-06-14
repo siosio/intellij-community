@@ -23,11 +23,10 @@ import com.intellij.lang.properties.IProperty;
 import com.intellij.lang.properties.editor.PropertiesAnchorizer;
 import com.intellij.lang.properties.editor.ResourceBundleEditorViewElement;
 import com.intellij.lang.properties.editor.ResourceBundlePropertyStructureViewElement;
-import com.intellij.lang.properties.psi.Property;
 import com.intellij.navigation.ItemPresentation;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
 import com.intellij.util.NullableFunction;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
@@ -139,24 +138,26 @@ public class PropertiesPrefixGroup implements Group, ResourceBundleEditorViewEle
     return result;
   }
 
+  @NotNull
   @Override
-  public PsiElement[] getPsiElements() {
-    final List<PsiElement> elements = ContainerUtil.mapNotNull(getChildren(), new NullableFunction<TreeElement, PsiElement>() {
-      @Nullable
-      @Override
-      public PsiElement fun(final TreeElement treeElement) {
-        if (treeElement instanceof PropertiesStructureViewElement) {
-          PropertiesStructureViewElement propertiesElement = (PropertiesStructureViewElement)treeElement;
-          IProperty property = propertiesElement.getValue();
-          return property.getPsiElement();
-        }
-        else if (treeElement instanceof ResourceBundlePropertyStructureViewElement) {
-          return ((ResourceBundlePropertyStructureViewElement)treeElement).getPsiElements()[0];
-        }
-        return null;
+  public IProperty[] getProperties() {
+    final List<IProperty> elements = ContainerUtil.mapNotNull(getChildren(), (NullableFunction<TreeElement, IProperty>)treeElement -> {
+      if (treeElement instanceof PropertiesStructureViewElement) {
+        PropertiesStructureViewElement propertiesElement = (PropertiesStructureViewElement)treeElement;
+        return propertiesElement.getValue();
       }
+      else if (treeElement instanceof ResourceBundlePropertyStructureViewElement) {
+        return ((ResourceBundlePropertyStructureViewElement)treeElement).getProperties()[0];
+      }
+      return null;
     });
-    return elements.toArray(new PsiElement[elements.size()]);
+    return elements.toArray(new IProperty[elements.size()]);
+  }
+
+  @Nullable
+  @Override
+  public PsiFile[] getFiles() {
+    return null;
   }
 
   public boolean equals(final Object o) {

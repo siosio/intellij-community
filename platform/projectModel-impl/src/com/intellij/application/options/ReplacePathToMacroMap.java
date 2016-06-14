@@ -174,6 +174,7 @@ public class ReplacePathToMacroMap extends PathMacroMap {
     final String replacement = s.getValue();
     if (replacement.contains("..")) return 1;
     if (replacement.contains("$" + PathMacrosImpl.USER_HOME_MACRO_NAME + "$")) return 1;
+    if (replacement.contains("$" + PathMacrosImpl.APPLICATION_HOME_MACRO_NAME + "$")) return 1;
     if (replacement.contains("$" + PathMacrosImpl.MODULE_DIR_MACRO_NAME + "$")) return 3;
     if (replacement.contains("$" + PathMacrosImpl.PROJECT_DIR_MACRO_NAME + "$")) return 3;
     return 2;
@@ -198,18 +199,8 @@ public class ReplacePathToMacroMap extends PathMacroMap {
         weights.put(entry, getIndex(entry) * 512 + stripPrefix(entry.getKey()));
       }
 
-      ContainerUtil.sort(entries, new Comparator<Map.Entry<String, String>>() {
-        @Override
-        public int compare(final Map.Entry<String, String> o1, final Map.Entry<String, String> o2) {
-          return weights.get(o2) - weights.get(o1);
-        }
-      });
-      myPathsIndex = ContainerUtil.map2List(entries, new Function<Map.Entry<String, String>, String>() {
-        @Override
-        public String fun(Map.Entry<String, String> entry) {
-          return entry.getKey();
-        }
-      });
+      ContainerUtil.sort(entries, (o1, o2) -> weights.get(o2) - weights.get(o1));
+      myPathsIndex = ContainerUtil.map2List(entries, entry -> entry.getKey());
     }
     return myPathsIndex;
   }

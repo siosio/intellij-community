@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,13 +42,18 @@ public class IoTestUtil {
   @NotNull
   public static File getTempDirectory() {
     File dir = new File(FileUtil.getTempDirectory());
-    if (SystemInfo.isWindows && dir.getPath().contains("~")) {
+    dir = expandWindowsPath(dir);
+    return dir;
+  }
+
+  private static File expandWindowsPath(File file) {
+    if (SystemInfo.isWindows && file.getPath().indexOf('~') > 0) {
       try {
-        dir = dir.getCanonicalFile();
+        return file.getCanonicalFile();
       }
       catch (IOException ignored) { }
     }
-    return dir;
+    return file;
   }
 
   @NotNull
@@ -73,7 +78,11 @@ public class IoTestUtil {
       command = new ProcessBuilder("ln", "-s", targetFile.getPath(), linkFile.getPath());
     }
     final int res = runCommand(command);
-    assertEquals(command.command().toString(), 0, res);
+    String message = command.command().toString();
+    if (SystemInfo.isWindows)  {
+      message = "Cannot create a symlink; configure permissions as described: http://superuser.com/a/105381\n" + message;
+    }
+    assertEquals(message, 0, res);
 
     shouldExist |= SystemInfo.isWindows && SystemInfo.JAVA_VERSION.startsWith("1.6");
     assertEquals("target=" + target + ", link=" + linkFile, shouldExist, linkFile.exists());
@@ -120,6 +129,18 @@ public class IoTestUtil {
     return junctionFile;
   }
 
+  public static void deleteJunction(@NotNull String junction) throws InterruptedException, IOException {
+    assertTrue(SystemInfo.isWindows);
+
+    final File junctionFile = new File(FileUtil.toSystemDependentName(junction));
+
+    final String exePath = getJunctionExePath();
+
+    final ProcessBuilder command = new ProcessBuilder(exePath, "-d",  junctionFile.getPath());
+    final int res = runCommand(command);
+    assertEquals(command.command().toString(), 0, res);
+  }
+
   @NotNull
   public static File createSubst(@NotNull String target) throws InterruptedException, IOException {
     assertTrue(SystemInfo.isWindows);
@@ -143,12 +164,7 @@ public class IoTestUtil {
   }
 
   private static char getFirstFreeDriveLetter() {
-    final Set<Character> roots = ContainerUtil.map2Set(File.listRoots(), new Function<File, Character>() {
-      @Override
-      public Character fun(File root) {
-        return root.getPath().toUpperCase(Locale.US).charAt(0);
-      }
-    });
+    final Set<Character> roots = ContainerUtil.map2Set(File.listRoots(), root -> root.getPath().toUpperCase(Locale.US).charAt(0));
 
     char drive = 0;
     for (char c = 'E'; c <= 'Z'; c++) {
@@ -194,26 +210,30 @@ public class IoTestUtil {
   }
 
   private static int runCommand(final ProcessBuilder command) throws IOException, InterruptedException {
+    command.redirectErrorStream(true);
     final Process process = command.start();
-    new Thread(new Runnable() {
-      @Override
-      public void run() {
+    Thread thread = new Thread(() -> {
+      try {
+        final BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
         try {
-          final BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-          try {
-            //noinspection StatementWithEmptyBody
-            while (reader.readLine() != null);
-          }
-          finally {
-            reader.close();
+          //noinspection StatementWithEmptyBody
+          String line;
+          while ((line = reader.readLine()) != null) {
+            System.out.println(line);
           }
         }
-        catch (IOException e) {
-          throw new RuntimeException(e);
+        finally {
+          reader.close();
         }
       }
-    },"io test").start();
-    return process.waitFor();
+      catch (IOException e) {
+        throw new RuntimeException(e);
+      }
+    }, "io test");
+    thread.start();
+    int ret = process.waitFor();
+    thread.join();
+    return ret;
   }
 
   public static void assertTimestampsEqual(final long expected, final long actual) {
@@ -232,7 +252,7 @@ public class IoTestUtil {
 
   @NotNull
   public static File createTestJar() throws IOException {
-    File jarFile = FileUtil.createTempFile("test.", ".jar");
+    File jarFile = expandWindowsPath(FileUtil.createTempFile("test.", ".jar"));
     return createTestJar(jarFile);
   }
 
@@ -261,22 +281,19 @@ public class IoTestUtil {
   public static File createTestJar(@NotNull File jarFile, @NotNull final File root) throws IOException {
     final ZipOutputStream stream = new ZipOutputStream(new FileOutputStream(jarFile));
     try {
-      FileUtil.visitFiles(root, new Processor<File>() {
-        @Override
-        public boolean process(File file) {
-          if (file.isFile()) {
-            String path = FileUtil.toSystemIndependentName(ObjectUtils.assertNotNull(FileUtil.getRelativePath(root, file)));
-            try {
-              stream.putNextEntry(new ZipEntry(path));
-              stream.write(FileUtil.loadFileBytes(file));
-              stream.closeEntry();
-            }
-            catch (IOException e) {
-              throw new RuntimeException(e);
-            }
+      FileUtil.visitFiles(root, file -> {
+        if (file.isFile()) {
+          String path = FileUtil.toSystemIndependentName(ObjectUtils.assertNotNull(FileUtil.getRelativePath(root, file)));
+          try {
+            stream.putNextEntry(new ZipEntry(path));
+            stream.write(FileUtil.loadFileBytes(file));
+            stream.closeEntry();
           }
-          return true;
+          catch (IOException e) {
+            throw new RuntimeException(e);
+          }
         }
+        return true;
       });
     }
     finally {

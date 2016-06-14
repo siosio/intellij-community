@@ -47,11 +47,7 @@ public class FieldEvaluator implements Evaluator {
   private Field myEvaluatedField;
 
   public interface TargetClassFilter {
-    TargetClassFilter ALL = new TargetClassFilter() {
-      public boolean acceptClass(final ReferenceType refType) {
-        return true;
-      }
-    };
+    TargetClassFilter ALL = refType -> true;
     boolean acceptClass(ReferenceType refType);
   }
   
@@ -85,19 +81,19 @@ public class FieldEvaluator implements Evaluator {
   }
 
   @Nullable
-  private Field findField(Type t, final EvaluationContextImpl context) throws EvaluateException {
+  private Field findField(@Nullable Type t) {
     if(t instanceof ClassType) {
       ClassType cls = (ClassType) t;
       if(myTargetClassFilter.acceptClass(cls)) {
         return cls.fieldByName(myFieldName);
       }
       for (final InterfaceType interfaceType : cls.interfaces()) {
-        final Field field = findField(interfaceType, context);
+        final Field field = findField(interfaceType);
         if (field != null) {
           return field;
         }
       }
-      return findField(cls.superclass(), context);
+      return findField(cls.superclass());
     }
     else if(t instanceof InterfaceType) {
       InterfaceType iface = (InterfaceType) t;
@@ -105,7 +101,7 @@ public class FieldEvaluator implements Evaluator {
         return iface.fieldByName(myFieldName);
       }
       for (final InterfaceType interfaceType : iface.superinterfaces()) {
-        final Field field = findField(interfaceType, context);
+        final Field field = findField(interfaceType);
         if (field != null) {
           return field;
         }
@@ -126,7 +122,7 @@ public class FieldEvaluator implements Evaluator {
   private Object evaluateField(Object object, EvaluationContextImpl context) throws EvaluateException {
     if (object instanceof ReferenceType) {
       ReferenceType refType = (ReferenceType)object;
-      Field field = findField(refType, context);
+      Field field = findField(refType);
       if (field == null || !field.isStatic()) {
         field = refType.fieldByName(myFieldName);
       }
@@ -156,7 +152,7 @@ public class FieldEvaluator implements Evaluator {
         );
       }
 
-      Field field = findField(refType, context);
+      Field field = findField(refType);
       if (field == null) {
         field = refType.fieldByName(myFieldName);
       }
@@ -164,7 +160,7 @@ public class FieldEvaluator implements Evaluator {
       if (field == null) {
         throw EvaluateExceptionUtil.createEvaluateException(DebuggerBundle.message("evaluation.error.no.instance.field", myFieldName));
       }
-      myEvaluatedQualifier = field.isStatic()? (Object)refType : (Object)objRef;
+      myEvaluatedQualifier = field.isStatic() ? refType : objRef;
       myEvaluatedField = field;
       return field.isStatic()? refType.getValue(field) : objRef.getValue(field);
     }
@@ -212,6 +208,11 @@ public class FieldEvaluator implements Evaluator {
       };
     }
     return modifier;
+  }
+
+  @Override
+  public String toString() {
+    return "field " + myFieldName;
   }
 
   private static final class FQNameClassFilter implements TargetClassFilter {

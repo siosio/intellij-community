@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@ import com.intellij.util.Function;
 import com.intellij.util.SingleAlarm;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.HashSet;
+import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.tree.TreeUtil;
 import com.intellij.xdebugger.XDebuggerBundle;
 import com.intellij.xdebugger.XDebuggerManager;
@@ -62,16 +63,16 @@ import java.util.*;
 import java.util.List;
 
 public class BreakpointsDialog extends DialogWrapper {
-  @NotNull private Project myProject;
+  @NotNull private final Project myProject;
 
-  private Object myInitialBreakpoint;
-  private List<BreakpointPanelProvider> myBreakpointsPanelProviders;
+  private final Object myInitialBreakpoint;
+  private final List<BreakpointPanelProvider> myBreakpointsPanelProviders;
 
   private BreakpointItemsTreeController myTreeController;
 
-  JLabel temp = new JLabel();
+  final JLabel temp = new JLabel();
 
-  private MasterController myMasterController = new MasterController() {
+  private final MasterController myMasterController = new MasterController() {
     @Override
     public ItemWrapper[] getSelectedItems() {
       final List<BreakpointItem> res = myTreeController.getSelectedBreakpoints(false);
@@ -86,7 +87,7 @@ public class BreakpointsDialog extends DialogWrapper {
 
   private final DetailController myDetailController = new DetailController(myMasterController);
 
-  private final Collection<BreakpointItem> myBreakpointItems = new ArrayList<BreakpointItem>();
+  private final Collection<BreakpointItem> myBreakpointItems = new ArrayList<>();
 
   private final SingleAlarm myRebuildAlarm = new SingleAlarm(new Runnable() {
     @Override
@@ -97,11 +98,11 @@ public class BreakpointsDialog extends DialogWrapper {
     }
   }, 100, myDisposable);
 
-  private final List<XBreakpointGroupingRule> myRulesAvailable = new ArrayList<XBreakpointGroupingRule>();
+  private final List<XBreakpointGroupingRule> myRulesAvailable = new ArrayList<>();
 
-  private final Set<XBreakpointGroupingRule> myRulesEnabled = new TreeSet<XBreakpointGroupingRule>(XBreakpointGroupingRule.PRIORITY_COMPARATOR);
+  private final Set<XBreakpointGroupingRule> myRulesEnabled = new TreeSet<>(XBreakpointGroupingRule.PRIORITY_COMPARATOR);
   private final Disposable myListenerDisposable = Disposer.newDisposable();
-  private final List<ToggleActionButton> myToggleRuleActions = new ArrayList<ToggleActionButton>();
+  private final List<ToggleActionButton> myToggleRuleActions = new ArrayList<>();
 
   private XBreakpointManagerImpl getBreakpointManager() {
     return (XBreakpointManagerImpl)XDebuggerManager.getInstance(myProject).getBreakpointManager();
@@ -189,7 +190,7 @@ public class BreakpointsDialog extends DialogWrapper {
   }
 
   private class ToggleBreakpointGroupingRuleEnabledAction extends ToggleActionButton {
-    private XBreakpointGroupingRule myRule;
+    private final XBreakpointGroupingRule myRule;
 
     public ToggleBreakpointGroupingRuleEnabledAction(XBreakpointGroupingRule rule) {
       super(rule.getPresentableName(), rule.getIcon());
@@ -277,7 +278,7 @@ public class BreakpointsDialog extends DialogWrapper {
             return res;
           }
         };
-        List<AnAction> res = new ArrayList<AnAction>();
+        List<AnAction> res = new ArrayList<>();
         res.add(group);
         Object component = tree.getLastSelectedPathComponent();
         if (tree.getSelectionCount() == 1 && component instanceof BreakpointsGroupNode &&
@@ -297,7 +298,7 @@ public class BreakpointsDialog extends DialogWrapper {
         navigate(true);
         close(OK_EXIT_CODE);
       }
-    }.registerCustomShortcutSet(CommonShortcuts.ENTER, tree);
+    }.registerCustomShortcutSet(CommonShortcuts.ENTER, tree, myDisposable);
 
     new AnAction("BreakpointDialog.ShowSource") {
       @Override
@@ -305,7 +306,7 @@ public class BreakpointsDialog extends DialogWrapper {
         navigate(true);
         close(OK_EXIT_CODE);
       }
-    }.registerCustomShortcutSet(ActionManager.getInstance().getAction(IdeActions.ACTION_EDIT_SOURCE).getShortcutSet(), tree);
+    }.registerCustomShortcutSet(ActionManager.getInstance().getAction(IdeActions.ACTION_EDIT_SOURCE).getShortcutSet(), tree, myDisposable);
 
     final DefaultActionGroup breakpointTypes = new DefaultActionGroup();
     for (XBreakpointType<?, ?> type : XBreakpointUtil.getBreakpointTypes()) {
@@ -344,14 +345,15 @@ public class BreakpointsDialog extends DialogWrapper {
       setToolbarPosition(ActionToolbarPosition.TOP).
       setToolbarBorder(IdeBorderFactory.createEmptyBorder());
 
-    tree.setBorder(IdeBorderFactory.createBorder());
-
     for (ToggleActionButton action : myToggleRuleActions) {
       decorator.addExtraAction(action);
     }
 
     JPanel decoratedTree = decorator.createPanel();
     decoratedTree.setBorder(IdeBorderFactory.createEmptyBorder());
+
+    JScrollPane pane = UIUtil.getParentOfType(JScrollPane.class, tree);
+    if (pane != null) pane.setBorder(IdeBorderFactory.createBorder());
 
     myTreeController.setTreeView(tree);
 
@@ -411,19 +413,9 @@ public class BreakpointsDialog extends DialogWrapper {
   private void saveBreakpointsDialogState() {
     final XBreakpointsDialogState dialogState = new XBreakpointsDialogState();
     saveTreeState(dialogState);
-    final List<XBreakpointGroupingRule> rulesEnabled = ContainerUtil.filter(myRulesEnabled, new Condition<XBreakpointGroupingRule>() {
-      @Override
-      public boolean value(XBreakpointGroupingRule rule) {
-        return !rule.isAlwaysEnabled();
-      }
-    });
+    final List<XBreakpointGroupingRule> rulesEnabled = ContainerUtil.filter(myRulesEnabled, rule -> !rule.isAlwaysEnabled());
 
-    dialogState.setSelectedGroupingRules(new HashSet<String>(ContainerUtil.map(rulesEnabled, new Function<XBreakpointGroupingRule, String>() {
-      @Override
-      public String fun(XBreakpointGroupingRule rule) {
-        return rule.getId();
-      }
-    })));
+    dialogState.setSelectedGroupingRules(new HashSet<>(ContainerUtil.map(rulesEnabled, rule -> rule.getId())));
     getBreakpointManager().setBreakpointsDialogSettings(dialogState);
   }
 

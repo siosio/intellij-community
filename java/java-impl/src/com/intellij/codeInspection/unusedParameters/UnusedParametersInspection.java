@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,6 +44,7 @@ import com.intellij.psi.util.PsiModificationTracker;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.refactoring.changeSignature.ChangeSignatureProcessor;
 import com.intellij.refactoring.changeSignature.ParameterInfoImpl;
+import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -51,6 +52,7 @@ import javax.swing.*;
 import java.awt.*;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 
 public class UnusedParametersInspection extends GlobalJavaBatchInspectionTool {
@@ -122,7 +124,7 @@ public class UnusedParametersInspection extends GlobalJavaBatchInspectionTool {
             if (!refMethod.isStatic() && !refMethod.isConstructor() && !PsiModifier.PRIVATE.equals(refMethod.getAccessModifier())) {
               final ArrayList<RefParameter> unusedParameters = getUnusedParameters(refMethod);
               if (unusedParameters.isEmpty()) return;
-              PsiMethod[] derived = OverridingMethodsSearch.search(psiMethod, true).toArray(PsiMethod.EMPTY_ARRAY);
+              PsiMethod[] derived = OverridingMethodsSearch.search(psiMethod).toArray(PsiMethod.EMPTY_ARRAY);
               for (final RefParameter refParameter : unusedParameters) {
                 if (refMethod.isAbstract() && derived.length == 0) {
                   refParameter.parameterReferenced(false);
@@ -191,7 +193,7 @@ public class UnusedParametersInspection extends GlobalJavaBatchInspectionTool {
     clearUsedParameters(refMethod, result, checkDeep);
 
     for (RefParameter parameter : result) {
-      if (parameter != null) {
+      if (parameter != null && !((RefElementImpl)parameter).isSuppressed(UnusedSymbolLocalInspectionBase.UNUSED_PARAMETERS_SHORT_NAME)) {
         res.add(parameter);
       }
     }
@@ -236,7 +238,7 @@ public class UnusedParametersInspection extends GlobalJavaBatchInspectionTool {
     final JPanel panel = new JPanel(new GridBagLayout());
     panel.add(EntryPointsManagerImpl.createConfigureAnnotationsButton(),
               new GridBagConstraints(0, 0, 1, 1, 1, 1, GridBagConstraints.NORTHWEST, GridBagConstraints.NONE,
-                                     new Insets(0, 0, 0, 0), 0, 0));
+                                     JBUI.emptyInsets(), 0, 0));
     return panel;
   }
 
@@ -269,42 +271,34 @@ public class UnusedParametersInspection extends GlobalJavaBatchInspectionTool {
 
     @Override
     public void applyFix(@NotNull Project project, @NotNull ProblemDescriptor descriptor) {
-      if (!FileModificationService.getInstance().preparePsiElementForWrite(descriptor.getPsiElement())) return;
-      final PsiMethod psiMethod = PsiTreeUtil.getParentOfType(descriptor.getPsiElement(), PsiMethod.class);
-      if (psiMethod != null) {
-        final ArrayList<PsiElement> psiParameters = new ArrayList<PsiElement>();
+      final PsiElement psiElement = descriptor.getPsiElement();
+      if (!FileModificationService.getInstance().preparePsiElementForWrite(psiElement)) return;
+      final PsiParameter psiParameter = PsiTreeUtil.getParentOfType(psiElement, PsiParameter.class);
+      final PsiMethod psiMethod = PsiTreeUtil.getParentOfType(psiElement, PsiMethod.class);
+      if (psiMethod != null && psiParameter != null) {
         final RefElement refMethod = myManager != null ? myManager.getReference(psiMethod) : null;
-        if (refMethod != null) {
-          for (final RefParameter refParameter : getUnusedParameters((RefMethod)refMethod)) {
-            psiParameters.add(refParameter.getElement());
-          }
-        }
-        else {
-          final PsiParameter[] parameters = psiMethod.getParameterList().getParameters();
-          for (PsiParameter parameter : parameters) {
-            if (Comparing.strEqual(parameter.getName(), myHint)) {
-              psiParameters.add(parameter);
-              break;
-            }
-          }
-        }
         final PsiModificationTracker tracker = psiMethod.getManager().getModificationTracker();
         final long startModificationCount = tracker.getModificationCount();
 
-        removeUnusedParameterViaChangeSignature(psiMethod, psiParameters);
+        removeUnusedParameterViaChangeSignature(psiMethod, psiParameter);
         if (refMethod != null && startModificationCount != tracker.getModificationCount()) {
           myProcessor.ignoreElement(refMethod);
         }
       }
     }
 
+    @Override
+    public boolean startInWriteAction() {
+      return false;
+    }
+
     private static void removeUnusedParameterViaChangeSignature(final PsiMethod psiMethod,
-                                                                final Collection<PsiElement> parametersToDelete) {
+                                                                final PsiParameter parameterToDelete) {
       ArrayList<ParameterInfoImpl> newParameters = new ArrayList<ParameterInfoImpl>();
       PsiParameter[] oldParameters = psiMethod.getParameterList().getParameters();
       for (int i = 0; i < oldParameters.length; i++) {
         PsiParameter oldParameter = oldParameters[i];
-        if (!parametersToDelete.contains(oldParameter)) {
+        if (!oldParameter.equals(parameterToDelete)) {
           newParameters.add(new ParameterInfoImpl(i, oldParameter.getName(), oldParameter.getType()));
         }
       }
@@ -316,5 +310,11 @@ public class UnusedParametersInspection extends GlobalJavaBatchInspectionTool {
 
       csp.run();
     }
+  }
+
+  @Nullable
+  @Override
+  public String getAlternativeID() {
+    return "unused";
   }
 }

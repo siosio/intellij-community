@@ -36,16 +36,16 @@ public class TestFinderHelper {
     return null;
   }
 
-  public static List<PsiElement> findTestsForClass(PsiElement element) {
-    List<PsiElement> result = new ArrayList<PsiElement>();
+  public static Collection<PsiElement> findTestsForClass(PsiElement element) {
+    Collection<PsiElement> result = new LinkedHashSet<PsiElement>();
     for (TestFinder each : getFinders()) {
       result.addAll(each.findTestsForClass(element));
     }
     return result;
   }
 
-  public static List<PsiElement> findClassesForTest(PsiElement element) {
-    List<PsiElement> result = new ArrayList<PsiElement>();
+  public static Collection<PsiElement> findClassesForTest(PsiElement element) {
+    Collection<PsiElement> result = new LinkedHashSet<PsiElement>();
     for (TestFinder each : getFinders()) {
       result.addAll(each.findClassesForTest(element));
     }
@@ -79,15 +79,12 @@ public class TestFinderHelper {
   public static List<PsiElement> getSortedElements(final List<Pair<? extends PsiNamedElement, Integer>> elementsWithWeights,
                                                    final boolean weightsAscending,
                                                    @Nullable final Comparator<PsiElement> sameNameComparator) {
-    Collections.sort(elementsWithWeights, new Comparator<Pair<? extends PsiNamedElement, Integer>>() {
-      @Override
-      public int compare(Pair<? extends PsiNamedElement, Integer> o1, Pair<? extends PsiNamedElement, Integer> o2) {
-        int result = weightsAscending ? o1.second.compareTo(o2.second) : o2.second.compareTo(o1.second);
-        if (result == 0) result = Comparing.compare(o1.first.getName(), o2.first.getName());
-        if (result == 0 && sameNameComparator != null) result = sameNameComparator.compare(o1.first, o2.first);
+    Collections.sort(elementsWithWeights, (o1, o2) -> {
+      int result = weightsAscending ? o1.second.compareTo(o2.second) : o2.second.compareTo(o1.second);
+      if (result == 0) result = Comparing.compare(o1.first.getName(), o2.first.getName());
+      if (result == 0 && sameNameComparator != null) result = sameNameComparator.compare(o1.first, o2.first);
 
-        return result;
-      }
+      return result;
     });
 
     final List<PsiElement> result = new ArrayList<PsiElement>(elementsWithWeights.size());

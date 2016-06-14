@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,8 @@ import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.options.SchemeElement;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.tree.IElementType;
+import com.intellij.util.SmartList;
+import com.intellij.util.containers.IntArrayList;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -30,12 +32,12 @@ import java.util.*;
 
 public class TemplateImpl extends Template implements SchemeElement {
   private String myKey;
-  private String myString = null;
+  @NotNull private String myString;
   private String myDescription;
   private String myGroupName;
   private char myShortcutChar = TemplateSettings.DEFAULT_CHAR;
-  private final ArrayList<Variable> myVariables = new ArrayList<Variable>();
-  private ArrayList<Segment> mySegments = null;
+  private final List<Variable> myVariables = new SmartList<>();
+  private List<Segment> mySegments = null;
   private String myTemplateText = null;
   private String myId;
 
@@ -52,7 +54,7 @@ public class TemplateImpl extends Template implements SchemeElement {
     if (myDescription != null ? !myDescription.equals(template.myDescription) : template.myDescription != null) return false;
     if (myGroupName != null ? !myGroupName.equals(template.myGroupName) : template.myGroupName != null) return false;
     if (myKey != null ? !myKey.equals(template.myKey) : template.myKey != null) return false;
-    if (myString != null ? !myString.equals(template.myString) : template.myString != null) return false;
+    if (!myString.equals(template.myString)) return false;
     if (myTemplateText != null ? !myTemplateText.equals(template.myTemplateText) : template.myTemplateText != null) return false;
 
     if (!new HashSet<Variable>(myVariables).equals(new HashSet<Variable>(template.myVariables))) return false;
@@ -67,7 +69,7 @@ public class TemplateImpl extends Template implements SchemeElement {
     }
     int result;
     result = myKey.hashCode();
-    result = 29 * result + (myString == null ? 0 : myString.hashCode());
+    result = 29 * result + myString.hashCode();
     result = 29 * result + myGroupName.hashCode();
     return result;
   }
@@ -108,12 +110,12 @@ public class TemplateImpl extends Template implements SchemeElement {
     this(key, null, group);
     toParseSegments = false;
     myTemplateText = "";
-    mySegments = new ArrayList<Segment>();
+    mySegments = new SmartList<>();
   }
 
   public TemplateImpl(@NotNull String key, String string, @NotNull String group) {
     myKey = key;
-    myString = string;
+    myString = StringUtil.convertLineSeparators(StringUtil.notNullize(string));
     myGroupName = group;
   }
 
@@ -125,7 +127,7 @@ public class TemplateImpl extends Template implements SchemeElement {
   }
 
   @Override
-  public void addVariableSegment (@NotNull String name) {
+  public void addVariableSegment(@NotNull String name) {
     mySegments.add(new Segment(name, myTemplateText.length()));
   }
 
@@ -172,6 +174,7 @@ public class TemplateImpl extends Template implements SchemeElement {
     return myId;
   }
 
+  @NotNull
   @Override
   public TemplateImpl copy() {
     TemplateImpl template = new TemplateImpl(myKey, myString, myGroupName);
@@ -243,7 +246,7 @@ public class TemplateImpl extends Template implements SchemeElement {
     return isDeactivated;
   }
 
-  public TemplateContext getTemplateContext() {
+  @NotNull public TemplateContext getTemplateContext() {
     return myTemplateContext;
   }
 
@@ -270,6 +273,19 @@ public class TemplateImpl extends Template implements SchemeElement {
     return -1;
   }
 
+  public IntArrayList getVariableSegmentNumbers(String variableName) {
+    IntArrayList result = new IntArrayList();
+    parseSegments();
+    for (int i = 0; i < mySegments.size(); i++) {
+      Segment segment = mySegments.get(i);
+      if (segment.name.equals(variableName)) {
+        result.add(i);
+      }
+    }
+    return result;
+  }
+
+  @NotNull
   @Override
   public String getTemplateText() {
     parseSegments();
@@ -302,9 +318,7 @@ public class TemplateImpl extends Template implements SchemeElement {
       return;
     }
 
-    if (myString == null) myString = "";
-    myString = StringUtil.convertLineSeparators(myString);
-    mySegments = new ArrayList<Segment>();
+    mySegments = new SmartList<>();
     StringBuilder buffer = new StringBuilder("");
     TemplateTextLexer lexer = new TemplateTextLexer();
     lexer.start(myString);
@@ -384,13 +398,21 @@ public class TemplateImpl extends Template implements SchemeElement {
     myKey = key;
   }
 
+  @NotNull
+  @Override
   public String getString() {
     parseSegments();
     return myString;
   }
 
-  public void setString(String string) {
-    myString = string;
+  /**
+   * Set template text as it appears in Live Template settings, including variables surrounded with '$'.
+   * The text will be reparsed when needed.
+   * @param string template string text
+   */
+  public void setString(@NotNull String string) {
+    myString = StringUtil.convertLineSeparators(string);
+    toParseSegments = true;
   }
 
   @Override
@@ -452,7 +474,7 @@ public class TemplateImpl extends Template implements SchemeElement {
   }
 
   public boolean contextsEqual(TemplateImpl defaultTemplate) {
-    return getTemplateContext().getDifference(defaultTemplate.getTemplateContext()).isEmpty();
+    return getTemplateContext().getDifference(defaultTemplate.getTemplateContext()) == null;
   }
 
   public void applyOptions(final Map<TemplateOptionalProcessor, Boolean> context) {
@@ -470,7 +492,7 @@ public class TemplateImpl extends Template implements SchemeElement {
   }
 
   public ArrayList<Variable> getVariables() {
-    return myVariables;
+    return new ArrayList<>(myVariables);
   }
 
   private static class Segment {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -82,12 +82,7 @@ import java.util.*;
 public abstract class GrIntroduceHandlerBase<Settings extends GrIntroduceSettings, Scope extends PsiElement> implements RefactoringActionHandler {
   private static final Logger LOG = Logger.getInstance(GrIntroduceHandlerBase.class);
 
-  public static final Function<GrExpression, String> GR_EXPRESSION_RENDERER = new Function<GrExpression, String>() {
-    @Override
-    public String fun(@NotNull GrExpression expr) {
-      return expr.getText();
-    }
-  };
+  public static final Function<GrExpression, String> GR_EXPRESSION_RENDERER = expr -> expr.getText();
 
   public static GrExpression insertExplicitCastIfNeeded(GrVariable variable, GrExpression initializer) {
     PsiType ltype = findLValueType(initializer);
@@ -202,6 +197,11 @@ public abstract class GrIntroduceHandlerBase<Settings extends GrIntroduceSetting
   public static List<GrExpression> collectExpressions(final PsiFile file, final Editor editor, final int offset, boolean acceptVoidCalls) {
     int correctedOffset = correctOffset(editor, offset);
     final PsiElement elementAtCaret = file.findElementAt(correctedOffset);
+    return collectExpressions(elementAtCaret, acceptVoidCalls);
+  }
+
+  @NotNull
+  public static List<GrExpression> collectExpressions(PsiElement elementAtCaret, boolean acceptVoidCalls) {
     final List<GrExpression> expressions = new ArrayList<GrExpression>();
 
     for (GrExpression expression = PsiTreeUtil.getParentOfType(elementAtCaret, GrExpression.class);
@@ -211,6 +211,9 @@ public abstract class GrIntroduceHandlerBase<Settings extends GrIntroduceSetting
       if (expression instanceof GrParenthesizedExpression && !expressions.contains(((GrParenthesizedExpression)expression).getOperand())) {
         expressions.add(((GrParenthesizedExpression)expression).getOperand());
       }
+      if (expression.getParent() instanceof GrReferenceExpression
+          && expression instanceof GrReferenceExpression
+          && ((GrReferenceExpression)expression).resolve() instanceof PsiClass) continue;
       if (expressionIsIncorrect(expression, acceptVoidCalls)) continue;
 
       expressions.add(expression);
@@ -229,7 +232,7 @@ public abstract class GrIntroduceHandlerBase<Settings extends GrIntroduceSetting
     }
 
     if (expression instanceof GrClosableBlock && expression.getParent() instanceof GrStringInjection) return true;
-    if (!acceptVoidCalls && expression instanceof GrMethodCall && PsiType.VOID == expression.getType()) return true;
+    if (!acceptVoidCalls && expression instanceof GrMethodCall && PsiType.VOID.equals(expression.getType())) return true;
 
     return false;
   }
@@ -342,83 +345,67 @@ public abstract class GrIntroduceHandlerBase<Settings extends GrIntroduceSetting
   }
 
   protected void extractStringPart(final Ref<GrIntroduceContext> ref) {
-    CommandProcessor.getInstance().executeCommand(ref.get().getProject(), new Runnable() {
-      @Override
-      public void run() {
-        ApplicationManager.getApplication().runWriteAction(new Runnable() {
-          @Override
-          public void run() {
-            GrIntroduceContext context = ref.get();
+    CommandProcessor.getInstance().executeCommand(ref.get().getProject(), () -> ApplicationManager.getApplication().runWriteAction(() -> {
+      GrIntroduceContext context = ref.get();
 
-            StringPartInfo stringPart = context.getStringPart();
-            assert stringPart != null;
+      StringPartInfo stringPart = context.getStringPart();
+      assert stringPart != null;
 
-            GrExpression expression = stringPart.replaceLiteralWithConcatenation(null);
+      GrExpression expression = stringPart.replaceLiteralWithConcatenation(null);
 
-            ref.set(new GrIntroduceContextImpl(context.getProject(), context.getEditor(), expression, null, null, new PsiElement[]{expression}, context.getScope()));
-          }
-        });
-      }
-    }, getRefactoringName(), getRefactoringName());
+      ref.set(new GrIntroduceContextImpl(context.getProject(), context.getEditor(), expression, null, null, new PsiElement[]{expression}, context.getScope()));
+    }), getRefactoringName(), getRefactoringName());
   }
 
   protected void addBraces(@NotNull final GrStatement anchor, @NotNull final Ref<GrIntroduceContext> contextRef) {
-    CommandProcessor.getInstance().executeCommand(contextRef.get().getProject(), new Runnable() {
-      @Override
-      public void run() {
-        ApplicationManager.getApplication().runWriteAction(new Runnable() {
-          @Override
-          public void run() {
-            GrIntroduceContext context = contextRef.get();
-            SmartPointerManager pointManager = SmartPointerManager.getInstance(context.getProject());
-            SmartPsiElementPointer<GrExpression> expressionRef = context.getExpression() != null ? pointManager.createSmartPsiElementPointer(context.getExpression()) : null;
-            SmartPsiElementPointer<GrVariable> varRef = context.getVar() != null ? pointManager.createSmartPsiElementPointer(context.getVar()) : null;
+    CommandProcessor.getInstance().executeCommand(contextRef.get().getProject(), () -> ApplicationManager.getApplication().runWriteAction(() -> {
+      GrIntroduceContext context = contextRef.get();
+      SmartPointerManager pointManager = SmartPointerManager.getInstance(context.getProject());
+      SmartPsiElementPointer<GrExpression> expressionRef = context.getExpression() != null ? pointManager.createSmartPsiElementPointer(context.getExpression()) : null;
+      SmartPsiElementPointer<GrVariable> varRef = context.getVar() != null ? pointManager.createSmartPsiElementPointer(context.getVar()) : null;
 
-            SmartPsiElementPointer[] occurrencesRefs = new SmartPsiElementPointer[context.getOccurrences().length];
-            PsiElement[] occurrences = context.getOccurrences();
-            for (int i = 0; i < occurrences.length; i++) {
-              occurrencesRefs[i] = pointManager.createSmartPsiElementPointer(occurrences[i]);
-            }
-
-
-            PsiFile file = anchor.getContainingFile();
-            SmartPsiFileRange anchorPointer = pointManager.createSmartPsiFileRangePointer(file, anchor.getTextRange());
-
-            Document document = context.getEditor().getDocument();
-            CharSequence sequence = document.getCharsSequence();
-
-            TextRange range = anchor.getTextRange();
-
-            int end = range.getEndOffset();
-            document.insertString(end, "\n}");
-
-            int start = range.getStartOffset();
-            while (start > 0 && Character.isWhitespace(sequence.charAt(start - 1))) {
-              start--;
-            }
-            document.insertString(start, "{");
-
-            PsiDocumentManager.getInstance(context.getProject()).commitDocument(document);
-
-            Segment anchorSegment = anchorPointer.getRange();
-            PsiElement restoredAnchor = PsiImplUtil
-              .findElementInRange(file, anchorSegment.getStartOffset(), anchorSegment.getEndOffset(), PsiElement.class);
-            GrCodeBlock block = (GrCodeBlock)restoredAnchor.getParent();
-            CodeStyleManager.getInstance(context.getProject()).reformat(block.getRBrace());
-            CodeStyleManager.getInstance(context.getProject()).reformat(block.getLBrace());
-
-            for (int i = 0; i < occurrencesRefs.length; i++) {
-              occurrences[i] = occurrencesRefs[i].getElement();
-            }
-
-            contextRef.set(new GrIntroduceContextImpl(context.getProject(), context.getEditor(),
-                                                      expressionRef != null ? expressionRef.getElement() : null,
-                                                      varRef != null ? varRef.getElement() : null,
-                                                      null, occurrences, context.getScope()));
-          }
-        });
+      SmartPsiElementPointer[] occurrencesRefs = new SmartPsiElementPointer[context.getOccurrences().length];
+      PsiElement[] occurrences = context.getOccurrences();
+      for (int i = 0; i < occurrences.length; i++) {
+        occurrencesRefs[i] = pointManager.createSmartPsiElementPointer(occurrences[i]);
       }
-    }, getRefactoringName(), getRefactoringName());
+
+
+      PsiFile file = anchor.getContainingFile();
+      SmartPsiFileRange anchorPointer = pointManager.createSmartPsiFileRangePointer(file, anchor.getTextRange());
+
+      Document document = context.getEditor().getDocument();
+      CharSequence sequence = document.getCharsSequence();
+
+      TextRange range = anchor.getTextRange();
+
+      int end = range.getEndOffset();
+      document.insertString(end, "\n}");
+
+      int start = range.getStartOffset();
+      while (start > 0 && Character.isWhitespace(sequence.charAt(start - 1))) {
+        start--;
+      }
+      document.insertString(start, "{");
+
+      PsiDocumentManager.getInstance(context.getProject()).commitDocument(document);
+
+      Segment anchorSegment = anchorPointer.getRange();
+      PsiElement restoredAnchor = PsiImplUtil
+        .findElementInRange(file, anchorSegment.getStartOffset(), anchorSegment.getEndOffset(), PsiElement.class);
+      GrCodeBlock block = (GrCodeBlock)restoredAnchor.getParent();
+      CodeStyleManager.getInstance(context.getProject()).reformat(block.getRBrace());
+      CodeStyleManager.getInstance(context.getProject()).reformat(block.getLBrace());
+
+      for (int i = 0; i < occurrencesRefs.length; i++) {
+        occurrences[i] = occurrencesRefs[i].getElement();
+      }
+
+      contextRef.set(new GrIntroduceContextImpl(context.getProject(), context.getEditor(),
+                                                expressionRef != null ? expressionRef.getElement() : null,
+                                                varRef != null ? varRef.getElement() : null,
+                                                null, occurrences, context.getScope()));
+    }), getRefactoringName(), getRefactoringName());
   }
 
   @NotNull
@@ -459,15 +446,12 @@ public abstract class GrIntroduceHandlerBase<Settings extends GrIntroduceSetting
     if (scope instanceof GroovyScriptClass) {
       scope = scope.getContainingFile();
     }
-    ReferencesSearch.search(variable, new LocalSearchScope(scope)).forEach(new Processor<PsiReference>() {
-      @Override
-      public boolean process(PsiReference psiReference) {
-        final PsiElement element = psiReference.getElement();
-        if (element != null) {
-          list.add(element);
-        }
-        return true;
+    ReferencesSearch.search(variable, new LocalSearchScope(scope)).forEach(psiReference -> {
+      final PsiElement element = psiReference.getElement();
+      if (element != null) {
+        list.add(element);
       }
+      return true;
     });
     return list.toArray(new PsiElement[list.size()]);
   }
@@ -493,17 +477,9 @@ public abstract class GrIntroduceHandlerBase<Settings extends GrIntroduceSetting
         final Settings settings = showDialog(context);
         if (settings == null) return false;
 
-        CommandProcessor.getInstance().executeCommand(context.getProject(), new Runnable() {
-          @Override
-          public void run() {
-            ApplicationManager.getApplication().runWriteAction(new Runnable() {
-              @Override
-              public void run() {
-                runRefactoring(context, settings);
-              }
-            });
-          }
-        }, getRefactoringName(), null);
+        CommandProcessor.getInstance().executeCommand(context.getProject(), () -> ApplicationManager.getApplication().runWriteAction(() -> {
+          runRefactoring(context, settings);
+        }), getRefactoringName(), null);
       }
 
       return true;

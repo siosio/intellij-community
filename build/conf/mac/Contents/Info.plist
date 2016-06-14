@@ -54,6 +54,9 @@
     <key>NSHighResolutionCapable</key>
     <true/>
 
+    <key>NSSupportsAutomaticGraphicsSwitching</key>
+    <true/>
+
     @@archs@@
     <key>LSRequiresNativeExecution</key>
     <string>YES</string>
@@ -68,7 +71,7 @@
       <string>@@class_path@@</string>
 
       <key>JVMVersion</key>
-      <string>1.6*,1.7+</string>
+      <string>1.8*,1.8+</string>
 
       <key>MainClass</key>
       <string>com.intellij.idea.Main</string>
@@ -84,7 +87,7 @@
       </dict>
 
       <key>VMOptions</key>
-      <string>@@vmoptions@@ -Xbootclasspath/a:../lib/boot.jar</string>
+      <string>@@vmoptions@@ -XX:ErrorFile=$USER_HOME/java_error_in_@@executable@@_%p.log -XX:HeapDumpPath=$USER_HOME/java_error_in_@@executable@@.hprof -Xbootclasspath/a:../lib/boot.jar</string>
 
       <key>WorkingDirectory</key>
       <string>$APP_PACKAGE/Contents/bin</string>

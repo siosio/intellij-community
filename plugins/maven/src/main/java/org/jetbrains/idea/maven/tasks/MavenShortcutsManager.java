@@ -122,14 +122,21 @@ public class MavenShortcutsManager extends MavenSimpleProjectComponent implement
   }
 
   public String getDescription(MavenProject project, String goal) {
-    String actionId = getActionId(project.getPath(), goal);
-    if (actionId == null) return "";
-
-    Keymap activeKeymap = KeymapManager.getInstance().getActiveKeymap();
-    Shortcut[] shortcuts = activeKeymap.getShortcuts(actionId);
-    if (shortcuts == null || shortcuts.length == 0) return "";
-
+    Shortcut[] shortcuts = getShortcuts(project, goal);
+    if (shortcuts.length == 0) return "";
     return KeymapUtil.getShortcutsText(shortcuts);
+  }
+
+  public boolean hasShortcuts(MavenProject project, String goal) {
+    return getShortcuts(project, goal).length > 0;
+  }
+
+  @NotNull
+  private Shortcut[] getShortcuts(MavenProject project, String goal) {
+    String actionId = getActionId(project.getPath(), goal);
+    if (actionId == null) return Shortcut.EMPTY_ARRAY;
+    Keymap activeKeymap = KeymapManager.getInstance().getActiveKeymap();
+    return activeKeymap.getShortcuts(actionId);
   }
 
   private void fireShortcutsUpdated() {
@@ -239,19 +246,17 @@ public class MavenShortcutsManager extends MavenSimpleProjectComponent implement
             projectToDelete = selectScheduledProjects(false);
             mySheduledProjects.clear();
           }
-          MavenKeymapExtension.clearActions(myProject, projectToDelete);
-          MavenKeymapExtension.updateActions(myProject, projectToUpdate);
+          if (!myProject.isDisposed()) {
+            MavenKeymapExtension.clearActions(myProject, projectToDelete);
+            MavenKeymapExtension.updateActions(myProject, projectToUpdate);
+          }
         }
       });
     }
 
     private List<MavenProject> selectScheduledProjects(final boolean forUpdate) {
-      return ContainerUtil.mapNotNull(mySheduledProjects.entrySet(), new Function<Map.Entry<MavenProject, Boolean>, MavenProject>() {
-        @Override
-        public MavenProject fun(Map.Entry<MavenProject, Boolean> eachEntry) {
-          return forUpdate == eachEntry.getValue() ? eachEntry.getKey() : null;
-        }
-      });
+      return ContainerUtil.mapNotNull(mySheduledProjects.entrySet(),
+                                      eachEntry -> forUpdate == eachEntry.getValue() ? eachEntry.getKey() : null);
     }
   }
 }

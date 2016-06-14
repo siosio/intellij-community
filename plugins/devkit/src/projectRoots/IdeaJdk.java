@@ -15,6 +15,7 @@
  */
 package org.jetbrains.idea.devkit.projectRoots;
 
+import com.intellij.openapi.application.ApplicationStarter;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.projectRoots.*;
@@ -27,16 +28,12 @@ import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.WriteExternalException;
 import com.intellij.openapi.util.io.FileUtil;
-import com.intellij.openapi.vfs.JarFileSystem;
-import com.intellij.openapi.vfs.VfsUtilCore;
-import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.openapi.vfs.VirtualFileManager;
+import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.vfs.*;
 import com.intellij.pom.java.LanguageLevel;
-import com.intellij.psi.PsiManager;
 import com.intellij.psi.impl.compiled.ClsParsingUtil;
 import com.intellij.util.ArrayUtil;
-import com.intellij.util.io.zip.JBZipEntry;
-import com.intellij.util.io.zip.JBZipFile;
+import com.intellij.util.containers.JBIterable;
 import icons.DevkitIcons;
 import org.jdom.Element;
 import org.jetbrains.annotations.NonNls;
@@ -45,12 +42,16 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.devkit.DevKitBundle;
 
 import javax.swing.*;
+import java.io.DataInputStream;
 import java.io.File;
-import java.io.FileFilter;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
+
+import static com.intellij.openapi.util.io.FileUtil.toSystemDependentName;
 
 /**
  * @author anna
@@ -64,6 +65,7 @@ public class IdeaJdk extends JavaDependentSdkType implements JavaSdkType {
   @NonNls private static final String LIB_DIR_NAME = "lib";
   @NonNls private static final String SRC_DIR_NAME = "src";
   @NonNls private static final String PLUGINS_DIR = "plugins";
+  public static final String OUT_CLASSES = "/out/classes/production";
 
   public IdeaJdk() {
     super("IDEA JDK");
@@ -79,6 +81,7 @@ public class IdeaJdk extends JavaDependentSdkType implements JavaSdkType {
     return "reference.project.structure.sdk.idea";
   }
 
+  @NotNull
   public Icon getIconForAddAction() {
     return ADD_SDK;
   }
@@ -87,8 +90,9 @@ public class IdeaJdk extends JavaDependentSdkType implements JavaSdkType {
     return PathManager.getHomePath().replace(File.separatorChar, '/');
   }
 
+  @NotNull
   @Override
-  public String adjustSelectedSdkHome(String homePath) {
+  public String adjustSelectedSdkHome(@NotNull String homePath) {
     if (SystemInfo.isMac) {
       File home = new File(homePath, "Contents");
       if (home.exists()) return home.getPath();
@@ -123,15 +127,10 @@ public class IdeaJdk extends JavaDependentSdkType implements JavaSdkType {
   }
 
   public static boolean isFromIDEAProject(String path) {
-    File home = new File(path);
-    File[] openapiDir = home.listFiles(new FileFilter() {
-      public boolean accept(File pathname) {
-        @NonNls final String name = pathname.getName();
-        if (name.equals("openapi") && pathname.isDirectory()) return true; //todo
-        return false;
-      }
-    });
-    return openapiDir != null && openapiDir.length != 0;
+    File ultimate = new File(path, "idea.iml");
+    File community = new File(path, "community-main.iml");
+    return ultimate.exists() && ultimate.isFile() ||
+           community.exists() && community.isFile();
   }
 
   @Nullable
@@ -150,6 +149,7 @@ public class IdeaJdk extends JavaDependentSdkType implements JavaSdkType {
   }
 
   public String suggestSdkName(String currentSdkName, String sdkHome) {
+    if (isFromIDEAProject(sdkHome)) return "Local IDEA [" + sdkHome + "]";
     String buildNumber = getBuildNumber(sdkHome);
     return IntelliJPlatformProduct.fromBuildNumber(buildNumber).getName() + " " + (buildNumber != null ? buildNumber : "");
   }
@@ -208,7 +208,7 @@ public class IdeaJdk extends JavaDependentSdkType implements JavaSdkType {
   }
 
 
-  public boolean setupSdkPaths(final Sdk sdk, SdkModel sdkModel) {
+  public boolean setupSdkPaths(@NotNull final Sdk sdk, @NotNull SdkModel sdkModel) {
     final Sandbox additionalData = (Sandbox)sdk.getSdkAdditionalData();
     if (additionalData != null) {
       additionalData.cleanupWatchedRoots();
@@ -267,29 +267,27 @@ public class IdeaJdk extends JavaDependentSdkType implements JavaSdkType {
 
   @Nullable
   private static JavaSdkVersion getRequiredJdkVersion(Sdk ideaSdk) {
+    if (isFromIDEAProject(ideaSdk.getHomePath())) return JavaSdkVersion.JDK_1_8;
     File apiJar = getOpenApiJar(ideaSdk.getHomePath());
-    if (apiJar != null) {
-      int classFileVersion = getIdeaClassFileVersion(apiJar);
-      if (classFileVersion > 0) {
-        LanguageLevel languageLevel = ClsParsingUtil.getLanguageLevelByVersion(classFileVersion);
-        if (languageLevel != null) {
-          return JavaSdkVersion.fromLanguageLevel(languageLevel);
-        }
-      }
-    }
-
-    return null;
+    int classFileVersion = apiJar == null ? -1 : getIdeaClassFileVersion(apiJar);
+    LanguageLevel languageLevel = classFileVersion <= 0? null : ClsParsingUtil.getLanguageLevelByVersion(classFileVersion);
+    return languageLevel != null ? JavaSdkVersion.fromLanguageLevel(languageLevel) : null;
   }
 
   private static int getIdeaClassFileVersion(File apiJar) {
     try {
-      JBZipFile zipFile = new JBZipFile(apiJar);
+      ZipFile zipFile = new ZipFile(apiJar);
       try {
-        JBZipEntry entry = zipFile.getEntry(PsiManager.class.getName().replace('.', '/') + ".class");
+        ZipEntry entry = zipFile.getEntry(ApplicationStarter.class.getName().replace('.', '/') + ".class");
         if (entry != null) {
-          byte[] bytes = entry.getData();
-          if (bytes != null && bytes.length > 8) {
-            return ((int)bytes[6] << 8) + (int)bytes[7];
+          DataInputStream stream = new DataInputStream(zipFile.getInputStream(entry));
+          try {
+            if (stream.skip(6) == 6) {
+              return stream.readUnsignedShort();
+            }
+          }
+          finally {
+            stream.close();
           }
         }
       }
@@ -297,7 +295,9 @@ public class IdeaJdk extends JavaDependentSdkType implements JavaSdkType {
         zipFile.close();
       }
     }
-    catch (IOException ignored) { }
+    catch (IOException e) {
+      LOG.info(e);
+    }
 
     return -1;
   }
@@ -308,12 +308,40 @@ public class IdeaJdk extends JavaDependentSdkType implements JavaSdkType {
     addDocs(sdkModificator, internalJava);
     addSources(sdkModificator, internalJava);
     //roots for openapi and other libs
-    if (!isFromIDEAProject(sdkHome)) {
-      final VirtualFile[] ideaLib = getIdeaLibrary(sdkHome);
-      if (ideaLib != null) {
-        for (VirtualFile aIdeaLib : ideaLib) {
-          sdkModificator.addRoot(aIdeaLib, OrderRootType.CLASSES);
+    if (isFromIDEAProject(sdkHome)) {
+      JarFileSystem jarFileSystem = JarFileSystem.getInstance();
+      for (String prefix : Arrays.asList("community", "")) {
+        for (String path : Arrays.asList("lib", "build/kotlinc/lib/kotlin-runtime.jar", "xml/relaxng/lib")) {
+          File libDir = new File(sdkHome, FileUtil.toSystemDependentName(prefix + "/" + path));
+          if (!libDir.exists()) continue;
+          for (File file : JBIterable.of(libDir.listFiles()).append(libDir)) {
+            if (file.isDirectory()) continue;
+            if (!StringUtil.endsWithIgnoreCase(file.getName(), ".jar")) continue;
+            String jarPath = FileUtil.toSystemIndependentName(file.getPath()) + JarFileSystem.JAR_SEPARATOR;
+            VirtualFile jar = jarFileSystem.findFileByPath(jarPath);
+            if (jar == null) continue;
+            sdkModificator.addRoot(jar, OrderRootType.CLASSES);
+          }
         }
+      }
+      LocalFileSystem localFileSystem = LocalFileSystem.getInstance();
+      VirtualFile out = localFileSystem.refreshAndFindFileByPath(sdkHome + OUT_CLASSES);
+      if (out != null) {
+        List<String> suppressed = Arrays.asList("jps-plugin-system");
+        for (VirtualFile dir : JBIterable.of(out.findChild("resources")).append(out.getChildren())) {
+          if (!dir.isDirectory()) continue;
+          String name = dir.getName();
+          if (name.endsWith("-ide") || suppressed.contains(name)) continue;
+          if (!name.equals("ultimate-resources") &&
+              FileUtil.exists(toSystemDependentName(dir.getPath() + "/META-INF/plugin.xml"))) continue;
+          sdkModificator.addRoot(dir, OrderRootType.CLASSES);
+        }
+      }
+    }
+    else  {
+      VirtualFile[] ideaLib = getIdeaLibrary(sdkHome);
+      for (VirtualFile aIdeaLib : ideaLib) {
+        sdkModificator.addRoot(aIdeaLib, OrderRootType.CLASSES);
       }
       addSources(new File(sdkHome), sdkModificator);
     }
@@ -333,13 +361,11 @@ public class IdeaJdk extends JavaDependentSdkType implements JavaSdkType {
   private static void addSources(File file, SdkModificator sdkModificator) {
     final File src = new File(new File(file, LIB_DIR_NAME), SRC_DIR_NAME);
     if (!src.exists()) return;
-    File[] srcs = src.listFiles(new FileFilter() {
-      public boolean accept(File pathname) {
-        @NonNls final String path = pathname.getPath();
-        //noinspection SimplifiableIfStatement
-        if (path.contains("generics")) return false;
-        return path.endsWith(".jar") || path.endsWith(".zip");
-      }
+    File[] srcs = src.listFiles(pathname -> {
+      @NonNls final String path = pathname.getPath();
+      //noinspection SimplifiableIfStatement
+      if (path.contains("generics")) return false;
+      return path.endsWith(".jar") || path.endsWith(".zip");
     });
     for (int i = 0; srcs != null && i < srcs.length; i++) {
       File jarFile = srcs[i];
@@ -383,7 +409,9 @@ public class IdeaJdk extends JavaDependentSdkType implements JavaSdkType {
           }
         }
         else {
-          final File jdkHome = new File(javaSdk.getHomePath()).getParentFile();
+          String homePath = javaSdk.getHomePath();
+          if (homePath == null) return;
+          final File jdkHome = new File(homePath).getParentFile();
           @NonNls final String srcZip = "src.zip";
           final File jarFile = new File(jdkHome, srcZip);
           if (jarFile.exists()){
@@ -410,7 +438,7 @@ public class IdeaJdk extends JavaDependentSdkType implements JavaSdkType {
     return wasSmthAdded;
   }
 
-  public AdditionalDataConfigurable createAdditionalDataConfigurable(final SdkModel sdkModel, SdkModificator sdkModificator) {
+  public AdditionalDataConfigurable createAdditionalDataConfigurable(@NotNull final SdkModel sdkModel, @NotNull SdkModificator sdkModificator) {
     return new IdeaJdkConfigurable(sdkModel, sdkModificator);
   }
 
@@ -457,6 +485,7 @@ public class IdeaJdk extends JavaDependentSdkType implements JavaSdkType {
     return sandbox;
   }
 
+  @NotNull
   public String getPresentableName() {
     return DevKitBundle.message("sdk.title");
   }
@@ -473,7 +502,7 @@ public class IdeaJdk extends JavaDependentSdkType implements JavaSdkType {
   }
 
   @Override
-  public boolean isRootTypeApplicable(OrderRootType type) {
+  public boolean isRootTypeApplicable(@NotNull OrderRootType type) {
     return type == OrderRootType.CLASSES ||
            type == OrderRootType.SOURCES ||
            type == JavadocOrderRootType.getInstance() ||

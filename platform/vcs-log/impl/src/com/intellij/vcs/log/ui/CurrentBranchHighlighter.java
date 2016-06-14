@@ -18,49 +18,54 @@ package com.intellij.vcs.log.ui;
 import com.intellij.openapi.util.Condition;
 import com.intellij.ui.JBColor;
 import com.intellij.vcs.log.*;
-import com.intellij.vcs.log.data.LoadingDetails;
-import com.intellij.vcs.log.data.VcsLogDataHolder;
-import com.intellij.vcs.log.data.VcsLogUiProperties;
+import com.intellij.vcs.log.data.VcsLogData;
+import com.intellij.vcs.log.impl.VcsLogUtil;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.awt.*;
 
 public class CurrentBranchHighlighter implements VcsLogHighlighter {
   private static final JBColor CURRENT_BRANCH_BG = new JBColor(new Color(228, 250, 255), new Color(63, 71, 73));
-  @NotNull private final VcsLogUiProperties myUiProperties;
-  @NotNull private final VcsLogDataHolder myDataHolder;
+  private static final String HEAD = "HEAD";
+  @NotNull private final VcsLogData myLogData;
+  @NotNull private final VcsLogUi myLogUi;
+  @Nullable private String mySingleFilteredBranch;
 
-  public CurrentBranchHighlighter(@NotNull VcsLogDataHolder logDataHolder, @NotNull VcsLogUiProperties uiProperties) {
-    myDataHolder = logDataHolder;
-    myUiProperties = uiProperties;
+  public CurrentBranchHighlighter(@NotNull VcsLogData logData, @NotNull VcsLogUi logUi) {
+    myLogData = logData;
+    myLogUi = logUi;
   }
 
   @NotNull
   @Override
-  public VcsCommitStyle getStyle(int commitIndex, boolean isSelected) {
-    if (isSelected || !myUiProperties.isHighlighterEnabled(Factory.ID)) return VcsCommitStyle.DEFAULT;
-    VcsShortCommitDetails details = myDataHolder.getMiniDetailsGetter().getCommitDataIfAvailable(commitIndex);
-    if (details != null && !(details instanceof LoadingDetails)) {
-      VcsLogProvider provider = myDataHolder.getLogProvider(details.getRoot());
-      String currentBranch = provider.getCurrentBranch(details.getRoot());
-      if (currentBranch != null) {
-        Condition<Hash> condition = myDataHolder.getContainingBranchesGetter().getContainedInBranchCondition(currentBranch, details.getRoot());
-        if (condition.value(details.getId())) {
-          return VcsCommitStyleFactory.background(CURRENT_BRANCH_BG);
-        }
+  public VcsCommitStyle getStyle(@NotNull VcsShortCommitDetails details, boolean isSelected) {
+    if (isSelected || !myLogUi.isHighlighterEnabled(Factory.ID)) return VcsCommitStyle.DEFAULT;
+    VcsLogProvider provider = myLogData.getLogProvider(details.getRoot());
+    String currentBranch = provider.getCurrentBranch(details.getRoot());
+    if (!HEAD.equals(mySingleFilteredBranch) && currentBranch != null && !(currentBranch.equals(mySingleFilteredBranch))) {
+      Condition<CommitId> condition =
+        myLogData.getContainingBranchesGetter().getContainedInBranchCondition(currentBranch, details.getRoot());
+      if (condition.value(new CommitId(details.getId(), details.getRoot()))) {
+        return VcsCommitStyleFactory.background(CURRENT_BRANCH_BG);
       }
     }
     return VcsCommitStyle.DEFAULT;
   }
 
+  @Override
+  public void update(@NotNull VcsLogDataPack dataPack, boolean refreshHappened) {
+    VcsLogBranchFilter branchFilter = dataPack.getFilters().getBranchFilter();
+    mySingleFilteredBranch = branchFilter == null ? null : VcsLogUtil.getSingleFilteredBranch(branchFilter, dataPack.getRefs());
+  }
+
   public static class Factory implements VcsLogHighlighterFactory {
-    @NotNull
-    private static final String ID = "CURRENT_BRANCH";
+    @NotNull private static final String ID = "CURRENT_BRANCH";
 
     @NotNull
     @Override
-    public VcsLogHighlighter createHighlighter(@NotNull VcsLogDataHolder logDataHolder, @NotNull VcsLogUiProperties uiProperties) {
-      return new CurrentBranchHighlighter(logDataHolder, uiProperties);
+    public VcsLogHighlighter createHighlighter(@NotNull VcsLogData logData, @NotNull VcsLogUi logUi) {
+      return new CurrentBranchHighlighter(logData, logUi);
     }
 
     @NotNull
@@ -73,6 +78,11 @@ public class CurrentBranchHighlighter implements VcsLogHighlighter {
     @Override
     public String getTitle() {
       return "Current Branch";
+    }
+
+    @Override
+    public boolean showMenuItem() {
+      return true;
     }
   }
 }

@@ -19,9 +19,6 @@ import jetbrains.buildServer.messages.serviceMessages.TestStarted;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-/**
- * @author Sergey Simonchik
- */
 public class TestStartedEvent extends BaseStartedNodeEvent {
 
   private boolean myConfig;
@@ -37,8 +34,24 @@ public class TestStartedEvent extends BaseStartedNodeEvent {
           BaseStartedNodeEvent.isRunning(testStarted));
   }
 
+  public TestStartedEvent(@Nullable String name,
+                          @Nullable String id,
+                          @Nullable String parentId,
+                          @Nullable final String locationUrl,
+                          @Nullable String nodeType,
+                          @Nullable String nodeArgs,
+                          boolean running) {
+    super(name,
+          id,
+          parentId,
+          locationUrl,
+          nodeType,
+          nodeArgs,
+          running);
+  }
+
   public TestStartedEvent(@NotNull String name, @Nullable String locationUrl) {
-    super(name, -1, -1, locationUrl, null, null, true);
+    super(name, null, null, locationUrl, null, null, true);
   }
 
   public void setConfig(boolean config) {

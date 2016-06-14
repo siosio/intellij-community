@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -57,12 +57,7 @@ public final class RequestFocusInToolWindowCmd extends FinalizableCommand {
 
   @Override
   public final void run() {
-    myToolWindow.getActivation().doWhenDone(new Runnable() {
-      @Override
-      public void run() {
-        processRequestFocus();
-      }
-    });
+    myToolWindow.getActivation().doWhenDone(() -> processRequestFocus());
   }
 
   private void processRequestFocus() {
@@ -102,22 +97,12 @@ public final class RequestFocusInToolWindowCmd extends FinalizableCommand {
 
       // Try to focus component which is preferred one for the tool window
       if (preferredFocusedComponent != null) {
-        requestFocus(preferredFocusedComponent).doWhenDone(new Runnable() {
-          @Override
-          public void run() {
-            bringOwnerToFront();
-          }
-        });
+        requestFocus(preferredFocusedComponent).doWhenDone(() -> bringOwnerToFront());
       }
       else {
         // If there is no preferred component then try to focus tool window itself
         final JComponent componentToFocus = myToolWindow.getComponent();
-        requestFocus(componentToFocus).doWhenDone(new Runnable() {
-          @Override
-          public void run() {
-            bringOwnerToFront();
-          }
-        });
+        requestFocus(componentToFocus).doWhenDone(() -> bringOwnerToFront());
       }
     }
     finally {
@@ -174,23 +159,13 @@ public final class RequestFocusInToolWindowCmd extends FinalizableCommand {
               @Override
               @NotNull
               public ActionCallback run() {
-                return new ActionCallback.Done();
+                return ActionCallback.DONE;
               }
-            }, myForced).doWhenProcessed(new Runnable() {
-              @Override
-              public void run() {
-                updateToolWindow(c);
-              }
-            }).notify(result);
+            }, myForced).doWhenProcessed(() -> updateToolWindow(c)).notify(result);
           }
           else {
             myManager.getFocusManager().requestFocus(new FocusCommand.ByComponent(c, myToolWindow.getComponent(), new Exception()), myForced)
-              .doWhenProcessed(new Runnable() {
-                @Override
-                public void run() {
-                  updateToolWindow(c);
-                }
-              }).notify(result);
+              .doWhenProcessed(() -> updateToolWindow(c)).notify(result);
           }
         }
         else {

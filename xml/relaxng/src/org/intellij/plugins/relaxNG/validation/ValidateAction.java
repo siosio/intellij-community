@@ -26,6 +26,7 @@ import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
+import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.WindowManager;
 import com.intellij.psi.PsiElement;
@@ -124,50 +125,32 @@ public class ValidateAction extends AnAction {
 
     final MessageViewHelper helper = new MessageViewHelper(project, CONTENT_NAME, KEY);
 
-    helper.openMessageView(new Runnable() {
-      @Override
-      public void run() {
-        doRun(project, instanceFile, schemaFile);
-      }
-    });
+    helper.openMessageView(() -> doRun(project, instanceFile, schemaFile));
 
-    final Future<?> future = ApplicationManager.getApplication().executeOnPooledThread(new Runnable() {
-      @Override
-      public void run() {
-        ApplicationManager.getApplication().runReadAction(new Runnable() {
-          @Override
-          public void run() {
-            final MessageViewHelper.ErrorHandler eh = helper.new ErrorHandler();
+    final Future<?> future = ApplicationManager.getApplication().executeOnPooledThread(
+      () -> ApplicationManager.getApplication().runReadAction(() -> {
+        final MessageViewHelper.ErrorHandler eh = helper.new ErrorHandler();
 
-            instanceFile.putUserData(IN_PROGRESS_KEY, Boolean.TRUE);
-            try {
-              doValidation(instanceFile, schemaFile, eh);
-            } finally {
-              instanceFile.putUserData(IN_PROGRESS_KEY, null);
-            }
+        instanceFile.putUserData(IN_PROGRESS_KEY, Boolean.TRUE);
+        try {
+          doValidation(instanceFile, schemaFile, eh);
+        } finally {
+          instanceFile.putUserData(IN_PROGRESS_KEY, null);
+        }
 
-            SwingUtilities.invokeLater(
-              new Runnable() {
-                  @Override
-                  public void run() {
-                    if (!eh.hadErrorOrWarning()) {
-                      SwingUtilities.invokeLater(
-                          new Runnable() {
-                            @Override
-                            public void run() {
-                              helper.close();
-                              WindowManager.getInstance().getStatusBar(project).setInfo("No errors detected");
-                            }
-                          }
-                      );
-                    }
-                  }
+        SwingUtilities.invokeLater(
+          () -> {
+            if (!eh.hadErrorOrWarning()) {
+              SwingUtilities.invokeLater(
+                () -> {
+                  helper.close();
+                  WindowManager.getInstance().getStatusBar(project).setInfo("No errors detected");
                 }
-            );
+              );
+            }
           }
-        });
-      }
-    });
+        );
+      }));
 
     helper.setProcessController(new NewErrorTreeViewPanel.ProcessController() {
       @Override
@@ -195,14 +178,14 @@ public class ValidateAction extends AnAction {
     RngProperty.CHECK_ID_IDREF.add(properties);
 
     try {
-      final String schemaPath = RngParser.reallyFixIDEAUrl(schemaFile.getUrl());
+      final String schemaPath = VfsUtilCore.fixIDEAUrl(schemaFile.getUrl());
       try {
         final ValidationDriver driver = new ValidationDriver(properties.toPropertyMap(), sr);
         final InputSource in = ValidationDriver.uriOrFileInputSource(schemaPath);
         in.setEncoding(schemaFile.getCharset().name());
 
         if (driver.loadSchema(in)) {
-          final String path = RngParser.reallyFixIDEAUrl(instanceFile.getUrl());
+          final String path = VfsUtilCore.fixIDEAUrl(instanceFile.getUrl());
           try {
             driver.validate(ValidationDriver.uriOrFileInputSource(path));
           } catch (IOException e1) {

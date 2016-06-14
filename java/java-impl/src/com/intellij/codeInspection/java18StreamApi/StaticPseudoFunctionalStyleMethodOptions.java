@@ -22,6 +22,7 @@ import com.intellij.openapi.util.Condition;
 import com.intellij.ui.*;
 import com.intellij.ui.components.JBList;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.ui.EditableModel;
 import com.intellij.util.ui.UIUtil;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
@@ -62,12 +63,7 @@ public class StaticPseudoFunctionalStyleMethodOptions {
 
   @NotNull
   public Collection<PipelineElement> findElementsByMethodName(final @NotNull String methodName) {
-    return ContainerUtil.filter(myElements, new Condition<PipelineElement>() {
-      @Override
-      public boolean value(PipelineElement element) {
-        return methodName.equals(element.getMethodName());
-      }
-    });
+    return ContainerUtil.filter(myElements, element -> methodName.equals(element.getMethodName()));
   }
 
   public void readExternal(final @NotNull Element xmlElement) {
@@ -119,12 +115,10 @@ public class StaticPseudoFunctionalStyleMethodOptions {
   }
 
   public JComponent createPanel() {
-    final JBList list = new JBList();
-    list.setModel(new SettingsListModel());
-
+    final JBList list = new JBList(myElements);
     list.setCellRenderer(new ColoredListCellRenderer<PipelineElement>() {
       @Override
-      protected void customizeCellRenderer(JList list, PipelineElement element, int index, boolean selected, boolean hasFocus) {
+      protected void customizeCellRenderer(@NotNull JList list, PipelineElement element, int index, boolean selected, boolean hasFocus) {
         final String classFQName = element.getHandlerClass();
         final String[] split = classFQName.split("\\.");
         final int classShortNameIndex = classFQName.length() - split[split.length - 1].length();
@@ -152,26 +146,19 @@ public class StaticPseudoFunctionalStyleMethodOptions {
             return;
           }
           myElements.add(newElement);
-          UIUtil.invokeLaterIfNeeded(new Runnable() {
-            @Override
-            public void run() {
-              list.revalidate();
-              list.updateUI();
-            }
-          });
+          ((DefaultListModel)list.getModel()).addElement(newElement);
         }
       }
     }).setRemoveAction(new AnActionButtonRunnable() {
       @Override
       public void run(AnActionButton button) {
-        myElements.remove(list.getSelectedIndex());
-        UIUtil.invokeLaterIfNeeded(new Runnable() {
-          @Override
-          public void run() {
-            list.revalidate();
-            list.updateUI();
-          }
-        });
+        final int[] indices = list.getSelectedIndices();
+        final List<PipelineElement> toRemove = new ArrayList<PipelineElement>(indices.length);
+        for (int idx : indices) {
+          toRemove.add(myElements.get(idx));
+        }
+        myElements.removeAll(toRemove);
+        ListUtil.removeSelectedItems(list);
       }
     }).createPanel();
   }
@@ -221,28 +208,6 @@ public class StaticPseudoFunctionalStyleMethodOptions {
       result = 31 * result + myMethodName.hashCode();
       result = 31 * result + myTemplate.hashCode();
       return result;
-    }
-  }
-
-  private class SettingsListModel implements ListModel {
-    @Override
-    public int getSize() {
-      return myElements.size();
-    }
-
-    @Override
-    public PipelineElement getElementAt(int index) {
-      return myElements.get(index);
-    }
-
-    @Override
-    public void addListDataListener(ListDataListener l) {
-
-    }
-
-    @Override
-    public void removeListDataListener(ListDataListener l) {
-
     }
   }
 }

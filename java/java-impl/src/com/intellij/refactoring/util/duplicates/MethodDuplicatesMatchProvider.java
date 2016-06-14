@@ -47,8 +47,12 @@ class MethodDuplicatesMatchProvider implements MatchProvider {
   }
 
   @Override
-  public PsiElement processMatch(Match match) throws IncorrectOperationException {
+  public void prepareSignature(Match match) {
     MatchUtil.changeSignature(match, myMethod);
+  }
+
+  @Override
+  public PsiElement processMatch(Match match) throws IncorrectOperationException {
     final PsiClass containingClass = myMethod.getContainingClass();
     if (isEssentialStaticContextAbsent(match)) {
       PsiUtil.setModifierProperty(myMethod, PsiModifier.STATIC, true);
@@ -116,9 +120,10 @@ class MethodDuplicatesMatchProvider implements MatchProvider {
     if (PsiTreeUtil.isAncestor(containingClass, matchStart, false)) {
       return false;
     }
-    final PsiClass psiClass = PsiTreeUtil.getParentOfType(matchStart, PsiClass.class);
-    if (psiClass != null) {
+    PsiClass psiClass = PsiTreeUtil.getParentOfType(matchStart, PsiClass.class);
+    while (psiClass != null) {
       if (InheritanceUtil.isInheritorOrSelf(psiClass, containingClass, true)) return false;
+      psiClass = PsiTreeUtil.getParentOfType(psiClass, PsiClass.class);
     }
     return true;
   }
@@ -139,7 +144,23 @@ class MethodDuplicatesMatchProvider implements MatchProvider {
       final PsiExpression instanceExpression = match.getInstanceExpression();
       if (instanceExpression != null) return false;
       if (isExternal(match)) return true;
-      if (PsiTreeUtil.isAncestor(myMethod.getContainingClass(), match.getMatchStart(), false) && RefactoringUtil.isInStaticContext(match.getMatchStart(), myMethod.getContainingClass())) return true;
+
+      final PsiElement matchStart = match.getMatchStart();
+      final PsiClass containingClass = myMethod.getContainingClass();
+
+      if (PsiTreeUtil.isAncestor(containingClass, matchStart, false)) {
+        if (RefactoringUtil.isInStaticContext(matchStart, containingClass)) return true;
+      }
+      else {
+        PsiClass psiClass = PsiTreeUtil.getParentOfType(matchStart, PsiClass.class);
+        while (psiClass != null) {
+          if (InheritanceUtil.isInheritorOrSelf(psiClass, containingClass, true)) {
+            if (RefactoringUtil.isInStaticContext(matchStart, psiClass)) return true;
+            break;
+          }
+          psiClass = PsiTreeUtil.getParentOfType(psiClass, PsiClass.class);
+        }
+      }
     }
     return false;
   }

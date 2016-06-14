@@ -43,6 +43,34 @@ public class GradleResourceFilteringTest extends GradleCompilingTestCase {
       "  filter(HeadFilter, lines:3, skip:2)\n" +
       "}"
     );
+    assertModules("project", "project_main", "project_test");
+    compileModules("project_main");
+
+    assertCopied("build/resources/main/dir/file.txt", "3 another text\n" +
+                                                      "4\n" +
+                                                      "5 another text \n");
+  }
+
+  @Test
+  public void testHeadFilter_MergedProject() throws Exception {
+    createProjectSubFile(
+      "src/main/resources/dir/file.txt", "1 Header\n" +
+                                         "2\n" +
+                                         "3 another text\n" +
+                                         "4\n" +
+                                         "5 another text \n" +
+                                         "6 another text @token@ another text\n" +
+                                         "7\n" +
+                                         "8 Footer");
+    importProjectUsingSingeModulePerGradleProject(
+      "apply plugin: 'java'\n" +
+      "\n" +
+      "import org.apache.tools.ant.filters.*\n" +
+      "processResources {\n" +
+      "  filter(HeadFilter, lines:3, skip:2)\n" +
+      "}"
+    );
+
     assertModules("project");
     compileModules("project");
 
@@ -63,6 +91,38 @@ public class GradleResourceFilteringTest extends GradleCompilingTestCase {
                                          "7\n" +
                                          "8 Footer");
     importProject(
+      "apply plugin: 'java'\n" +
+      "\n" +
+      "import org.apache.tools.ant.filters.*\n" +
+      "processResources {\n" +
+      "  filter(ReplaceTokens, tokens:[token1:'<11111>', token2:'<2222>'], beginToken: '#', endToken: '#')\n" +
+      "}"
+    );
+    assertModules("project", "project_main", "project_test");
+    compileModules("project_main");
+
+    assertCopied("build/resources/main/dir/file.txt", "1 Header\n" +
+                                                      "2\n" +
+                                                      "3 <11111>another text\n" +
+                                                      "4\n" +
+                                                      "5 another text \n" +
+                                                      "6 another text <2222> another text\n" +
+                                                      "7\n" +
+                                                      "8 Footer");
+  }
+
+  @Test
+  public void testReplaceTokensFilter_MergedProject() throws Exception {
+    createProjectSubFile(
+      "src/main/resources/dir/file.txt", "1 Header\n" +
+                                         "2\n" +
+                                         "3 #token1#another text\n" +
+                                         "4\n" +
+                                         "5 another text \n" +
+                                         "6 another text #token2# another text\n" +
+                                         "7\n" +
+                                         "8 Footer");
+    importProjectUsingSingeModulePerGradleProject(
       "apply plugin: 'java'\n" +
       "\n" +
       "import org.apache.tools.ant.filters.*\n" +
@@ -94,10 +154,65 @@ public class GradleResourceFilteringTest extends GradleCompilingTestCase {
       "  rename 'file.txt', 'file001.txt'\n" +
       "}"
     );
+    assertModules("project", "project_main", "project_test");
+    compileModules("project_main");
+
+    assertCopied("build/resources/main/dir/file001.txt");
+  }
+
+  @Test
+  public void testRenameFilter_MergedProject() throws Exception {
+    createProjectSubFile("src/main/resources/dir/file.txt");
+    importProjectUsingSingeModulePerGradleProject(
+      "apply plugin: 'java'\n" +
+      "\n" +
+      "import org.apache.tools.ant.filters.*\n" +
+      "processResources {\n" +
+      "  rename 'file.txt', 'file001.txt'\n" +
+      "}"
+    );
     assertModules("project");
     compileModules("project");
 
     assertCopied("build/resources/main/dir/file001.txt");
+  }
+
+  @Test
+  public void testExpandPropertiesFilter() throws Exception {
+    createProjectSubFile(
+      "src/main/resources/dir/file.txt", "some text ${myProp} another text");
+    importProject(
+      "apply plugin: 'java'\n" +
+      "\n" +
+      "import org.apache.tools.ant.filters.*\n" +
+      "ant.project.setProperty('myProp', 'myPropValue')\n" +
+      "processResources {\n" +
+      "  filter (ExpandProperties, project: ant.project)\n" +
+      "}"
+    );
+    assertModules("project", "project_main", "project_test");
+    compileModules("project_main");
+
+    assertCopied("build/resources/main/dir/file.txt", "some text myPropValue another text");
+  }
+
+  @Test
+  public void testExpandPropertiesFilter_MergedProject() throws Exception {
+    createProjectSubFile(
+      "src/main/resources/dir/file.txt", "some text ${myProp} another text");
+    importProjectUsingSingeModulePerGradleProject(
+      "apply plugin: 'java'\n" +
+      "\n" +
+      "import org.apache.tools.ant.filters.*\n" +
+      "ant.project.setProperty('myProp', 'myPropValue')\n" +
+      "processResources {\n" +
+      "  filter (ExpandProperties, project: ant.project)\n" +
+      "}"
+    );
+    assertModules("project");
+    compileModules("project");
+
+    assertCopied("build/resources/main/dir/file.txt", "some text myPropValue another text");
   }
 
   @Test
@@ -112,6 +227,36 @@ public class GradleResourceFilteringTest extends GradleCompilingTestCase {
                                          "7\n" +
                                          "8 Footer");
     importProject(
+      "apply plugin: 'java'\n" +
+      "\n" +
+      "import org.apache.tools.ant.filters.*\n" +
+      "processResources {\n" +
+      "  filter(HeadFilter, lines:4, skip:2)\n" +
+      "  filter(ReplaceTokens, tokens:[token1:'<11111>', token2:'<2222>'])\n" +
+      "  rename 'file.txt', 'file001.txt'\n" +
+      "}"
+    );
+    assertModules("project", "project_main", "project_test");
+    compileModules("project_main");
+
+    assertCopied("build/resources/main/dir/file001.txt", "3 another text<11111>\n" +
+                                                         "4\n" +
+                                                         "5 another text \n" +
+                                                         "6 another text <2222> another text");
+  }
+
+  @Test
+  public void testFiltersChain_MergedProject() throws Exception {
+    createProjectSubFile(
+      "src/main/resources/dir/file.txt", "1 Header\n" +
+                                         "2\n" +
+                                         "3 another text@token1@\n" +
+                                         "4\n" +
+                                         "5 another text \n" +
+                                         "6 another text @token2@ another text\n" +
+                                         "7\n" +
+                                         "8 Footer");
+    importProjectUsingSingeModulePerGradleProject(
       "apply plugin: 'java'\n" +
       "\n" +
       "import org.apache.tools.ant.filters.*\n" +

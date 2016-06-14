@@ -67,14 +67,14 @@ import javax.swing.plaf.BorderUIResource;
 import javax.swing.text.html.HTMLDocument;
 import javax.swing.text.html.HTMLEditorKit;
 import javax.swing.text.html.HTMLFrameHyperlinkEvent;
+import javax.swing.text.html.StyleSheet;
 import java.awt.*;
 import java.awt.event.MouseEvent;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.URL;
-import java.util.HashSet;
+import java.util.*;
 import java.util.List;
-import java.util.Set;
 
 import static com.intellij.openapi.util.text.StringUtil.isEmptyOrSpaces;
 
@@ -123,13 +123,26 @@ public abstract class PluginManagerMain implements Disposable {
     myUISettings = uiSettings;
   }
 
-  public static boolean isJetBrainsPlugin(@NotNull IdeaPluginDescriptor plugin) {
-    return JETBRAINS_VENDOR.equals(plugin.getVendor());
+  public static boolean isDevelopedByJetBrains(@NotNull IdeaPluginDescriptor plugin) {
+    return isDevelopedByJetBrains(plugin.getVendor());
+  }
+
+  public static boolean isDevelopedByJetBrains(@Nullable String vendorString) {
+    if (vendorString == null) return false;
+    for (String vendor : StringUtil.split(vendorString, ",")) {
+      if (vendor.trim().equals(JETBRAINS_VENDOR)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   protected void init() {
     GuiUtils.replaceJSplitPaneWithIDEASplitter(main);
-    myDescriptionTextArea.setEditorKit(new HTMLEditorKit());
+    HTMLEditorKit kit = new HTMLEditorKit();
+    StyleSheet sheet = kit.getStyleSheet();
+    sheet.addRule("ul {margin-left: 16px}"); // list-style-type: none;
+    myDescriptionTextArea.setEditorKit(kit);
     myDescriptionTextArea.setEditable(false);
     myDescriptionTextArea.addHyperlinkListener(new MyHyperlinkListener());
 
@@ -220,12 +233,9 @@ public abstract class PluginManagerMain implements Disposable {
   }
 
   public void reset() {
-    UiNotifyConnector.doWhenFirstShown(getPluginTable(), new Runnable() {
-      @Override
-      public void run() {
-        requireShutdown = false;
-        TableUtil.ensureSelectionExists(getPluginTable());
-      }
+    UiNotifyConnector.doWhenFirstShown(getPluginTable(), () -> {
+      requireShutdown = false;
+      TableUtil.ensureSelectionExists(getPluginTable());
     });
   }
 
@@ -235,12 +245,7 @@ public abstract class PluginManagerMain implements Disposable {
 
   @NotNull
   public static List<PluginId> mapToPluginIds(List<IdeaPluginDescriptor> plugins) {
-    return ContainerUtil.map(plugins, new Function<IdeaPluginDescriptor, PluginId>() {
-      @Override
-      public PluginId fun(IdeaPluginDescriptor descriptor) {
-        return descriptor.getPluginId();
-      }
-    });
+    return ContainerUtil.map(plugins, descriptor -> descriptor.getPluginId());
   }
 
   private static String getTextPrefix() {
@@ -322,63 +327,59 @@ public abstract class PluginManagerMain implements Disposable {
   protected void loadPluginsFromHostInBackground() {
     setDownloadStatus(true);
 
-    ApplicationManager.getApplication().executeOnPooledThread(new Runnable() {
-      @Override
-      public void run() {
-        final List<IdeaPluginDescriptor> list = ContainerUtil.newArrayList();
-        final List<String> errors = ContainerUtil.newSmartList();
-        ProgressIndicator indicator = new EmptyProgressIndicator();
+    ApplicationManager.getApplication().executeOnPooledThread(() -> {
+      final List<IdeaPluginDescriptor> list = ContainerUtil.newArrayList();
+      final Map<String, String> errors = ContainerUtil.newLinkedHashMap();
+      ProgressIndicator indicator = new EmptyProgressIndicator();
 
-        List<String> hosts = RepositoryHelper.getPluginHosts();
-        Set<PluginId> unique = ContainerUtil.newHashSet();
-        for (String host : hosts) {
-          try {
-            if (host == null || acceptHost(host)) {
-              List<IdeaPluginDescriptor> plugins = RepositoryHelper.loadPlugins(host, null, indicator);
-              for (IdeaPluginDescriptor plugin : plugins) {
-                if (unique.add(plugin.getPluginId())) {
-                  list.add(plugin);
-                }
+      List<String> hosts = RepositoryHelper.getPluginHosts();
+      Set<PluginId> unique = ContainerUtil.newHashSet();
+      for (String host : hosts) {
+        try {
+          if (host == null || acceptHost(host)) {
+            List<IdeaPluginDescriptor> plugins = RepositoryHelper.loadPlugins(host, indicator);
+            for (IdeaPluginDescriptor plugin : plugins) {
+              if (unique.add(plugin.getPluginId())) {
+                list.add(plugin);
               }
-            }
-          }
-          catch (FileNotFoundException e) {
-            LOG.info(host, e);
-          }
-          catch (IOException e) {
-            LOG.info(host, e);
-            if (host != ApplicationInfoEx.getInstanceEx().getBuiltinPluginsUrl()) {
-              errors.add(String.format("'%s' for '%s'", e.getMessage(), host));
             }
           }
         }
-
-        UIUtil.invokeLaterIfNeeded(new Runnable() {
-          @Override
-          public void run() {
-            setDownloadStatus(false);
-
-            if (!list.isEmpty()) {
-              InstalledPluginsState state = InstalledPluginsState.getInstance();
-              for (IdeaPluginDescriptor descriptor : list) {
-                state.onDescriptorDownload(descriptor);
-              }
-
-              modifyPluginsList(list);
-              propagateUpdates(list);
-            }
-
-            if (!errors.isEmpty()) {
-              String message = IdeBundle.message("error.list.of.plugins.was.not.loaded", StringUtil.join(errors, ", "));
-              String title = IdeBundle.message("title.plugins");
-              String ok = CommonBundle.message("button.retry"), cancel = CommonBundle.getCancelButtonText();
-              if (Messages.showOkCancelDialog(message, title, ok, cancel, Messages.getErrorIcon()) == Messages.OK) {
-                loadPluginsFromHostInBackground();
-              }
-            }
+        catch (FileNotFoundException e) {
+          LOG.info(host, e);
+        }
+        catch (IOException e) {
+          LOG.info(host, e);
+          if (host != ApplicationInfoEx.getInstanceEx().getBuiltinPluginsUrl()) {
+            errors.put(host, String.format("'%s' for '%s'", e.getMessage(), host));
           }
-        });
+        }
       }
+
+      UIUtil.invokeLaterIfNeeded(() -> {
+        setDownloadStatus(false);
+
+        if (!list.isEmpty()) {
+          InstalledPluginsState state = InstalledPluginsState.getInstance();
+          for (IdeaPluginDescriptor descriptor : list) {
+            state.onDescriptorDownload(descriptor);
+          }
+
+          modifyPluginsList(list);
+          propagateUpdates(list);
+        }
+
+        if (!errors.isEmpty()) {
+          String message = IdeBundle.message("error.list.of.plugins.was.not.loaded",
+                                             StringUtil.join(errors.keySet(), ", "),
+                                             StringUtil.join(errors.values(), ",\n"));
+          String title = IdeBundle.message("title.plugins");
+          String ok = CommonBundle.message("button.retry"), cancel = CommonBundle.getCancelButtonText();
+          if (Messages.showOkCancelDialog(message, title, ok, cancel, Messages.getErrorIcon()) == Messages.OK) {
+            loadPluginsFromHostInBackground();
+          }
+        }
+      });
     });
   }
 
@@ -423,7 +424,9 @@ public abstract class PluginManagerMain implements Disposable {
             }
           }
           finally {
-            if (cleanup != null) cleanup.run();
+            if (cleanup != null) {
+              ApplicationManager.getApplication().invokeLater(cleanup);
+            }
           }
         }
       });
@@ -624,6 +627,126 @@ public abstract class PluginManagerMain implements Disposable {
     Set<String> descriptionSet = new HashSet<String>(search);
     descriptionSet.removeAll(words);
     return descriptionSet.isEmpty();
+  }
+
+  public static boolean suggestToEnableInstalledDependantPlugins(PluginEnabler pluginEnabler,
+                                                                 List<PluginNode> list) {
+    final Set<IdeaPluginDescriptor> disabled = new HashSet<IdeaPluginDescriptor>();
+    final Set<IdeaPluginDescriptor> disabledDependants = new HashSet<IdeaPluginDescriptor>();
+    for (PluginNode node : list) {
+      final PluginId pluginId = node.getPluginId();
+      if (pluginEnabler.isDisabled(pluginId)) {
+        disabled.add(node);
+      }
+      final List<PluginId> depends = node.getDepends();
+      if (depends != null) {
+        final Set<PluginId> optionalDeps = new HashSet<PluginId>(Arrays.asList(node.getOptionalDependentPluginIds()));
+        for (PluginId dependantId : depends) {
+          if (optionalDeps.contains(dependantId)) continue;
+          final IdeaPluginDescriptor pluginDescriptor = PluginManager.getPlugin(dependantId);
+          if (pluginDescriptor != null && pluginEnabler.isDisabled(dependantId)) {
+            disabledDependants.add(pluginDescriptor);
+          }
+        }
+      }
+    }
+
+    if (!disabled.isEmpty() || !disabledDependants.isEmpty()) {
+      String message = "";
+      if (disabled.size() == 1) {
+        message += "Updated plugin '" + disabled.iterator().next().getName() + "' is disabled.";
+      }
+      else if (!disabled.isEmpty()) {
+        message += "Updated plugins " + StringUtil.join(disabled, pluginDescriptor -> pluginDescriptor.getName(), ", ") + " are disabled.";
+      }
+
+      if (!disabledDependants.isEmpty()) {
+        message += "<br>";
+        message += "Updated plugin" + (list.size() > 1 ? "s depend " : " depends ") + "on disabled";
+        if (disabledDependants.size() == 1) {
+          message += " plugin '" + disabledDependants.iterator().next().getName() + "'.";
+        }
+        else {
+          message += " plugins " + StringUtil.join(disabledDependants, pluginDescriptor -> pluginDescriptor.getName(), ", ") + ".";
+        }
+      }
+      message += " Disabled plugins " + (disabled.isEmpty() ? "and plugins which depend on disabled " :"") + "won't be activated after restart.";
+
+      int result;
+      if (!disabled.isEmpty() && !disabledDependants.isEmpty()) {
+        result =
+          Messages.showYesNoCancelDialog(XmlStringUtil.wrapInHtml(message), CommonBundle.getWarningTitle(), "Enable all",
+                                         "Enable updated plugin" + (disabled.size() > 1 ? "s" : ""), CommonBundle.getCancelButtonText(),
+                                         Messages.getQuestionIcon());
+        if (result == Messages.CANCEL) return false;
+      }
+      else {
+        message += "<br>Would you like to enable ";
+        if (!disabled.isEmpty()) {
+          message += "updated plugin" + (disabled.size() > 1 ? "s" : "");
+        }
+        else {
+          //noinspection SpellCheckingInspection
+          message += "plugin dependenc" + (disabledDependants.size() > 1 ? "ies" : "y");
+        }
+        message += "?";
+        result = Messages.showYesNoDialog(XmlStringUtil.wrapInHtml(message), CommonBundle.getWarningTitle(), Messages.getQuestionIcon());
+        if (result == Messages.NO) return false;
+      }
+
+      if (result == Messages.YES) {
+        disabled.addAll(disabledDependants);
+        pluginEnabler.enablePlugins(disabled);
+      }
+      else if (result == Messages.NO && !disabled.isEmpty()) {
+        pluginEnabler.enablePlugins(disabled);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  public interface PluginEnabler {
+    void enablePlugins(Set<IdeaPluginDescriptor> disabled);
+
+    boolean isDisabled(PluginId pluginId);
+
+    class HEADLESS implements PluginEnabler {
+      @Override
+      public void enablePlugins(Set<IdeaPluginDescriptor> disabled) {
+        for (IdeaPluginDescriptor descriptor : disabled) {
+          PluginManagerCore.enablePlugin(descriptor.getPluginId().getIdString());
+        }
+      }
+
+      @Override
+      public boolean isDisabled(PluginId pluginId) {
+        return isDisabled(pluginId.getIdString());
+      }
+
+      public boolean isDisabled(String pluginId) {
+        return PluginManagerCore.getDisabledPlugins().contains(pluginId);
+      }
+    }
+
+    class UI implements PluginEnabler {
+      @NotNull
+      private final InstalledPluginsTableModel pluginsModel;
+
+      public UI(@NotNull InstalledPluginsTableModel model) {
+        pluginsModel = model;
+      }
+
+      @Override
+      public void enablePlugins(Set<IdeaPluginDescriptor> disabled) {
+        pluginsModel.enableRows(disabled.toArray(new IdeaPluginDescriptor[disabled.size()]), true);
+      }
+
+      @Override
+      public boolean isDisabled(PluginId pluginId) {
+        return pluginsModel.isDisabled(pluginId);
+      }
+    }
   }
 
   public static void notifyPluginsUpdated(@Nullable Project project) {

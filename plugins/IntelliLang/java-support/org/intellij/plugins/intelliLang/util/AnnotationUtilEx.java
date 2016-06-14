@@ -120,7 +120,7 @@ public class AnnotationUtilEx {
 
   public interface AnnotatedElementVisitor {
     boolean visitMethodParameter(PsiExpression expression, PsiCallExpression psiCallExpression);
-    boolean visitMethodReturnStatement(PsiReturnStatement parent, PsiMethod method);
+    boolean visitMethodReturnStatement(PsiElement source, PsiMethod method);
     boolean visitVariable(PsiVariable variable);
     boolean visitAnnotationParameter(PsiNameValuePair nameValuePair, PsiAnnotation psiAnnotation);
     boolean visitReference(PsiReferenceExpression expression);
@@ -137,6 +137,7 @@ public class AnnotationUtilEx {
     final PsiElement parent = element.getParent();
 
     if (element instanceof PsiReferenceExpression) {
+      if (parent instanceof PsiReferenceExpression) return false; // skip qualified references
       if (!visitor.visitReference((PsiReferenceExpression)element)) return false;
     }
     else if (element instanceof PsiNameValuePair && parent != null && parent.getParent() instanceof PsiAnnotation) {
@@ -155,10 +156,17 @@ public class AnnotationUtilEx {
     else if (parent instanceof PsiConditionalExpression && ((PsiConditionalExpression)parent).getCondition() == element) {
       return false;
     }
-    else if (parent instanceof PsiReturnStatement) {
-      final PsiMethod m = PsiTreeUtil.getParentOfType(parent, PsiMethod.class);
+    else if (parent instanceof PsiFunctionalExpression) {
+      PsiMethod m = LambdaUtil.getFunctionalInterfaceMethod(parent);
       if (m != null) {
-        if (!visitor.visitMethodReturnStatement((PsiReturnStatement)parent, m)) return false;
+        if (!visitor.visitMethodReturnStatement(element, m)) return false;
+      }
+    }
+    else if (parent instanceof PsiReturnStatement) {
+      PsiElement e = PsiTreeUtil.getParentOfType(parent, PsiMethod.class, PsiFunctionalExpression.class);
+      PsiMethod m = e == null ? null : e instanceof PsiMethod ? (PsiMethod)e : LambdaUtil.getFunctionalInterfaceMethod(e);
+      if (m != null) {
+        if (!visitor.visitMethodReturnStatement(parent, m)) return false;
       }
     }
     else if (parent instanceof PsiVariable) {
@@ -275,13 +283,8 @@ public class AnnotationUtilEx {
     if (!inHierarchy) {
       return modifierList == null ? PsiAnnotation.EMPTY_ARRAY : modifierList.getAnnotations();
     }
-    return CachedValuesManager.getCachedValue(listOwner, new CachedValueProvider<PsiAnnotation[]>() {
-      @Nullable
-      @Override
-      public Result<PsiAnnotation[]> compute() {
-        return Result.create(getHierarchyAnnotations(listOwner), PsiModificationTracker.MODIFICATION_COUNT);
-      }
-    });
+    return CachedValuesManager.getCachedValue(listOwner, () -> CachedValueProvider.Result
+      .create(getHierarchyAnnotations(listOwner), PsiModificationTracker.MODIFICATION_COUNT));
   }
 
   private static PsiAnnotation[] getHierarchyAnnotations(PsiModifierListOwner listOwner) {

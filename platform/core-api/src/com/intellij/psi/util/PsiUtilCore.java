@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -59,7 +59,7 @@ import java.util.List;
 public class PsiUtilCore {
   private static final Logger LOG = Logger.getInstance("#com.intellij.psi.util.PsiUtilCore");
   public static final PsiElement NULL_PSI_ELEMENT = new NullPsiElement();
-  private static class NullPsiElement implements PsiElement {
+  protected static class NullPsiElement implements PsiElement {
     @Override
     @NotNull
     public Project getProject() {
@@ -518,8 +518,10 @@ public class PsiUtilCore {
       append(" open=").append(project.isOpen());;
     sb.append("\nfileType=").append(fileType.getName()).append("/").append(fileType.getClass().getName());
     sb.append("\nisIgnored=").append(ignored);
+    sb.append(" underIgnored=").append(indexFacade.isUnderIgnored(file));
     sb.append(" inLibrary=").append(indexFacade.isInLibrarySource(file) || indexFacade.isInLibraryClasses(file));
-    sb.append(" parentDir=").append(vDir != null ? "has-vfs" : "no-vfs").append("/").append(psiDir != null ? "has-psi" : "no-psi");
+    sb.append(" parentDir=").append(vDir == null ? "no-vfs" : vDir.isDirectory() ? "has-vfs-dir" : "has-vfs-file").
+      append("/").append(psiDir == null ? "no-psi" : "has-psi");
     sb.append("\nviewProvider=").append(viewProvider == null ? "null" : viewProvider.getClass().getName());
     if (viewProvider != null) {
       List<PsiFile> files = viewProvider.getAllFiles();
@@ -598,9 +600,11 @@ public class PsiUtilCore {
     return node == null ? null : node.getElementType();
   }
 
-  @Contract("null -> null;!null -> !null")
+  @Contract("null -> null")
   public static IElementType getElementType(@Nullable PsiElement element) {
-    return element == null ? null : getElementType(element.getNode());
+    return element == null ? null :
+           element instanceof StubBasedPsiElement ? ((StubBasedPsiElement)element).getElementType() :
+           getElementType(element.getNode());
   }
 
   public static final PsiFile NULL_PSI_FILE = new NullPsiFile();

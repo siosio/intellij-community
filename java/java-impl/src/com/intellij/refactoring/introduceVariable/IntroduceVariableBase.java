@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,7 +36,10 @@ import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.Computable;
+import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.Pass;
+import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.WindowManager;
@@ -155,10 +158,14 @@ public abstract class IntroduceVariableBase extends IntroduceHandlerBase {
   }
   
   public static boolean selectLineAtCaret(int offset, PsiElement[] statementsInRange) {
-    return !PsiUtil.isStatement(statementsInRange[0]) ||
-            statementsInRange[0].getTextRange().getStartOffset() > offset ||
-            statementsInRange[0].getTextRange().getEndOffset() < offset ||
-            isPreferStatements();
+    TextRange range = statementsInRange[0].getTextRange();
+    if (statementsInRange[0] instanceof PsiExpressionStatement) {
+      range = ((PsiExpressionStatement)statementsInRange[0]).getExpression().getTextRange();
+    }
+
+    return range.getStartOffset() > offset ||
+           range.getEndOffset() <= offset ||
+           isPreferStatements();
   }
 
   public static int preferredSelection(PsiElement[] statementsInRange, List<PsiExpression> expressions) {
@@ -180,7 +187,7 @@ public abstract class IntroduceVariableBase extends IntroduceHandlerBase {
   }
 
   public static boolean isPreferStatements() {
-    return Boolean.valueOf(PropertiesComponent.getInstance().getOrInit(PREFER_STATEMENTS_OPTION, "false")).booleanValue() || Registry.is(PREFER_STATEMENTS_OPTION, false);
+    return Boolean.valueOf(PropertiesComponent.getInstance().getBoolean(PREFER_STATEMENTS_OPTION)) || Registry.is(PREFER_STATEMENTS_OPTION, false);
   }
 
   public static List<PsiExpression> collectExpressions(final PsiFile file,
@@ -233,7 +240,7 @@ public abstract class IntroduceVariableBase extends IntroduceHandlerBase {
     PsiExpression expression = PsiTreeUtil.getParentOfType(elementAtCaret, PsiExpression.class);
     while (expression != null) {
       if (!expressions.contains(expression) && !(expression instanceof PsiParenthesizedExpression) && !(expression instanceof PsiSuperExpression) &&
-          (acceptVoid || expression.getType() != PsiType.VOID)) {
+          (acceptVoid || !PsiType.VOID.equals(expression.getType()))) {
         if (expression instanceof PsiMethodReferenceExpression) {
           expressions.add(expression);
         }
@@ -299,7 +306,11 @@ public abstract class IntroduceVariableBase extends IntroduceHandlerBase {
     final InjectedLanguageManager injectedLanguageManager = InjectedLanguageManager.getInstance(project);
     PsiElement elementAtStart = file.findElementAt(startOffset);
     if (elementAtStart == null || elementAtStart instanceof PsiWhiteSpace || elementAtStart instanceof PsiComment) {
-      elementAtStart = PsiTreeUtil.skipSiblingsForward(elementAtStart, PsiWhiteSpace.class, PsiComment.class);
+      final PsiElement element = PsiTreeUtil.skipSiblingsForward(elementAtStart, PsiWhiteSpace.class, PsiComment.class);
+      if (element != null) {
+        startOffset = element.getTextOffset();
+        elementAtStart = file.findElementAt(startOffset);
+      }
       if (elementAtStart == null) {
         if (injectedLanguageManager.isInjectedFragment(file)) {
           return getSelectionFromInjectedHost(project, file, injectedLanguageManager, startOffset, endOffset);
@@ -320,6 +331,11 @@ public abstract class IntroduceVariableBase extends IntroduceHandlerBase {
 
     PsiElement elementAt = PsiTreeUtil.findCommonParent(elementAtStart, elementAtEnd);
     final PsiExpression containingExpression = PsiTreeUtil.getParentOfType(elementAt, PsiExpression.class, false);
+
+    if (containingExpression != null && containingExpression == elementAtEnd && startOffset == containingExpression.getTextOffset()) {
+      return containingExpression;
+    }
+    
     if (containingExpression == null || containingExpression instanceof PsiLambdaExpression) {
       if (injectedLanguageManager.isInjectedFragment(file)) {
         return getSelectionFromInjectedHost(project, file, injectedLanguageManager, startOffset, endOffset);
@@ -581,7 +597,7 @@ public abstract class IntroduceVariableBase extends IntroduceHandlerBase {
 
     final PsiElement tempContainer = anchorStatement.getParent();
 
-    if (!(tempContainer instanceof PsiCodeBlock) && !RefactoringUtil.isLoopOrIf(tempContainer) && (tempContainer.getParent() instanceof PsiLambdaExpression)) {
+    if (!(tempContainer instanceof PsiCodeBlock) && !RefactoringUtil.isLoopOrIf(tempContainer) && !(tempContainer instanceof PsiLambdaExpression) && (tempContainer.getParent() instanceof PsiLambdaExpression)) {
       String message = RefactoringBundle.message("refactoring.is.not.supported.in.the.current.context", REFACTORING_NAME);
       showErrorMessage(project, editor, message);
       return false;
@@ -684,41 +700,39 @@ public abstract class IntroduceVariableBase extends IntroduceHandlerBase {
 
         CommandProcessor.getInstance().executeCommand(
           project,
-          new Runnable() {
-            public void run() {
-              final Editor topLevelEditor ;
-              if (!InjectedLanguageManager.getInstance(project).isInjectedFragment(anchorStatement.getContainingFile())) {
-                topLevelEditor = InjectedLanguageUtil.getTopLevelEditor(editor);
-              } else {
-                topLevelEditor = editor;
+          () -> {
+            final Editor topLevelEditor ;
+            if (!InjectedLanguageManager.getInstance(project).isInjectedFragment(anchorStatement.getContainingFile())) {
+              topLevelEditor = InjectedLanguageUtil.getTopLevelEditor(editor);
+            } else {
+              topLevelEditor = editor;
+            }
+
+            PsiVariable variable = null;
+            try {
+              final IntroduceVariableSettings settings =
+                getSettings(project, topLevelEditor, expr, occurrences, typeSelectorManager, inFinalContext, hasWriteAccess, validator, anchorStatement, choice);
+              if (!settings.isOK()) {
+                wasSucceed[0] = false;
+                return;
               }
 
-              PsiVariable variable = null;
-              try {
-                final IntroduceVariableSettings settings =
-                  getSettings(project, topLevelEditor, expr, occurrences, typeSelectorManager, inFinalContext, hasWriteAccess, validator, anchorStatement, choice);
-                if (!settings.isOK()) {
-                  wasSucceed[0] = false;
-                  return;
-                }
+              final RefactoringEventData beforeData = new RefactoringEventData();
+              beforeData.addElement(expr);
+              project.getMessageBus()
+                .syncPublisher(RefactoringEventListener.REFACTORING_EVENT_TOPIC).refactoringStarted(REFACTORING_ID, beforeData);
 
-                final RefactoringEventData beforeData = new RefactoringEventData();
-                beforeData.addElement(expr);
-                project.getMessageBus()
-                  .syncPublisher(RefactoringEventListener.REFACTORING_EVENT_TOPIC).refactoringStarted(REFACTORING_ID, beforeData);
+              final PsiElement chosenAnchor =
+                chooseAnchor(settings.isReplaceAllOccurrences(), hasWriteAccess, nonWrite, anchorStatementIfAll, anchorStatement);
 
-                final PsiElement chosenAnchor =
-                  chooseAnchor(settings.isReplaceAllOccurrences(), hasWriteAccess, nonWrite, anchorStatementIfAll, anchorStatement);
-
-                variable = ApplicationManager.getApplication().runWriteAction(
-                  introduce(project, expr, topLevelEditor, chosenAnchor, occurrences, settings));
-              }
-              finally {
-                final RefactoringEventData afterData = new RefactoringEventData();
-                afterData.addElement(variable);
-                project.getMessageBus()
-                  .syncPublisher(RefactoringEventListener.REFACTORING_EVENT_TOPIC).refactoringDone(REFACTORING_ID, afterData);
-              }
+              variable = ApplicationManager.getApplication().runWriteAction(
+                introduce(project, expr, topLevelEditor, chosenAnchor, occurrences, settings));
+            }
+            finally {
+              final RefactoringEventData afterData = new RefactoringEventData();
+              afterData.addElement(variable);
+              project.getMessageBus()
+                .syncPublisher(RefactoringEventListener.REFACTORING_EVENT_TOPIC).refactoringDone(REFACTORING_ID, afterData);
             }
           }, REFACTORING_NAME, null);
       }
@@ -813,7 +827,8 @@ public abstract class IntroduceVariableBase extends IntroduceHandlerBase {
                                                   final IntroduceVariableSettings settings) {
     final PsiElement container = anchorStatement.getParent();
     PsiElement child = anchorStatement;
-    if (!RefactoringUtil.isLoopOrIf(container)) {
+    final boolean isInsideLoop = RefactoringUtil.isLoopOrIf(container);
+    if (!isInsideLoop) {
       child = locateAnchor(child);
       if (isFinalVariableOnLHS(expr)) {
         child = child.getNextSibling();
@@ -823,10 +838,10 @@ public abstract class IntroduceVariableBase extends IntroduceHandlerBase {
 
     boolean tempDeleteSelf = false;
     final boolean replaceSelf = settings.isReplaceLValues() || !RefactoringUtil.isAssignmentLHS(expr);
-    if (!RefactoringUtil.isLoopOrIf(container)) {
-      if (expr.getParent() instanceof PsiExpressionStatement && anchor.equals(anchorStatement)) {
-        PsiStatement statement = (PsiStatement) expr.getParent();
-        PsiElement parent = statement.getParent();
+    final PsiElement exprParent = expr.getParent();
+    if (!isInsideLoop) {
+      if (exprParent instanceof PsiExpressionStatement && anchor.equals(anchorStatement)) {
+        PsiElement parent = exprParent.getParent();
         if (parent instanceof PsiCodeBlock ||
             //fabrique
             parent instanceof PsiCodeFragment) {
@@ -836,6 +851,8 @@ public abstract class IntroduceVariableBase extends IntroduceHandlerBase {
       tempDeleteSelf &= replaceSelf;
     }
     final boolean deleteSelf = tempDeleteSelf;
+    final boolean replaceLoop = isInsideLoop ? exprParent instanceof PsiExpressionStatement 
+                                             : container instanceof PsiLambdaExpression && exprParent == container;
 
 
     final int col = editor != null ? editor.getCaretModel().getLogicalPosition().column : 0;
@@ -854,29 +871,22 @@ public abstract class IntroduceVariableBase extends IntroduceHandlerBase {
       public PsiVariable compute() {
         try {
           PsiStatement statement = null;
-          final boolean isInsideLoop = RefactoringUtil.isLoopOrIf(container);
           if (!isInsideLoop && deleteSelf) {
-            statement = (PsiStatement) expr.getParent();
+            statement = (PsiStatement)exprParent;
           }
 
           final PsiExpression expr1 = fieldConflictsResolver.fixInitializer(expr);
           PsiExpression initializer = RefactoringUtil.unparenthesizeExpression(expr1);
           final SmartTypePointer selectedType = SmartTypePointerManager.getInstance(project).createSmartTypePointer(
             settings.getSelectedType());
-          if (expr1 instanceof PsiNewExpression) {
-            final PsiNewExpression newExpression = (PsiNewExpression)expr1;
-            if (newExpression.getArrayInitializer() != null) {
-              initializer = newExpression.getArrayInitializer();
-            }
-            initializer = replaceExplicitWithDiamondWhenApplicable(initializer, selectedType.getType());
-          }
+          initializer = simplifyVariableInitializer(initializer, selectedType.getType());
 
           PsiDeclarationStatement declaration = JavaPsiFacade.getInstance(project).getElementFactory()
             .createVariableDeclarationStatement(settings.getEnteredName(), selectedType.getType(), initializer, container);
           if (!isInsideLoop) {
             declaration = addDeclaration(declaration, initializer);
             LOG.assertTrue(expr1.isValid());
-            if (deleteSelf) { // never true
+            if (deleteSelf) {
               final PsiElement lastChild = statement.getLastChild();
               if (lastChild instanceof PsiComment) { // keep trailing comment
                 declaration.addBefore(lastChild, null);
@@ -922,7 +932,7 @@ public abstract class IntroduceVariableBase extends IntroduceHandlerBase {
             }
           }
 
-          declaration = (PsiDeclarationStatement) RefactoringUtil.putStatementInLoopBody(declaration, container, anchorStatement);
+          declaration = (PsiDeclarationStatement) RefactoringUtil.putStatementInLoopBody(declaration, container, anchorStatement, replaceSelf && replaceLoop);
           declaration = (PsiDeclarationStatement)JavaCodeStyleManager.getInstance(project).shortenClassReferences(declaration);
           PsiVariable var = (PsiVariable) declaration.getDeclaredElements()[0];
           PsiUtil.setModifierProperty(var, PsiModifier.FINAL, settings.isDeclareFinal());
@@ -973,20 +983,35 @@ public abstract class IntroduceVariableBase extends IntroduceHandlerBase {
     return false;
   }
 
-  public static PsiExpression replaceExplicitWithDiamondWhenApplicable(final PsiExpression initializer,
-                                                                       final PsiType expectedType) {
-    if (initializer instanceof PsiNewExpression) {
+  public static PsiExpression simplifyVariableInitializer(final PsiExpression initializer,
+                                                          final PsiType expectedType) {
+
+    if (initializer instanceof PsiTypeCastExpression) {
+      PsiExpression operand = ((PsiTypeCastExpression)initializer).getOperand();
+      if (operand != null) {
+        PsiType operandType = operand.getType();
+        if (operandType != null && TypeConversionUtil.isAssignable(expectedType, operandType)) {
+          return operand;
+        }
+      }
+    }
+    else if (initializer instanceof PsiNewExpression) {
       final PsiNewExpression newExpression = (PsiNewExpression)initializer;
-      final PsiExpression tryToDetectDiamondNewExpr = ((PsiVariable)JavaPsiFacade.getElementFactory(initializer.getProject())
-        .createVariableDeclarationStatement("x", expectedType, initializer, initializer).getDeclaredElements()[0])
-        .getInitializer();
-      if (tryToDetectDiamondNewExpr instanceof PsiNewExpression &&
-          PsiDiamondTypeUtil.canCollapseToDiamond((PsiNewExpression)tryToDetectDiamondNewExpr,
-                                                  (PsiNewExpression)tryToDetectDiamondNewExpr,
-                                                  expectedType)) {
-        final PsiElement paramList = PsiDiamondTypeUtil
-          .replaceExplicitWithDiamond(newExpression.getClassOrAnonymousClassReference().getParameterList());
-        return PsiTreeUtil.getParentOfType(paramList, PsiNewExpression.class);
+      if (newExpression.getArrayInitializer() != null) {
+        return newExpression.getArrayInitializer();
+      }
+      else {
+        final PsiExpression tryToDetectDiamondNewExpr = ((PsiVariable)JavaPsiFacade.getElementFactory(initializer.getProject())
+          .createVariableDeclarationStatement("x", expectedType, initializer, initializer).getDeclaredElements()[0])
+          .getInitializer();
+        if (tryToDetectDiamondNewExpr instanceof PsiNewExpression &&
+            PsiDiamondTypeUtil.canCollapseToDiamond((PsiNewExpression)tryToDetectDiamondNewExpr,
+                                                    (PsiNewExpression)tryToDetectDiamondNewExpr,
+                                                    expectedType)) {
+          final PsiElement paramList = PsiDiamondTypeUtil
+            .replaceExplicitWithDiamond(newExpression.getClassOrAnonymousClassReference().getParameterList());
+          return PsiTreeUtil.getParentOfType(paramList, PsiNewExpression.class);
+        }
       }
     }
     return initializer;

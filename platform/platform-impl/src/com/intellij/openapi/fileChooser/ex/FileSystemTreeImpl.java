@@ -33,6 +33,8 @@ import com.intellij.openapi.fileChooser.impl.FileComparator;
 import com.intellij.openapi.fileChooser.impl.FileTreeBuilder;
 import com.intellij.openapi.fileChooser.impl.FileTreeStructure;
 import com.intellij.openapi.fileTypes.FileType;
+import com.intellij.openapi.project.DumbModePermission;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.text.StringUtil;
@@ -100,12 +102,10 @@ public class FileSystemTreeImpl implements FileSystemTree {
 
     myTree.addTreeExpansionListener(myExpansionListener);
 
-    myTreeBuilder = createTreeBuilder(myTree, treeModel, myTreeStructure, FileComparator.getInstance(), descriptor, new Runnable() {
-      public void run() {
-        myTree.expandPath(new TreePath(treeModel.getRoot()));
-        if (onInitialized != null) {
-          onInitialized.run();
-        }
+    myTreeBuilder = createTreeBuilder(myTree, treeModel, myTreeStructure, FileComparator.getInstance(), descriptor, () -> {
+      myTree.expandPath(new TreePath(treeModel.getRoot()));
+      if (onInitialized != null) {
+        onInitialized.run();
       }
     });
 
@@ -281,20 +281,25 @@ public class FileSystemTreeImpl implements FileSystemTree {
     CommandProcessor.getInstance().executeCommand(
         myProject, new Runnable() {
           public void run() {
-            ApplicationManager.getApplication().runWriteAction(new Runnable() {
+            DumbService.allowStartingDumbModeInside(DumbModePermission.MAY_START_MODAL, new Runnable() {
+              @Override
               public void run() {
-                try {
-                  VirtualFile parent = parentDirectory;
-                  for (String name : StringUtil.tokenize(newFolderName, "\\/")) {
-                    VirtualFile folder = parent.createChildDirectory(this, name);
-                    updateTree();
-                    select(folder, null);
-                    parent = folder;
+                ApplicationManager.getApplication().runWriteAction(new Runnable() {
+                  public void run() {
+                    try {
+                      VirtualFile parent = parentDirectory;
+                      for (String name : StringUtil.tokenize(newFolderName, "\\/")) {
+                        VirtualFile folder = parent.createChildDirectory(this, name);
+                        updateTree();
+                        select(folder, null);
+                        parent = folder;
+                      }
+                    }
+                    catch (IOException e) {
+                      failReason[0] = e;
+                    }
                   }
-                }
-                catch (IOException e) {
-                  failReason[0] = e;
-                }
+                });
               }
             });
           }
@@ -359,12 +364,9 @@ public class FileSystemTreeImpl implements FileSystemTree {
 
   @NotNull
   public VirtualFile[] getSelectedFiles() {
-    final List<VirtualFile> files = collectSelectedElements(new NullableFunction<FileElement, VirtualFile>() {
-      @Override
-      public VirtualFile fun(final FileElement element) {
-        final VirtualFile file = element.getFile();
-        return file != null && file.isValid() ? file : null;
-      }
+    final List<VirtualFile> files = collectSelectedElements((NullableFunction<FileElement, VirtualFile>)element -> {
+      final VirtualFile file = element.getFile();
+      return file != null && file.isValid() ? file : null;
     });
     return VfsUtilCore.toVirtualFileArray(files);
   }
@@ -465,13 +467,15 @@ public class FileSystemTreeImpl implements FileSystemTree {
 
 
           AbstractTreeStructure treeStructure = myTreeBuilder.getTreeStructure();
-          boolean async = treeStructure != null && treeStructure.isToBuildChildrenInBackground(virtualFile);
-          if (virtualFile instanceof NewVirtualFile) {
-            RefreshQueue.getInstance().refresh(async, false, null, ModalityState.stateForComponent(myTree), virtualFile);
-          }
-          else {
-            virtualFile.refresh(async, false);
-          }
+          final boolean async = treeStructure != null && treeStructure.isToBuildChildrenInBackground(virtualFile);
+          DumbService.allowStartingDumbModeInside(DumbModePermission.MAY_START_MODAL, () -> {
+            if (virtualFile instanceof NewVirtualFile) {
+              RefreshQueue.getInstance().refresh(async, false, null, ModalityState.stateForComponent(myTree), virtualFile);
+            }
+            else {
+              virtualFile.refresh(async, false);
+            }
+          });
         }
       }
     }

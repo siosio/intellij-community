@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,15 +40,12 @@ abstract class FoldRegionsTree {
   @NotNull
   private List<FoldRegion> myRegions = ContainerUtil.newArrayList();
 
-  private static final Comparator<FoldRegion> BY_END_OFFSET = new Comparator<FoldRegion>() {
-    @Override
-    public int compare(FoldRegion r1, FoldRegion r2) {
-      int end1 = r1.getEndOffset();
-      int end2 = r2.getEndOffset();
-      if (end1 < end2) return -1;
-      if (end1 > end2) return 1;
-      return 0;
-    }
+  private static final Comparator<FoldRegion> BY_END_OFFSET = (r1, r2) -> {
+    int end1 = r1.getEndOffset();
+    int end2 = r2.getEndOffset();
+    if (end1 < end2) return -1;
+    if (end1 > end2) return 1;
+    return 0;
   };
   private static final Comparator<? super FoldRegion> BY_END_OFFSET_REVERSE = Collections.reverseOrder(BY_END_OFFSET);
 
@@ -356,6 +353,14 @@ abstract class FoldRegionsTree {
   public FoldRegion getRegionAt(int startOffset, int endOffset) {
     int index = Collections.binarySearch(myRegions, new DummyFoldRegion(startOffset, endOffset), RangeMarker.BY_START_OFFSET);
     return index < 0 ? null : myRegions.get(index);
+  }
+
+  void clearDocumentRangesModificationStatus() {
+    for (FoldRegion region : myRegions) {
+      if (region instanceof FoldRegionImpl) {
+        ((FoldRegionImpl)region).resetDocumentRegionChanged();
+      }
+    }
   }
 
   private class CachedData implements Cloneable {

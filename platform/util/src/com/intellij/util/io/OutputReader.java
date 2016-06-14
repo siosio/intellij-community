@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,80 +15,28 @@
  */
 package com.intellij.util.io;
 
-import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.util.concurrency.Semaphore;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.IOException;
 import java.io.InputStream;
-import java.io.Reader;
 import java.nio.charset.Charset;
 
+/** @deprecated use {@link BaseOutputReader}. to be removed in IDEA 2018.1 */
+@Deprecated 
 public abstract class OutputReader extends BaseOutputReader {
-  private static final Logger LOG = Logger.getInstance("#com.intellij.util.io.OutputReader");
-
-  private final Semaphore myReadFullySemaphore = new Semaphore();
-
-  public OutputReader(@NotNull InputStream inputStream, @Nullable Charset charset, @Nullable SleepingPolicy sleepingPolicy) {
-    super(inputStream, charset, sleepingPolicy);
-    start();
+  /** @deprecated use {@link BaseOutputReader}. to be removed in IDEA 2018.1 */
+  public OutputReader(@NotNull InputStream stream, @Nullable Charset charset, @NotNull String name) {
+    super(stream, charset);
+    start(name);
   }
 
-  public OutputReader(@NotNull InputStream inputStream, @Nullable Charset charset) {
-    super(inputStream, charset);
-    start();
+  /** @deprecated use {@link BaseOutputReader}. to be removed in IDEA 2018.1 */
+  public OutputReader(@NotNull InputStream stream, @Nullable Charset charset, @Nullable SleepingPolicy policy, @NotNull String name) {
+    super(stream, charset, Options.withPolicy(policy));
+    start(name);
   }
 
-  @Deprecated
-  public OutputReader(@NotNull Reader reader) {
-    super(reader);
-    start();
-  }
-
-  @Override
-  protected void doRun() {
-    try {
-      while (true) {
-        boolean read = readAvailable();
-
-        if (!read) {
-          myReadFullySemaphore.up();
-        }
-
-        if (isStopped) {
-          break;
-        }
-
-        Thread.sleep(mySleepingPolicy.getTimeToSleep(read));
-      }
-    }
-    catch (InterruptedException ignore) {
-    }
-    catch (IOException e) {
-      LOG.info(e);
-    }
-    catch (Exception e) {
-      LOG.error(e);
-    }
-    finally {
-      try {
-        myReader.close();
-      }
-      catch (IOException e) {
-        LOG.warn("Can't close reader", e);
-      }
-    }
-  }
-
+  /** @deprecated use {@link BaseOutputReader}. to be removed in IDEA 2018.1 */
   public void readFully() throws InterruptedException {
-    myReadFullySemaphore.down();
-    while (!myReadFullySemaphore.waitForUnsafe(10)) {
-      if (isStopped) {
-        waitFor();
-        return;
-      }
-    }
   }
-
 }

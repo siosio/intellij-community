@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,7 +35,6 @@ import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.*;
 import com.intellij.openapi.vfs.impl.jrt.JrtFileSystem;
-import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.HashMap;
 import org.jdom.Element;
@@ -45,7 +44,6 @@ import org.jetbrains.jps.model.java.impl.JavaSdkUtil;
 
 import javax.swing.*;
 import java.io.File;
-import java.io.FileFilter;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -68,7 +66,7 @@ public class JavaSdkImpl extends JavaSdk {
     super("JavaSDK");
 
     fileManager.addVirtualFileListener(new VirtualFileAdapter() {
-
+      @Override
       public void fileDeleted(@NotNull VirtualFileEvent event) {
         updateCache(event);
       }
@@ -100,6 +98,7 @@ public class JavaSdkImpl extends JavaSdk {
     });
   }
 
+  @NotNull
   @Override
   public String getPresentableName() {
     return ProjectBundle.message("sdk.java.name");
@@ -116,6 +115,7 @@ public class JavaSdkImpl extends JavaSdk {
     return "reference.project.structure.sdk.java";
   }
 
+  @NotNull
   @Override
   public Icon getIconForAddAction() {
     return AllIcons.General.AddJdk;
@@ -140,8 +140,14 @@ public class JavaSdkImpl extends JavaSdk {
     return null;
   }
 
+  @Nullable
   @Override
-  public AdditionalDataConfigurable createAdditionalDataConfigurable(SdkModel sdkModel, SdkModificator sdkModificator) {
+  public String getDownloadSdkUrl() {
+    return "http://www.oracle.com/technetwork/java/javase/downloads/index.html";
+  }
+
+  @Override
+  public AdditionalDataConfigurable createAdditionalDataConfigurable(@NotNull SdkModel sdkModel, @NotNull SdkModificator sdkModificator) {
     return null;
   }
 
@@ -150,7 +156,7 @@ public class JavaSdkImpl extends JavaSdk {
   }
 
   @Override
-  @SuppressWarnings({"HardCodedStringLiteral"})
+  @SuppressWarnings("HardCodedStringLiteral")
   public String getBinPath(@NotNull Sdk sdk) {
     return getConvertedHomePath(sdk) + "bin";
   }
@@ -264,22 +270,13 @@ public class JavaSdkImpl extends JavaSdk {
   }
 
   private static void scanFolder(File javasFolder, ArrayList<String> result) {
-    File[] candidates = javasFolder.listFiles(new FileFilter() {
-      @Override
-      public boolean accept(File pathname) {
-        return JdkUtil.checkForJdk(pathname);
-      }
-    });
+    File[] candidates = javasFolder.listFiles(pathname -> JdkUtil.checkForJdk(pathname));
     if (candidates != null) {
-      result.addAll(ContainerUtil.map2List(candidates, new Function<File, String>() {
-        @Override
-        public String fun(File file) {
-          return file.getAbsolutePath();
-        }
-      }));
+      result.addAll(ContainerUtil.map2List(candidates, file -> file.getAbsolutePath()));
     }
   }
 
+  @NotNull
   @Override
   public FileChooserDescriptor getHomeChooserDescriptor() {
     final FileChooserDescriptor baseDescriptor = super.getHomeChooserDescriptor();
@@ -299,8 +296,9 @@ public class JavaSdkImpl extends JavaSdk {
     return descriptor;
   }
 
+  @NotNull
   @Override
-  public String adjustSelectedSdkHome(String homePath) {
+  public String adjustSelectedSdkHome(@NotNull String homePath) {
     if (SystemInfo.isMac) {
       File home = new File(homePath, "/Home");
       if (home.exists()) return home.getPath();
@@ -314,13 +312,8 @@ public class JavaSdkImpl extends JavaSdk {
 
   @Override
   public boolean isValidSdkHome(String path) {
-    if (!checkForJdk(new File(path))) {
-      return false;
-    }
-    if (JrtFileSystem.isModularJdk(path) && !JrtFileSystem.isSupported()) {
-      return false;
-    }
-    return true;
+    return checkForJdk(new File(path)) &&
+           (!JrtFileSystem.isModularJdk(path) || JrtFileSystem.isSupported());
   }
 
   @Override
@@ -372,7 +365,7 @@ public class JavaSdkImpl extends JavaSdk {
   }
 
   @Override
-  @SuppressWarnings({"HardCodedStringLiteral"})
+  @SuppressWarnings("HardCodedStringLiteral")
   public void setupSdkPaths(@NotNull Sdk sdk) {
     String homePath = sdk.getHomePath();
     assert homePath != null : sdk;
@@ -443,17 +436,29 @@ public class JavaSdkImpl extends JavaSdk {
 
   public static void attachJdkAnnotations(@NotNull SdkModificator modificator) {
     LocalFileSystem lfs = LocalFileSystem.getInstance();
+    List<String> pathsChecked = new ArrayList<String>();
     // community idea under idea
-    VirtualFile root = lfs.findFileByPath(FileUtil.toSystemIndependentName(PathManager.getHomePath()) + "/java/jdkAnnotations");
+    String path = FileUtil.toSystemIndependentName(PathManager.getHomePath()) + "/java/jdkAnnotations";
+    VirtualFile root = lfs.findFileByPath(path);
+    pathsChecked.add(path);
 
     if (root == null) {  // idea under idea
-      root = lfs.findFileByPath(FileUtil.toSystemIndependentName(PathManager.getHomePath()) + "/community/java/jdkAnnotations");
+      path = FileUtil.toSystemIndependentName(PathManager.getHomePath()) + "/community/java/jdkAnnotations";
+      root = lfs.findFileByPath(path);
+      pathsChecked.add(path);
     }
     if (root == null) { // build
-      root = VirtualFileManager.getInstance().findFileByUrl("jar://"+ FileUtil.toSystemIndependentName(PathManager.getHomePath()) + "/lib/jdkAnnotations.jar!/");
+      String url = "jar://" + FileUtil.toSystemIndependentName(PathManager.getHomePath()) + "/lib/jdkAnnotations.jar!/";
+      root = VirtualFileManager.getInstance().findFileByUrl(url);
+      pathsChecked.add(FileUtil.toSystemIndependentName(PathManager.getHomePath()) + "/lib/jdkAnnotations.jar");
     }
     if (root == null) {
-      LOG.error("jdk annotations not found in: "+ FileUtil.toSystemIndependentName(PathManager.getHomePath()) + "/lib/jdkAnnotations.jar!/");
+      String msg = "Paths checked:\n";
+      for (String p : pathsChecked) {
+        File file = new File(p);
+        msg += "Path: '"+p+"' "+(file.exists() ? "Found" : "Not found")+"; directory children: "+Arrays.toString(file.getParentFile().listFiles())+"\n";
+      }
+      LOG.error("JDK annotations not found", msg);
       return;
     }
 
@@ -500,6 +505,7 @@ public class JavaSdkImpl extends JavaSdk {
     return sdkVersion != null && sdkVersion.isAtLeast(version);
   }
 
+  @NotNull
   @Override
   public Sdk createJdk(@NotNull String jdkName, @NotNull String home, boolean isJre) {
     ProjectJdkImpl jdk = new ProjectJdkImpl(jdkName, this);
@@ -541,12 +547,7 @@ public class JavaSdkImpl extends JavaSdk {
         result.add(vFile);
       }
     }
-    Collections.sort(result, new Comparator<VirtualFile>() {
-      @Override
-      public int compare(VirtualFile o1, VirtualFile o2) {
-        return o1.getPath().compareTo(o2.getPath());
-      }
-    });
+    Collections.sort(result, (o1, o2) -> o1.getPath().compareTo(o2.getPath()));
     return result;
   }
 
@@ -558,14 +559,14 @@ public class JavaSdkImpl extends JavaSdk {
   }
 
   @Nullable
-  @SuppressWarnings({"HardCodedStringLiteral"})
-  public static VirtualFile findSources(File file) {
+  @SuppressWarnings("HardCodedStringLiteral")
+  private static VirtualFile findSources(File file) {
     return findSources(file, "src");
   }
 
   @Nullable
-  @SuppressWarnings({"HardCodedStringLiteral"})
-  public static VirtualFile findSources(File file, final String srcName) {
+  @SuppressWarnings("HardCodedStringLiteral")
+  private static VirtualFile findSources(File file, final String srcName) {
     File srcDir = new File(file, "src");
     File jarFile = new File(file, srcName + ".jar");
     if (!jarFile.exists()) {
@@ -586,7 +587,7 @@ public class JavaSdkImpl extends JavaSdk {
     }
   }
 
-  @SuppressWarnings({"HardCodedStringLiteral"})
+  @SuppressWarnings("HardCodedStringLiteral")
   private static void addDocs(File file, SdkModificator rootContainer) {
     VirtualFile vFile = findDocs(file, "docs/api");
     if (vFile != null) {
@@ -603,7 +604,7 @@ public class JavaSdkImpl extends JavaSdk {
   }
 
   @Nullable
-  public static VirtualFile findDocs(File file, final String relativePath) {
+  private static VirtualFile findDocs(File file, final String relativePath) {
     file = new File(file.getAbsolutePath() + File.separator + relativePath.replace('/', File.separatorChar));
     if (!file.exists() || !file.isDirectory()) return null;
     String path = file.getAbsolutePath().replace(File.separatorChar, '/');
@@ -611,7 +612,7 @@ public class JavaSdkImpl extends JavaSdk {
   }
 
   @Override
-  public boolean isRootTypeApplicable(OrderRootType type) {
+  public boolean isRootTypeApplicable(@NotNull OrderRootType type) {
     return type == OrderRootType.CLASSES ||
            type == OrderRootType.SOURCES ||
            type == JavadocOrderRootType.getInstance() ||

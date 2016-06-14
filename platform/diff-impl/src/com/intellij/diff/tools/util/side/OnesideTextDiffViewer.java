@@ -60,7 +60,7 @@ public abstract class OnesideTextDiffViewer extends OnesideDiffViewer<TextEditor
     myEditorSettingsAction = new SetEditorSettingsAction(getTextSettings(), getEditors());
     myEditorSettingsAction.applyDefaults();
 
-    new MyOpenInEditorWithMouseAction().register(getEditors());
+    new MyOpenInEditorWithMouseAction().install(getEditors());
   }
 
   @Override
@@ -88,7 +88,7 @@ public abstract class OnesideTextDiffViewer extends OnesideDiffViewer<TextEditor
     return holder;
   }
 
-  @NotNull
+  @Nullable
   @Override
   protected JComponent createTitle() {
     List<JComponent> textTitles = DiffUtil.createTextTitles(myRequest, ContainerUtil.list(getEditor(), getEditor()));

@@ -67,6 +67,12 @@ public class MockPsiDocumentManager extends PsiDocumentManager {
     return document.getModificationStamp();
   }
 
+  @Nullable
+  @Override
+  public Document getLastCommittedDocument(@NotNull PsiFile file) {
+    return null;
+  }
+
   @Override
   @NotNull
   public Document[] getUncommittedDocuments() {
@@ -126,6 +132,11 @@ public class MockPsiDocumentManager extends PsiDocumentManager {
 
   @Override
   public void reparseFiles(@NotNull Collection<VirtualFile> files, boolean includeOpenFiles) {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
+  public void performLaterWhenAllCommitted(@NotNull final Runnable runnable) {
     throw new UnsupportedOperationException();
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,8 @@
 package com.intellij.ide;
 
 import com.intellij.concurrency.JobScheduler;
+import com.intellij.execution.configurations.GeneralCommandLine;
+import com.intellij.execution.util.ExecUtil;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.notification.*;
 import com.intellij.openapi.application.Application;
@@ -36,6 +38,7 @@ import com.intellij.openapi.wm.WindowManager;
 import com.intellij.ui.HyperlinkAdapter;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.util.SystemProperties;
+import com.intellij.util.TimeoutUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.PropertyKey;
 
@@ -47,14 +50,16 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class SystemHealthMonitor extends ApplicationComponent.Adapter {
-  private static final Logger LOG = Logger.getInstance("#com.intellij.ide.SystemHealthMonitor");
+  private static final Logger LOG = Logger.getInstance(SystemHealthMonitor.class);
 
   private static final NotificationGroup GROUP = new NotificationGroup("System Health", NotificationDisplayType.STICKY_BALLOON, false);
   private static final NotificationGroup LOG_GROUP = NotificationGroup.logOnlyGroup("System Health (minor)");
 
-  @NotNull private final PropertiesComponent myProperties;
+  private final PropertiesComponent myProperties;
 
   public SystemHealthMonitor(@NotNull PropertiesComponent properties) {
     myProperties = properties;
@@ -63,57 +68,77 @@ public class SystemHealthMonitor extends ApplicationComponent.Adapter {
   @Override
   public void initComponent() {
     checkJvm();
+    checkIBus();
     startDiskSpaceMonitoring();
   }
 
   private void checkJvm() {
     if (StringUtil.containsIgnoreCase(System.getProperty("java.vm.name", ""), "OpenJDK") && !SystemInfo.isJavaVersionAtLeast("1.7")) {
-      notifyUnsupportedJvm("unsupported.jvm.openjdk.message");
+      showNotification("unsupported.jvm.openjdk.message");
     }
     else if (StringUtil.endsWithIgnoreCase(System.getProperty("java.version", ""), "-ea")) {
-      notifyUnsupportedJvm("unsupported.jvm.ea.message");
+      showNotification("unsupported.jvm.ea.message");
     }
   }
 
-  private void notifyUnsupportedJvm(@PropertyKey(resourceBundle = "messages.IdeBundle") final String key) {
-    final String ignoreKey = "ignore." + key;
-    final String message = IdeBundle.message(key) + IdeBundle.message("unsupported.jvm.link");
-    showNotification(ignoreKey, message, new HyperlinkAdapter() {
-      @Override
-      protected void hyperlinkActivated(HyperlinkEvent e) {
-        myProperties.setValue(ignoreKey, "true");
+  private void checkIBus() {
+    if (SystemInfo.isXWindow) {
+      String xim = System.getenv("XMODIFIERS");
+      if (xim != null && xim.contains("im=ibus")) {
+        String version = ExecUtil.execAndReadLine(new GeneralCommandLine("ibus-daemon", "--version"));
+        if (version != null) {
+          Matcher m = Pattern.compile("ibus-daemon - Version ([0-9.]+)").matcher(version);
+          if (m.find() && StringUtil.compareVersionNumbers(m.group(1), "1.5.11") < 0) {
+            String fix = System.getenv("IBUS_ENABLE_SYNC_MODE");
+            if (fix == null || fix.isEmpty() || fix.equals("0") || fix.equalsIgnoreCase("false")) {
+              showNotification("ibus.blocking.warn.message");
+            }
+          }
+        }
       }
-    });
+    }
   }
 
-  private void showNotification(final String ignoreKey, final String message, final HyperlinkAdapter hyperlinkAdapter) {
-    if (myProperties.isValueSet(ignoreKey)) {
-      return;
-    }
+  private void showNotification(@PropertyKey(resourceBundle = "messages.IdeBundle") String key) {
+    final String ignoreKey = "ignore." + key;
+    boolean ignored = myProperties.isValueSet(ignoreKey);
+    LOG.info("issue detected: " + key + (ignored ? " (ignored)" : ""));
+    if (ignored) return;
+
+    final String message = IdeBundle.message(key) + IdeBundle.message("sys.health.acknowledge.link");
 
     final Application app = ApplicationManager.getApplication();
     app.getMessageBus().connect(app).subscribe(AppLifecycleListener.TOPIC, new AppLifecycleListener.Adapter() {
       @Override
       public void appFrameCreated(String[] commandLineArgs, @NotNull Ref<Boolean> willOpenProject) {
-        app.invokeLater(new Runnable() {
-          public void run() {
-            JComponent component = WindowManager.getInstance().findVisibleFrame().getRootPane();
-            if (component != null) {
-              Rectangle rect = component.getVisibleRect();
-              JBPopupFactory.getInstance()
-                .createHtmlTextBalloonBuilder(message, MessageType.WARNING, hyperlinkAdapter)
-                .setFadeoutTime(-1)
-                .setHideOnFrameResize(false)
-                .setHideOnLinkClick(true)
-                .setDisposable(app)
-                .createBalloon()
-                .show(new RelativePoint(component, new Point(rect.x + 30, rect.y + rect.height - 10)), Balloon.Position.above);
-            }
-
-            Notification notification = LOG_GROUP.createNotification(message, NotificationType.WARNING);
-            notification.setImportant(true);
-            Notifications.Bus.notify(notification);
+        app.invokeLater(() -> {
+          JComponent component = WindowManager.getInstance().findVisibleFrame().getRootPane();
+          if (component != null) {
+            Rectangle rect = component.getVisibleRect();
+            JBPopupFactory.getInstance()
+              .createHtmlTextBalloonBuilder(message, MessageType.WARNING, new HyperlinkAdapter() {
+                @Override
+                protected void hyperlinkActivated(HyperlinkEvent e) {
+                  String url = e.getDescription();
+                  if ("ack".equals(url)) {
+                    myProperties.setValue(ignoreKey, "true");
+                  }
+                  else {
+                    BrowserUtil.browse(url);
+                  }
+                }
+              })
+              .setFadeoutTime(-1)
+              .setHideOnFrameResize(false)
+              .setHideOnLinkClick(true)
+              .setDisposable(app)
+              .createBalloon()
+              .show(new RelativePoint(component, new Point(rect.x + 30, rect.y + rect.height - 10)), Balloon.Position.above);
           }
+
+          Notification notification = LOG_GROUP.createNotification(message, NotificationType.WARNING);
+          notification.setImportant(true);
+          Notifications.Bus.notify(notification);
         });
       }
     });
@@ -137,19 +162,16 @@ public class SystemHealthMonitor extends ApplicationComponent.Adapter {
         if (!reported.get()) {
           Future<Long> future = ourFreeSpaceCalculation.get();
           if (future == null) {
-            ourFreeSpaceCalculation.set(future = ApplicationManager.getApplication().executeOnPooledThread(new Callable<Long>() {
-              @Override
-              public Long call() throws Exception {
-                // file.getUsableSpace() can fail and return 0 e.g. after MacOSX restart or awakening from sleep
-                // so several times try to recalculate usable space on receiving 0 to be sure
-                long fileUsableSpace = file.getUsableSpace();
-                while(fileUsableSpace == 0) {
-                  Thread.sleep(5000); // hopefully we will not hummer disk too much
-                  fileUsableSpace = file.getUsableSpace();
-                }
-
-                return fileUsableSpace;
+            ourFreeSpaceCalculation.set(future = ApplicationManager.getApplication().executeOnPooledThread(() -> {
+              // file.getUsableSpace() can fail and return 0 e.g. after MacOSX restart or awakening from sleep
+              // so several times try to recalculate usable space on receiving 0 to be sure
+              long fileUsableSpace = file.getUsableSpace();
+              while (fileUsableSpace == 0) {
+                TimeoutUtil.sleep(5000);  // hopefully we will not hummer disk too much
+                fileUsableSpace = file.getUsableSpace();
               }
+
+              return fileUsableSpace;
             }));
           }
           if (!future.isDone() || future.isCancelled()) {
@@ -171,26 +193,20 @@ public class SystemHealthMonitor extends ApplicationComponent.Adapter {
               reported.compareAndSet(false, true);
 
               //noinspection SSBasedInspection
-              SwingUtilities.invokeLater(new Runnable() {
-                @Override
-                public void run() {
-                  String productName = ApplicationNamesInfo.getInstance().getFullProductName();
-                  String message = IdeBundle.message("low.disk.space.message", productName);
-                  if (fileUsableSpace < 100 * 1024) {
-                    LOG.warn(message + " (" + fileUsableSpace + ")");
-                    Messages.showErrorDialog(message, "Fatal Configuration Problem");
+              SwingUtilities.invokeLater(() -> {
+                String productName = ApplicationNamesInfo.getInstance().getFullProductName();
+                String message = IdeBundle.message("low.disk.space.message", productName);
+                if (fileUsableSpace < 100 * 1024) {
+                  LOG.warn(message + " (" + fileUsableSpace + ")");
+                  Messages.showErrorDialog(message, "Fatal Configuration Problem");
+                  reported.compareAndSet(true, false);
+                  restart(timeout);
+                }
+                else {
+                  GROUP.createNotification(message, file.getPath(), NotificationType.ERROR, null).whenExpired(() -> {
                     reported.compareAndSet(true, false);
                     restart(timeout);
-                  }
-                  else {
-                    GROUP.createNotification(message, file.getPath(), NotificationType.ERROR, null).whenExpired(new Runnable() {
-                      @Override
-                      public void run() {
-                        reported.compareAndSet(true, false);
-                        restart(timeout);
-                      }
-                    }).notify(null);
-                  }
+                  }).notify(null);
                 }
               });
             }
@@ -218,5 +234,4 @@ public class SystemHealthMonitor extends ApplicationComponent.Adapter {
       }
     }, 1, TimeUnit.SECONDS);
   }
-
 }

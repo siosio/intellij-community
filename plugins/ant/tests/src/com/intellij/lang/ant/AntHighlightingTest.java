@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -117,12 +117,7 @@ public class AntHighlightingTest extends DaemonAnalyzerTestCase {
 
     try {
       myIgnoreInfos = true;
-      PlatformTestUtil.startPerformanceTest("Should be quite performant !", 25000, new ThrowableRunnable() {
-        @Override
-        public void run() {
-          doDoTest(true, false);
-        }
-      }).cpuBound().assertTiming();
+      PlatformTestUtil.startPerformanceTest("Should be quite performant !", 25000, () -> doDoTest(true, false)).cpuBound().useLegacyScaling().assertTiming();
     }
     finally {
       myIgnoreInfos = false;

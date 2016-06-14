@@ -99,13 +99,13 @@ public class PyCodeFragmentUtil {
       }
     }
 
-
     final boolean yieldsFound = subGraphAnalysis.yieldExpressions > 0;
     if (yieldsFound && LanguageLevel.forElement(owner).isOlderThan(LanguageLevel.PYTHON33)) {
       throw new CannotCreateCodeFragmentException(PyBundle.message("refactoring.extract.method.error.yield"));
     }
+    final boolean isAsync = owner instanceof PyFunction && ((PyFunction)owner).isAsync();
 
-    return new PyCodeFragment(inputNames, outputNames, globalWrites, nonlocalWrites, subGraphAnalysis.returns > 0, yieldsFound);
+    return new PyCodeFragment(inputNames, outputNames, globalWrites, nonlocalWrites, subGraphAnalysis.returns > 0, yieldsFound, isAsync);
   }
 
   private static boolean resolvesToBoundMethodParameter(@NotNull PsiElement element) {
@@ -277,6 +277,7 @@ public class PyCodeFragmentUtil {
           for (PsiElement resolved : multiResolve(reference)) {
             if (!subGraphElements.contains(resolved)) {
               result.add(element);
+              break;
             }
           }
         }
@@ -371,12 +372,8 @@ public class PyCodeFragmentUtil {
 
   private static boolean isUsedOutside(@NotNull PsiNamedElement element, @NotNull List<Instruction> subGraph) {
     final Set<PsiElement> subGraphElements = getSubGraphElements(subGraph);
-    return ContainerUtil.exists(PyRefactoringUtil.findUsages(element, false), new Condition<UsageInfo>() {
-      @Override
-      public boolean value(UsageInfo usageInfo) {
-        return !subGraphElements.contains(usageInfo.getElement());
-      }
-    });
+    return ContainerUtil.exists(PyRefactoringUtil.findUsages(element, false),
+                                usageInfo -> !subGraphElements.contains(usageInfo.getElement()));
   }
 
   @NotNull

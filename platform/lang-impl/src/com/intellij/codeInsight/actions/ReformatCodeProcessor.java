@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -110,55 +110,52 @@ public class ReformatCodeProcessor extends AbstractLayoutCodeProcessor {
   protected FutureTask<Boolean> prepareTask(@NotNull final PsiFile file, final boolean processChangedTextOnly)
     throws IncorrectOperationException
   {
-    return new FutureTask<Boolean>(new Callable<Boolean>() {
-      @Override
-      public Boolean call() throws Exception {
-        FormattingProgressTask.FORMATTING_CANCELLED_FLAG.set(false);
-        try {
-          Collection<TextRange> ranges = getRangesToFormat(processChangedTextOnly, file);
+    return new FutureTask<Boolean>(() -> {
+      FormattingProgressTask.FORMATTING_CANCELLED_FLAG.set(false);
+      try {
+        Collection<TextRange> ranges = getRangesToFormat(processChangedTextOnly, file);
 
-          CharSequence before = null;
-          Document document = PsiDocumentManager.getInstance(myProject).getDocument(file);
-          if (getInfoCollector() != null) {
-            LOG.assertTrue(document != null);
-            before = document.getImmutableCharSequence();
-          }
-
-          CaretVisualPositionKeeper caretPositionKeeper = new CaretVisualPositionKeeper(document);
-
-          if (processChangedTextOnly) {
-            CodeStyleManager.getInstance(myProject).reformatTextWithContext(file, ranges);
-          }
-          else {
-            CodeStyleManager.getInstance(myProject).reformatText(file, ranges);
-          }
-
-          caretPositionKeeper.restoreOriginalLocation();
-
-          if (before != null) {
-            prepareUserNotificationMessage(document, before);
-          }
-
-          return !FormattingProgressTask.FORMATTING_CANCELLED_FLAG.get();
+        CharSequence before = null;
+        Document document = PsiDocumentManager.getInstance(myProject).getDocument(file);
+        if (getInfoCollector() != null) {
+          LOG.assertTrue(document != null);
+          before = document.getImmutableCharSequence();
         }
-        catch (FilesTooBigForDiffException e) {
-          handleFileTooBigException(LOG, e, file);
-          return false;
-        } 
-        catch (IncorrectOperationException e) {
-          LOG.error(e);
-          return false;
+
+        CaretVisualPositionKeeper caretPositionKeeper = new CaretVisualPositionKeeper(document);
+
+        if (processChangedTextOnly) {
+          CodeStyleManager.getInstance(myProject).reformatTextWithContext(file, ranges);
         }
-        finally {
-          myRanges.clear();
+        else {
+          CodeStyleManager.getInstance(myProject).reformatText(file, ranges);
         }
+
+        caretPositionKeeper.restoreOriginalLocation();
+
+        if (before != null) {
+          prepareUserNotificationMessage(document, before);
+        }
+
+        return !FormattingProgressTask.FORMATTING_CANCELLED_FLAG.get();
+      }
+      catch (FilesTooBigForDiffException e) {
+        handleFileTooBigException(LOG, e, file);
+        return false;
+      }
+      catch (IncorrectOperationException e) {
+        LOG.error(e);
+        return false;
+      }
+      finally {
+        myRanges.clear();
       }
     });
   }
 
   private void prepareUserNotificationMessage(@NotNull Document document, @NotNull CharSequence before) {
     LOG.assertTrue(getInfoCollector() != null);
-    int number = FormatChangedTextUtil.calculateChangedLinesNumber(document, before);
+    int number = FormatChangedTextUtil.getInstance().calculateChangedLinesNumber(document, before);
     if (number > 0) {
       String message = "formatted " + number + " line" + (number > 1 ? "s" : "");
       getInfoCollector().setReformatCodeNotification(message);
@@ -172,7 +169,7 @@ public class ReformatCodeProcessor extends AbstractLayoutCodeProcessor {
     }
 
     if (processChangedTextOnly) {
-      return FormatChangedTextUtil.getChangedTextRanges(myProject, file);
+      return FormatChangedTextUtil.getInstance().getChangedTextRanges(myProject, file);
     }
 
     return !myRanges.isEmpty() ? myRanges : ContainerUtil.newArrayList(file.getTextRange());

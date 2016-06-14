@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,6 @@ import com.intellij.openapi.editor.ex.RangeHighlighterEx;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Condition;
-import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.PsiDocumentManager;
@@ -47,8 +46,7 @@ public class HighlightingSessionImpl implements HighlightingSession {
   private final EditorColorsScheme myEditorColorsScheme;
   @NotNull private final Project myProject;
   private final Document myDocument;
-  private final Map<TextRange,RangeMarker> myRanges2markersCache = new THashMap<TextRange, RangeMarker>();
-  private volatile boolean myDisposed;
+  private final Map<TextRange,RangeMarker> myRanges2markersCache = new THashMap<>();
 
   private HighlightingSessionImpl(@NotNull PsiFile psiFile,
                                   @Nullable Editor editor,
@@ -60,10 +58,6 @@ public class HighlightingSessionImpl implements HighlightingSession {
     myEditorColorsScheme = editorColorsScheme;
     myProject = psiFile.getProject();
     myDocument = PsiDocumentManager.getInstance(myProject).getDocument(psiFile);
-    Disposer.register(progressIndicator, this);
-    if (progressIndicator.isCanceled()) {
-      Disposer.dispose(progressIndicator); //dispose both progress indicator and this session in case we managed to register after indicator dispose to avoid mem leaks
-    }
   }
 
   private static final Key<ConcurrentMap<PsiFile, HighlightingSession>> HIGHLIGHTING_SESSION = Key.create("HIGHLIGHTING_SESSION");
@@ -80,12 +74,12 @@ public class HighlightingSessionImpl implements HighlightingSession {
                                                             @Nullable EditorColorsScheme editorColorsScheme) {
     HighlightingSession session = getHighlightingSession(psiFile, progressIndicator);
     if (session == null) {
-      session = new HighlightingSessionImpl(psiFile, editor, progressIndicator, editorColorsScheme);
       ConcurrentMap<PsiFile, HighlightingSession> map = progressIndicator.getUserData(HIGHLIGHTING_SESSION);
       if (map == null) {
-        map = progressIndicator.putUserDataIfAbsent(HIGHLIGHTING_SESSION, ContainerUtil.<PsiFile, HighlightingSession>newConcurrentMap());
+        map = progressIndicator.putUserDataIfAbsent(HIGHLIGHTING_SESSION, ContainerUtil.newConcurrentMap());
       }
-      session = ConcurrencyUtil.cacheOrGet(map, psiFile, session);
+      session = ConcurrencyUtil.cacheOrGet(map, psiFile,
+                                           new HighlightingSessionImpl(psiFile, editor, progressIndicator, editorColorsScheme));
     }
     return session;
   }
@@ -125,41 +119,44 @@ public class HighlightingSessionImpl implements HighlightingSession {
     return myEditorColorsScheme;
   }
 
-  private final TransferToEDTQueue<Info> myAddHighlighterInEDTQueue = new TransferToEDTQueue<Info>("Apply highlighting results", new Processor<Info>() {
-    @Override
-    public boolean process(Info info) {
-      final EditorColorsScheme colorsScheme = getColorsScheme();
-      UpdateHighlightersUtil.addHighlighterToEditorIncrementally(myProject, myDocument, getPsiFile(), info.myRestrictRange.getStartOffset(),
-                                                                 info.myRestrictRange.getEndOffset(),
-                                                                 info.myInfo, colorsScheme, info.myGroupId, myRanges2markersCache);
+  private final TransferToEDTQueue<Info> myAddHighlighterInEDTQueue =
+    new TransferToEDTQueue<>("Apply highlighting results", new Processor<Info>() {
+      @Override
+      public boolean process(Info info) {
+        final EditorColorsScheme colorsScheme = getColorsScheme();
+        UpdateHighlightersUtil
+          .addHighlighterToEditorIncrementally(myProject, getDocument(), getPsiFile(), info.myRestrictRange.getStartOffset(),
+                                               info.myRestrictRange.getEndOffset(),
+                                               info.myInfo, colorsScheme, info.myGroupId, myRanges2markersCache);
 
-      return true;
-    }
-  }, new Condition<Object>() {
-    @Override
-    public boolean value(Object o) {
-      return myProject.isDisposed() || getProgressIndicator().isCanceled();
-    }
-  }, 200);
-  private final TransferToEDTQueue<RangeHighlighterEx> myDisposeHighlighterInEDTQueue = new TransferToEDTQueue<RangeHighlighterEx>("Dispose abandoned highlighter", new Processor<RangeHighlighterEx>() {
-    @Override
-    public boolean process(@NotNull RangeHighlighterEx highlighter) {
-      highlighter.dispose();
-      return true;
-    }
-  }, new Condition<Object>() {
-    @Override
-    public boolean value(Object o) {
-      return myProject.isDisposed() || getProgressIndicator().isCanceled();
-    }
-  }, 200);
+        return true;
+      }
+    }, new Condition<Object>() {
+      @Override
+      public boolean value(Object o) {
+        return myProject.isDisposed() || getProgressIndicator().isCanceled();
+      }
+    }, 200);
+  private final TransferToEDTQueue<RangeHighlighterEx> myDisposeHighlighterInEDTQueue =
+    new TransferToEDTQueue<>("Dispose abandoned highlighter", new Processor<RangeHighlighterEx>() {
+      @Override
+      public boolean process(@NotNull RangeHighlighterEx highlighter) {
+        highlighter.dispose();
+        return true;
+      }
+    }, new Condition<Object>() {
+      @Override
+      public boolean value(Object o) {
+        return myProject.isDisposed() || getProgressIndicator().isCanceled();
+      }
+    }, 200);
 
 
   void queueHighlightInfo(@NotNull HighlightInfo info,
                           @NotNull TextRange priorityRange,
                           @NotNull TextRange restrictedRange,
                           int groupId) {
-    myAddHighlighterInEDTQueue.offer(new Info(info, priorityRange, restrictedRange, groupId));
+    myAddHighlighterInEDTQueue.offer(new Info(info, restrictedRange, groupId));
   }
 
   void queueDisposeHighlighter(@Nullable RangeHighlighterEx highlighter) {
@@ -167,20 +164,13 @@ public class HighlightingSessionImpl implements HighlightingSession {
     myDisposeHighlighterInEDTQueue.offer(highlighter);
   }
 
-  @Override
-  public void dispose() {
-    myDisposed = true;
-  }
-
   private static class Info {
     @NotNull private final HighlightInfo myInfo;
-    @NotNull private final TextRange myPriorityRange;
     @NotNull private final TextRange myRestrictRange;
     private final int myGroupId;
 
-    public Info(@NotNull HighlightInfo info, @NotNull TextRange priorityRange, @NotNull TextRange restrictRange, int groupId) {
+    private Info(@NotNull HighlightInfo info, @NotNull TextRange restrictRange, int groupId) {
       myInfo = info;
-      myPriorityRange = priorityRange;
       myRestrictRange = restrictRange;
       myGroupId = groupId;
     }

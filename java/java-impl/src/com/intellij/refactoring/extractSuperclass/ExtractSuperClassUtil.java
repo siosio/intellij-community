@@ -78,8 +78,16 @@ public class ExtractSuperClassUtil {
       final PsiReferenceList subClassExtends = subclass.getExtendsList();
       if (subClassExtends != null) {
         copyPsiReferenceList(subClassExtends, superclass.getExtendsList());
-      } else if (subclass instanceof PsiAnonymousClass) {
-        superclass.getExtendsList().add(((PsiAnonymousClass)subclass).getBaseClassReference());
+      }
+      else if (subclass instanceof PsiAnonymousClass) {
+        PsiJavaCodeReferenceElement classReference = ((PsiAnonymousClass)subclass).getBaseClassReference();
+        PsiElement baseClass = classReference.resolve();
+        if (baseClass instanceof PsiClass && ((PsiClass)baseClass).isInterface()) {
+          superclass.getImplementsList().add(classReference);
+        }
+        else {
+          superclass.getExtendsList().add(classReference);
+        }
       }
 
       // create constructors if neccesary
@@ -95,10 +103,11 @@ public class ExtractSuperClassUtil {
 
       // make original class extend extracted superclass
       PsiJavaCodeReferenceElement ref = createExtendingReference(superclass, subclass, selectedMemberInfos);
+      final CodeStyleManager codeStyleManager = CodeStyleManager.getInstance(project);
       if (subClassExtends != null) {
-        subclass.getExtendsList().add(ref);
+        codeStyleManager.reformat(subclass.getExtendsList().add(ref));
       } else if (subclass instanceof PsiAnonymousClass) {
-        ((PsiAnonymousClass)subclass).getBaseClassReference().replace(ref);
+        codeStyleManager.reformat(((PsiAnonymousClass)subclass).getBaseClassReference().replace(ref));
       }
 
       PullUpProcessor pullUpHelper = new PullUpProcessor(subclass, superclass, selectedMemberInfos,
@@ -199,12 +208,7 @@ public class ExtractSuperClassUtil {
     for (final MemberInfo info : selectedMembers) {
       movedElements.add(info.getMember());
     }
-    final Condition<PsiTypeParameter> filter = new Condition<PsiTypeParameter>() {
-      @Override
-      public boolean value(PsiTypeParameter parameter) {
-        return findTypeParameterInDerived(derivedClass, parameter.getName()) == parameter;
-      }
-    };
+    final Condition<PsiTypeParameter> filter = parameter -> findTypeParameterInDerived(derivedClass, parameter.getName()) == parameter;
     final PsiTypeParameterList typeParameterList = RefactoringUtil.createTypeParameterListWithUsedTypeParameters(null, filter, PsiUtilCore.toPsiElementArray(movedElements));
     final PsiTypeParameterList originalTypeParameterList = superClass.getTypeParameterList();
     assert originalTypeParameterList != null;
@@ -267,12 +271,7 @@ public class ExtractSuperClassUtil {
   public static RefactoringEventData createBeforeData(final PsiClass subclassClass, final MemberInfo[] members) {
     RefactoringEventData data = new RefactoringEventData();
     data.addElement(subclassClass);
-    data.addMembers(members, new Function<MemberInfo, PsiElement>() {
-      @Override
-      public PsiElement fun(MemberInfo info) {
-        return info.getMember();
-      }
-    });
+    data.addMembers(members, info -> info.getMember());
     return data;
   }
 

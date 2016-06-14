@@ -25,7 +25,6 @@ import com.intellij.refactoring.listeners.MoveMemberListener;
 import com.intellij.refactoring.memberPullUp.PullUpConflictsUtil;
 import com.intellij.refactoring.memberPullUp.PullUpProcessor;
 import com.intellij.refactoring.util.DocCommentPolicy;
-import com.intellij.refactoring.util.classMembers.InterfaceContainmentVerifier;
 import com.intellij.refactoring.util.classMembers.MemberInfo;
 import com.intellij.testFramework.IdeaTestUtil;
 import com.intellij.util.containers.MultiMap;
@@ -33,6 +32,7 @@ import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Arrays;
+import java.util.TreeSet;
 
 /**
  * @author ven
@@ -98,6 +98,11 @@ public class PullUpTest extends LightRefactoringTestCase {
   public void testNotFunctionalAnymore() {
     setLanguageLevel(LanguageLevel.JDK_1_8);
     doTest(true, "Functional expression demands functional interface to have exact one method", new RefactoringTestUtil.MemberDescriptor("get", PsiMethod.class, true));
+  }
+
+  public void testPullToInterfaceAsDefault() throws Exception {
+    setLanguageLevel(LanguageLevel.JDK_1_8);
+    doTest(true, "Method <b><code>mass()</code></b> uses field <b><code>SimplePlanet.mass</code></b>, which is not moved to the superclass", new RefactoringTestUtil.MemberDescriptor("mass", PsiMethod.class, false));
   }
 
   public void testStillFunctional() {
@@ -174,8 +179,32 @@ public class PullUpTest extends LightRefactoringTestCase {
     doTest(false, "Class <b><code>Test.Printer</code></b> already contains a method <b><code>foo()</code></b>", new RefactoringTestUtil.MemberDescriptor("foo", PsiMethod.class));
   }
 
+  public void testOuterClassRefsNoConflictIfAsAbstract() throws Exception {
+    doTest(false, new RefactoringTestUtil.MemberDescriptor("bar", PsiMethod.class, true));
+  }
+
+  public void testOuterClassRefs() throws Exception {
+    doTest(false, "Method <b><code>bar()</code></b> uses field <b><code>Outer.x</code></b>, which is not moved to the superclass", new RefactoringTestUtil.MemberDescriptor("bar", PsiMethod.class));
+  }
+
+  public void testDefaultMethodAsAbstract() throws Exception {
+    doTest(false, new RefactoringTestUtil.MemberDescriptor("foo", PsiMethod.class, true));
+  }
+
+  public void testDefaultMethodAsDefault() throws Exception {
+    doTest(false, new RefactoringTestUtil.MemberDescriptor("foo", PsiMethod.class, false));
+  }
+
   public void testPublicMethodFromPrivateClassConflict() {
     doTest(false, new RefactoringTestUtil.MemberDescriptor("HM", PsiClass.class), new RefactoringTestUtil.MemberDescriptor("foo", PsiMethod.class));
+  }
+
+  public void testSOEOnSelfInheritance() throws Exception {
+    doTest(false, IGNORE_CONFLICTS, new RefactoringTestUtil.MemberDescriptor("test", PsiMethod.class));
+  }
+
+  public void testPullUpAsAbstractInClass() throws Exception {
+    doTest(false, new RefactoringTestUtil.MemberDescriptor("test", PsiMethod.class, true));
   }
 
   private void doTest(RefactoringTestUtil.MemberDescriptor... membersToFind) {
@@ -232,7 +261,8 @@ public class PullUpTest extends LightRefactoringTestCase {
     }
 
     if (conflictMessage != null && !IGNORE_CONFLICTS.equals(conflictMessage)) {
-      assertEquals(conflictMessage, conflictsMap.values().iterator().next());
+      TreeSet<String> conflicts = new TreeSet<>(conflictsMap.values());
+      assertEquals(conflictMessage, conflicts.iterator().next());
       return;
     }
 

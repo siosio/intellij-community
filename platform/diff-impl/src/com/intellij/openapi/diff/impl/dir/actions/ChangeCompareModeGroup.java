@@ -19,6 +19,7 @@ import com.intellij.ide.diff.DirDiffSettings;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.actionSystem.ex.ComboBoxAction;
 import com.intellij.openapi.diff.impl.dir.DirDiffTableModel;
+import com.intellij.openapi.project.DumbAware;
 import com.intellij.ui.IdeBorderFactory;
 import org.jetbrains.annotations.NotNull;
 
@@ -29,7 +30,7 @@ import java.util.ArrayList;
 /**
  * @author Konstantin Bulenkov
  */
-public class ChangeCompareModeGroup extends ComboBoxAction implements ShortcutProvider{
+public class ChangeCompareModeGroup extends ComboBoxAction implements ShortcutProvider, DumbAware {
   private final DefaultActionGroup myGroup;
   private DirDiffSettings mySettings;
   private JButton myButton;
@@ -37,7 +38,7 @@ public class ChangeCompareModeGroup extends ComboBoxAction implements ShortcutPr
   public ChangeCompareModeGroup(DirDiffTableModel model) {
     mySettings = model.getSettings();
     getTemplatePresentation().setText(mySettings.compareMode.getPresentableName(mySettings));
-    final ArrayList<ChangeCompareModeAction> actions = new ArrayList<ChangeCompareModeAction>();
+    final ArrayList<ChangeCompareModeAction> actions = new ArrayList<>();
     if (model.getSettings().showCompareModes) {
       for (DirDiffSettings.CompareMode mode : DirDiffSettings.CompareMode.values()) {
         actions.add(new ChangeCompareModeAction(model, mode));

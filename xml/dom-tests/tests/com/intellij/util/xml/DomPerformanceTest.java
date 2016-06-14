@@ -1,8 +1,21 @@
 /*
- * Copyright (c) 2000-2006 JetBrains s.r.o. All Rights Reserved.
-                                                    */
+ * Copyright 2000-2015 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.intellij.util.xml;
 
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.Result;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.module.Module;
@@ -41,14 +54,11 @@ public class DomPerformanceTest extends DomHardCoreTestCase{
     child.addChildElement().addBarComposite().setValue("ssss");
     child.addBarChild().getChild2().getAttr().setValue("234178956023");
 
-    PlatformTestUtil.startPerformanceTest(getTestName(false), 80000, new ThrowableRunnable() {
-      @Override
-      public void run() throws Exception {
-        for (int i = 0; i < 239; i++) {
-          element.addChildElement().copyFrom(child);
-        }
+    PlatformTestUtil.startPerformanceTest(getTestName(false), 80000, () -> ApplicationManager.getApplication().runWriteAction(() -> {
+      for (int i = 0; i < 239; i++) {
+        element.addChildElement().copyFrom(child);
       }
-    }).cpuBound().attempts(1).assertTiming();
+    })).cpuBound().attempts(1).useLegacyScaling().assertTiming();
 
     final MyElement newElement = createElement(DomUtil.getFile(element).getText(), MyElement.class);
 
@@ -63,7 +73,7 @@ public class DomPerformanceTest extends DomHardCoreTestCase{
         });
 
       }
-    }).cpuBound().assertTiming();
+    }).cpuBound().useLegacyScaling().assertTiming();
   }
 
   public void testShouldntParseNonDomFiles() throws Throwable {
@@ -91,7 +101,7 @@ public class DomPerformanceTest extends DomHardCoreTestCase{
     @NotNull final VirtualFile virtualFile = createFile("a.xml", "").getVirtualFile();
     new WriteCommandAction(getProject()) {
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
 
         final BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(virtualFile.getOutputStream(this)));
         writer.write("<root>\n");
@@ -108,12 +118,7 @@ public class DomPerformanceTest extends DomHardCoreTestCase{
     final XmlFile file = (XmlFile)getPsiManager().findFile(virtualFile);
     assertFalse(file.getNode().isParsed());
     assertTrue(StringUtil.isNotEmpty(file.getText()));
-    PlatformTestUtil.startPerformanceTest("", 100, new ThrowableRunnable() {
-      @Override
-      public void run() throws Exception {
-        assertNull(getDomManager().getFileElement(file));
-      }
-    }).cpuBound().assertTiming();
+    PlatformTestUtil.startPerformanceTest("", 100, () -> assertNull(getDomManager().getFileElement(file))).cpuBound().useLegacyScaling().assertTiming();
   }
 
   public void testDontParseNamespacedDomFiles() throws Exception {

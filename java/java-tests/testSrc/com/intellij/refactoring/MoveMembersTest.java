@@ -18,7 +18,6 @@ package com.intellij.refactoring;
 import com.intellij.JavaTestUtil;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.roots.LanguageLevelProjectExtension;
-import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiElement;
@@ -155,6 +154,17 @@ public class MoveMembersTest extends MultiFileTestCase {
     }
   }
 
+  public void testExistingFieldInSuper() throws Exception {
+    try {
+      doTest("B", "A", 0, 1);
+      fail("conflict expected");
+    }
+    catch (BaseRefactoringProcessor.ConflictsInTestsException e) {
+      assertEquals("Field <b><code>truth</code></b> already exists in the target class.\n" +
+                   "Method <b><code>important()</code></b> already exists in the target class.", e.getMessage());
+    }
+  }
+
   public void testInnerToInterface() throws Exception {
     doTest("A", "B", 0);
   }
@@ -174,7 +184,11 @@ public class MoveMembersTest extends MultiFileTestCase {
   public void testEscalateVisibility1() throws Exception {
     doTest("A", "B", true, VisibilityUtil.ESCALATE_VISIBILITY, 0);
   }
-  
+
+  public void testStringConstantInSwitchLabelExpression() throws Exception {
+    doTest("A", "B", true, VisibilityUtil.ESCALATE_VISIBILITY, 0);
+  }
+
   public void testMultipleWithDependencies() throws Exception {
     doTest("A", "B", true, VisibilityUtil.ESCALATE_VISIBILITY, 0, 1);
   }
@@ -185,6 +199,14 @@ public class MoveMembersTest extends MultiFileTestCase {
 
   public void testFromNestedToOuter() throws Exception {
     doTest("Outer.Inner", "Outer", true, VisibilityUtil.ESCALATE_VISIBILITY, 0);
+  }
+
+  public void testMixedStaticImportAndQualified() throws Exception {
+    doTest("ImportingClass.Constants", "ImportingClass.ImportantConstants", 0);
+  }
+
+  public void testStaticProblemsShouldNotRaiseAConflict() throws Exception {
+    doTest("A", "B", 0);
   }
 
   public void testFromNestedToOuterMethodRef() throws Exception {
@@ -222,9 +244,7 @@ public class MoveMembersTest extends MultiFileTestCase {
                       final String defaultVisibility,
                       final int... memberIndices)
     throws Exception {
-    doTest((rootDir, rootAfter) -> {
-      MoveMembersTest.this.performAction(sourceClassName, targetClassName, memberIndices, defaultVisibility);
-    }, lowercaseFirstLetter);
+    doTest((rootDir, rootAfter) -> MoveMembersTest.this.performAction(sourceClassName, targetClassName, memberIndices, defaultVisibility), lowercaseFirstLetter);
   }
 
   private void performAction(String sourceClassName, String targetClassName, int[] memberIndices, final String visibility) throws Exception {

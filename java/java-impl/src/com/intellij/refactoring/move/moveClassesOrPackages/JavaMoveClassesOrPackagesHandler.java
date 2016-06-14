@@ -200,17 +200,14 @@ public class JavaMoveClassesOrPackagesHandler extends MoveHandlerDelegate {
         new MoveDirectoryWithClassesProcessor(project, directories, (PsiDirectory)targetContainer,
                                               refactoringSettings.RENAME_SEARCH_IN_COMMENTS_FOR_PACKAGE,
                                               refactoringSettings.RENAME_SEARCH_IN_COMMENTS_FOR_PACKAGE, true, callback);
-      processor.setPrepareSuccessfulSwingThreadCallback(new Runnable() {
-        @Override
-        public void run() {
-        }
+      processor.setPrepareSuccessfulSwingThreadCallback(() -> {
       });
       processor.run();
     }
     else {
       final boolean containsJava = hasJavaFiles(directories[0]);
       if (!containsJava) {
-        MoveFilesOrDirectoriesUtil.doMove(project, new PsiElement[]{directories[0]}, new PsiElement[]{targetContainer}, callback);
+        MoveFilesOrDirectoriesUtil.doMove(project, directories, new PsiElement[]{targetContainer}, callback);
         return;
       }
       final MoveClassesOrPackagesToNewDirectoryDialog dlg =

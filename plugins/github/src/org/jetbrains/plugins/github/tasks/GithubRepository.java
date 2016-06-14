@@ -8,7 +8,6 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.tasks.*;
 import com.intellij.tasks.impl.BaseRepository;
 import com.intellij.tasks.impl.BaseRepositoryImpl;
-import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.xmlb.annotations.Tag;
 import com.intellij.util.xmlb.annotations.Transient;
@@ -41,6 +40,7 @@ public class GithubRepository extends BaseRepositoryImpl {
   @NotNull private String myRepoName = "";
   @NotNull private String myUser = "";
   @NotNull private String myToken = "";
+  private boolean myAssignedIssuesOnly = false;
 
   @SuppressWarnings({"UnusedDeclaration"})
   public GithubRepository() {
@@ -51,6 +51,7 @@ public class GithubRepository extends BaseRepositoryImpl {
     setRepoName(other.myRepoName);
     setRepoAuthor(other.myRepoAuthor);
     setToken(other.myToken);
+    setAssignedIssuesOnly(other.myAssignedIssuesOnly);
   }
 
   public GithubRepository(GithubRepositoryType type) {
@@ -67,7 +68,7 @@ public class GithubRepository extends BaseRepositoryImpl {
       @Override
       protected void doTest() throws Exception {
         try {
-          GithubApiUtil.getIssuesQueried(myConnection, getRepoAuthor(), getRepoName(), "", false);
+          GithubApiUtil.getIssuesQueried(myConnection, getRepoAuthor(), getRepoName(), null, null, false);
         }
         catch (GithubOperationCanceledException ignore) {
         }
@@ -126,23 +127,26 @@ public class GithubRepository extends BaseRepositoryImpl {
     GithubConnection connection = getConnection();
 
     try {
-      List<GithubIssue> issues;
-      if (StringUtil.isEmptyOrSpaces(query)) {
+      String assigned = null;
+      if (myAssignedIssuesOnly) {
         if (StringUtil.isEmptyOrSpaces(myUser)) {
           myUser = GithubApiUtil.getCurrentUser(connection).getLogin();
         }
-        issues = GithubApiUtil.getIssuesAssigned(connection, getRepoAuthor(), getRepoName(), myUser, max, withClosed);
-      }
-      else {
-        issues = GithubApiUtil.getIssuesQueried(connection, getRepoAuthor(), getRepoName(), query, withClosed);
+        assigned = myUser;
       }
 
-      return ContainerUtil.map2Array(issues, Task.class, new Function<GithubIssue, Task>() {
-        @Override
-        public Task fun(GithubIssue issue) {
-          return createTask(issue);
-        }
-      });
+      List<GithubIssue> issues;
+      if (StringUtil.isEmptyOrSpaces(query)) {
+        // search queries have way smaller request number limit
+        issues =
+          GithubApiUtil.getIssuesAssigned(connection, getRepoAuthor(), getRepoName(), assigned, max, withClosed);
+      }
+      else {
+        issues =
+          GithubApiUtil.getIssuesQueried(connection, getRepoAuthor(), getRepoName(), assigned, query, withClosed);
+      }
+
+      return ContainerUtil.map2Array(issues, Task.class, issue -> createTask(issue));
     }
     finally {
       connection.close();
@@ -236,14 +240,11 @@ public class GithubRepository extends BaseRepositoryImpl {
     try {
       List<GithubIssueComment> result = GithubApiUtil.getIssueComments(connection, getRepoAuthor(), getRepoName(), id);
 
-      return ContainerUtil.map2Array(result, Comment.class, new Function<GithubIssueComment, Comment>() {
-        @Override
-        public Comment fun(GithubIssueComment comment) {
-          return new GithubComment(comment.getCreatedAt(), comment.getUser().getLogin(), comment.getBodyHtml(),
-                                   comment.getUser().getAvatarUrl(),
-                                   comment.getUser().getHtmlUrl());
-        }
-      });
+      return ContainerUtil.map2Array(result, Comment.class, comment -> new GithubComment(comment.getCreatedAt(),
+                                                                                         comment.getUser().getLogin(),
+                                                                                         comment.getBodyHtml(),
+                                                                                         comment.getUser().getAvatarUrl(),
+                                                                                         comment.getUser().getHtmlUrl()));
     }
     finally {
       connection.close();
@@ -346,6 +347,14 @@ public class GithubRepository extends BaseRepositoryImpl {
     setUser("");
   }
 
+  public boolean isAssignedIssuesOnly() {
+    return myAssignedIssuesOnly;
+  }
+
+  public void setAssignedIssuesOnly(boolean value) {
+    myAssignedIssuesOnly = value;
+  }
+
   @Tag("token")
   public String getEncodedToken() {
     return PasswordUtil.encodePassword(getToken());
@@ -377,8 +386,15 @@ public class GithubRepository extends BaseRepositoryImpl {
     if (!Comparing.equal(getRepoAuthor(), that.getRepoAuthor())) return false;
     if (!Comparing.equal(getRepoName(), that.getRepoName())) return false;
     if (!Comparing.equal(getToken(), that.getToken())) return false;
+    if (!Comparing.equal(isAssignedIssuesOnly(), that.isAssignedIssuesOnly())) return false;
 
     return true;
+  }
+
+  @Override
+  public int hashCode() {
+    return StringUtil.stringHashCode(getRepoName()) +
+           31 * StringUtil.stringHashCode(getRepoAuthor());
   }
 
   @Override

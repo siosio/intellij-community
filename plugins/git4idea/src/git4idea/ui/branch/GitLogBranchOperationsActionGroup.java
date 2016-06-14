@@ -23,8 +23,6 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Condition;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.vcs.log.*;
-import com.intellij.vcs.log.data.RefsModel;
-import git4idea.GitPlatformFacade;
 import git4idea.config.GitVcsSettings;
 import git4idea.log.GitRefManager;
 import git4idea.repo.GitRepository;
@@ -58,16 +56,16 @@ public class GitLogBranchOperationsActionGroup extends ActionGroup implements Du
       return AnAction.EMPTY_ARRAY;
     }
 
-    List<VcsFullCommitDetails> details = log.getSelectedDetails();
-    if (details.size() != 1) return AnAction.EMPTY_ARRAY;
+    List<CommitId> commits = log.getSelectedCommits();
+    if (commits.size() != 1) return AnAction.EMPTY_ARRAY;
 
-    VcsFullCommitDetails commitDetails = details.get(0);
+    CommitId commit = commits.get(0);
     GitRepositoryManager repositoryManager = ServiceManager.getService(project, GitRepositoryManager.class);
-    final GitRepository root = repositoryManager.getRepositoryForRoot(commitDetails.getRoot());
+    final GitRepository root = repositoryManager.getRepositoryForRoot(commit.getRoot());
     if (root == null) return AnAction.EMPTY_ARRAY;
 
     VcsLogDataPack dataPack = logUI.getDataPack();
-    Collection<VcsRef> allVcsRefs = ((RefsModel)dataPack.getRefs()).refsToCommit(commitDetails.getId());
+    Collection<VcsRef> allVcsRefs = dataPack.getRefs().refsToCommit(commit.getHash(), commit.getRoot());
 
     List<VcsRef> vcsRefs = ContainerUtil.filter(allVcsRefs, new Condition<VcsRef>() {
       @Override
@@ -89,7 +87,7 @@ public class GitLogBranchOperationsActionGroup extends ActionGroup implements Du
 
     if (vcsRefs.isEmpty()) return AnAction.EMPTY_ARRAY;
 
-    GitVcsSettings settings = ServiceManager.getService(project, GitPlatformFacade.class).getSettings(project);
+    GitVcsSettings settings = GitVcsSettings.getInstance(project);
     boolean showBranchesPopup = vcsRefs.size() > MAX_BRANCH_GROUPS;
 
     List<AnAction> branchActionGroups = new ArrayList<AnAction>();
@@ -128,7 +126,8 @@ public class GitLogBranchOperationsActionGroup extends ActionGroup implements Du
     }
 
     String text = showBranchesPopup ? ref.getName() : "Branch '" + ref.getName() + "'";
-    ActionGroup group = new DefaultActionGroup(text, actions);
+    ActionGroup group = new DefaultActionGroup(actions);
+    group.getTemplatePresentation().setText(text, false);
     group.setPopup(true);
     return group;
   }

@@ -17,13 +17,8 @@ package com.intellij.openapi.editor;
 
 import com.intellij.openapi.editor.impl.DocumentImpl;
 import com.intellij.testFramework.LightPlatformTestCase;
-import com.intellij.testFramework.PlatformTestCase;
 
 public class FoldingStressTest extends LightPlatformTestCase {
-
-  static {
-    PlatformTestCase.autodetectPlatformPrefix();
-  }
 
   public void testStressFoldingFromZeroOffset() throws Exception {
     for (int len = 2; len < 25; len++) {
@@ -36,12 +31,9 @@ public class FoldingStressTest extends LightPlatformTestCase {
     Editor editor = EditorFactory.getInstance().createEditor(doc);
     try {
       final FoldingModel model = editor.getFoldingModel();
-      model.runBatchFoldingOperation(new Runnable() {
-        @Override
-        public void run() {
-          addAndCollapseFoldRegion(model, 0, 8, "/*...*/");
-          addAndCollapseFoldRegion(model, 10, 12, "/*...*/");
-        }
+      model.runBatchFoldingOperation(() -> {
+        addAndCollapseFoldRegion(model, 0, 8, "/*...*/");
+        addAndCollapseFoldRegion(model, 10, 12, "/*...*/");
       });
 
       assertEquals(10, editor.logicalPositionToOffset(new LogicalPosition(0, 10)));
@@ -63,12 +55,9 @@ public class FoldingStressTest extends LightPlatformTestCase {
     Editor editor = EditorFactory.getInstance().createEditor(doc);
     try {
       final FoldingModel model = editor.getFoldingModel();
-      model.runBatchFoldingOperation(new Runnable() {
-        @Override
-        public void run() {
-          addAndCollapseFoldRegion(model, 0, len, "/*...*/");
-          addAndCollapseFoldRegion(model, len + 2, len + 4, "/*...*/");
-        }
+      model.runBatchFoldingOperation(() -> {
+        addAndCollapseFoldRegion(model, 0, len, "/*...*/");
+        addAndCollapseFoldRegion(model, len + 2, len + 4, "/*...*/");
       });
 
       for (int line = 0; line <= 3; line++) {

@@ -20,6 +20,7 @@ import com.google.common.collect.Collections2;
 import com.google.common.collect.Maps;
 import com.intellij.psi.PsiElement;
 import com.jetbrains.python.PyNames;
+import com.jetbrains.python.codeInsight.PyTypingTypeProvider;
 import com.jetbrains.python.psi.types.*;
 import com.jetbrains.python.toolbox.ChainIterable;
 import org.jetbrains.annotations.NotNull;
@@ -128,9 +129,11 @@ public class PyTypeModelBuilder {
 
   static class TupleType extends TypeModel {
     private final List<TypeModel> members;
+    private final boolean homogeneous;
 
-    public TupleType(List<TypeModel> members) {
+    public TupleType(List<TypeModel> members, boolean homogeneous) {
       this.members = members;
+      this.homogeneous = homogeneous;
     }
 
     @Override
@@ -200,23 +203,22 @@ public class PyTypeModelBuilder {
     TypeModel result = null;
     if (type instanceof PyCollectionType) {
       final String name = type.getName();
-      final PyType elementType = ((PyCollectionType)type).getElementType(myContext);
-      final List<TypeModel> elementTypes = new ArrayList<TypeModel>();
-      if (elementType instanceof PyTupleType) {
-        final PyTupleType tupleType = (PyTupleType)elementType;
-        final int n = tupleType.getElementCount();
-        for (int i = 0; i < n; i++) {
-          final PyType t = tupleType.getElementType(i);
-          if (t != null) {
-            elementTypes.add(build(t, true));
-          }
+      final List<PyType> elementTypes = ((PyCollectionType)type).getElementTypes(myContext);
+      boolean nullOnlyTypes = true;
+      for (PyType elementType : elementTypes) {
+        if (elementType != null) {
+          nullOnlyTypes = false;
+          break;
         }
       }
-      else if (elementType != null) {
-        elementTypes.add(build(elementType, true));
-      }
-      if (!elementTypes.isEmpty()) {
-        result = new CollectionOf(name, elementTypes);
+      final List<TypeModel> elementModels = new ArrayList<TypeModel>();
+      if (!nullOnlyTypes) {
+        for (PyType elementType : elementTypes) {
+          elementModels.add(build(elementType, true));
+        }
+        if (!elementModels.isEmpty()) {
+          result = new CollectionOf(name, elementModels);
+        }
       }
     }
     else if (type instanceof PyUnionType && allowUnions) {
@@ -244,11 +246,11 @@ public class PyTypeModelBuilder {
     else if (type instanceof PyTupleType) {
       final List<TypeModel> elementModels = new ArrayList<TypeModel>();
       final PyTupleType tupleType = (PyTupleType)type;
-      for (int i = 0; i < tupleType.getElementCount(); i++) {
+      for (int i = 0; i < (tupleType.isHomogeneous() ? 1 : tupleType.getElementCount()); i++) {
         final PyType elementType = tupleType.getElementType(i);
         elementModels.add(build(elementType, true));
       }
-      result = new TupleType(elementModels);
+      result = new TupleType(elementModels, tupleType.isHomogeneous());
     }
     if (result == null) {
       result = type != null ? _(type.getName()) : _(PyNames.UNKNOWN_TYPE);
@@ -406,7 +408,9 @@ public class PyTypeModelBuilder {
         add("...");
         return;
       }
-      addType(collectionOf.collectionName);
+      final String name = collectionOf.collectionName;
+      final String typingName = PyTypingTypeProvider.TYPING_COLLECTION_CLASSES.get(name);
+      addType(typingName != null ? typingName : name);
       add("[");
       processList(collectionOf.elementTypes, ", ");
       add("]");
@@ -475,6 +479,9 @@ public class PyTypeModelBuilder {
     public void tuple(TupleType type) {
       add("Tuple[");
       processList(type.members, ", ");
+      if (type.homogeneous) {
+        add(", ...");
+      }
       add("]");
     }
   }

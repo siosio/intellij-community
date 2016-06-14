@@ -29,13 +29,11 @@ import com.intellij.openapi.wm.FocusCommand;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.openapi.wm.ex.IdeFocusTraversalPolicy;
 import com.intellij.ui.components.panels.NonOpaquePanel;
-import com.intellij.ui.components.panels.Wrapper;
 import com.intellij.ui.content.*;
 import com.intellij.ui.switcher.SwitchProvider;
 import com.intellij.ui.switcher.SwitchTarget;
 import com.intellij.util.EventDispatcher;
 import com.intellij.util.SmartList;
-import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -45,10 +43,8 @@ import javax.swing.*;
 import java.awt.*;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
-import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.*;
 import java.util.List;
-import java.util.Set;
 
 /**
  * @author Anton Katilin
@@ -63,7 +59,6 @@ public class ContentManagerImpl implements ContentManager, PropertyChangeListene
   private final List<Content> mySelection = new ArrayList<Content>();
   private final boolean myCanCloseContents;
 
-  private Wrapper.FocusHolder myFocusProxy;
   private MyNonOpaquePanel myComponent;
 
   private final Set<Content> myContentWithChangedComponent = new HashSet<Content>();
@@ -99,15 +94,10 @@ public class ContentManagerImpl implements ContentManager, PropertyChangeListene
     if (myComponent == null) {
       myComponent = new MyNonOpaquePanel();
 
-      myFocusProxy = new Wrapper.FocusHolder();
-      myFocusProxy.setOpaque(false);
-      myFocusProxy.setPreferredSize(JBUI.emptySize());
-
       MyContentComponent contentComponent = new MyContentComponent();
       contentComponent.setContent(myUI.getComponent());
       contentComponent.setFocusCycleRoot(true);
 
-      myComponent.add(myFocusProxy, BorderLayout.NORTH);
       myComponent.add(contentComponent, BorderLayout.CENTER);
     }
     return myComponent;
@@ -117,9 +107,9 @@ public class ContentManagerImpl implements ContentManager, PropertyChangeListene
   @Override
   public ActionCallback getReady(@NotNull Object requestor) {
     Content selected = getSelectedContent();
-    if (selected == null) return new ActionCallback.Done();
+    if (selected == null) return ActionCallback.DONE;
     BusyObject busyObject = selected.getBusyObject();
-    return busyObject != null ? busyObject.getReady(requestor) : new ActionCallback.Done();
+    return busyObject != null ? busyObject.getReady(requestor) : ActionCallback.DONE;
   }
 
   private class MyNonOpaquePanel extends NonOpaquePanel implements DataProvider {
@@ -156,7 +146,7 @@ public class ContentManagerImpl implements ContentManager, PropertyChangeListene
       if (myUI instanceof SwitchProvider) {
         return ((SwitchProvider)myUI).getTargets(onlyVisible, false);
       }
-      return new SmartList<SwitchTarget>();
+      return Collections.emptyList();
     }
 
     @Override
@@ -224,21 +214,18 @@ public class ContentManagerImpl implements ContentManager, PropertyChangeListene
   @Override
   public ActionCallback removeContent(@NotNull Content content, boolean dispose, final boolean trackFocus, final boolean forcedFocus) {
     final ActionCallback result = new ActionCallback();
-    removeContent(content, true, dispose).doWhenDone(new Runnable() {
-      @Override
-      public void run() {
-        if (trackFocus) {
-          Content current = getSelectedContent();
-          if (current != null) {
-            setSelectedContent(current, true, true, !forcedFocus);
-          }
-          else {
-            result.setDone();
-          }
+    removeContent(content, true, dispose).doWhenDone(() -> {
+      if (trackFocus) {
+        Content current = getSelectedContent();
+        if (current != null) {
+          setSelectedContent(current, true, true, !forcedFocus);
         }
         else {
           result.setDone();
         }
+      }
+      else {
+        result.setDone();
       }
     });
 
@@ -249,17 +236,17 @@ public class ContentManagerImpl implements ContentManager, PropertyChangeListene
   private ActionCallback removeContent(@NotNull Content content, boolean trackSelection, boolean dispose) {
     ApplicationManager.getApplication().assertIsDispatchThread();
     int indexToBeRemoved = getIndexOfContent(content);
-    if (indexToBeRemoved == -1) return new ActionCallback.Rejected();
+    if (indexToBeRemoved == -1) return ActionCallback.REJECTED;
 
     try {
       Content selection = mySelection.isEmpty() ? null : mySelection.get(mySelection.size() - 1);
       int selectedIndex = selection != null ? myContents.indexOf(selection) : -1;
 
       if (!fireContentRemoveQuery(content, indexToBeRemoved, ContentManagerEvent.ContentOperation.undefined)) {
-        return new ActionCallback.Rejected();
+        return ActionCallback.REJECTED;
       }
       if (!content.isValid()) {
-        return new ActionCallback.Rejected();
+        return ActionCallback.REJECTED;
       }
 
       boolean wasSelected = isSelected(content);
@@ -317,7 +304,9 @@ public class ContentManagerImpl implements ContentManager, PropertyChangeListene
     }
     finally {
       if (ApplicationManager.getApplication().isDispatchThread()) {
-        myUI.getComponent().updateUI(); //cleanup visibleComponent from Alloy...TabbedPaneUI
+        if (!myDisposed) {
+          myUI.getComponent().updateUI(); //cleanup visibleComponent from Alloy...TabbedPaneUI
+        }
       }
     }
   }
@@ -495,7 +484,7 @@ public class ContentManagerImpl implements ContentManager, PropertyChangeListene
     }
 
     if (!checkSelectionChangeShouldBeProcessed(content, implicit)) {
-      return new ActionCallback.Rejected();
+      return ActionCallback.REJECTED;
     }
     if (!myContents.contains(content)) {
       throw new IllegalArgumentException("Cannot find content:" + content.getDisplayName());
@@ -509,7 +498,7 @@ public class ContentManagerImpl implements ContentManager, PropertyChangeListene
       @NotNull
       @Override
       public ActionCallback run() {
-        if (myDisposed || getIndexOfContent(content) == -1) return new ActionCallback.Rejected();
+        if (myDisposed || getIndexOfContent(content) == -1) return ActionCallback.REJECTED;
 
         for (Content each : old) {
           removeFromSelection(each);
@@ -520,7 +509,7 @@ public class ContentManagerImpl implements ContentManager, PropertyChangeListene
         if (requestFocus) {
           return requestFocus(content, forcedFocus);
         }
-        return new ActionCallback.Done();
+        return ActionCallback.DONE;
       }
     };
 
@@ -528,12 +517,7 @@ public class ContentManagerImpl implements ContentManager, PropertyChangeListene
     boolean enabledFocus = getFocusManager().isFocusTransferEnabled();
     if (focused || requestFocus) {
       if (enabledFocus) {
-        return getFocusManager().requestFocus(myFocusProxy, true).doWhenProcessed(new Runnable() {
-          @Override
-          public void run() {
-            selection.run().notify(result);
-          }
-        });
+        return getFocusManager().requestFocus(myComponent, true).doWhenProcessed(() -> selection.run().notify(result));
       }
       return selection.run().notify(result);
     }
@@ -634,7 +618,7 @@ public class ContentManagerImpl implements ContentManager, PropertyChangeListene
   @Override
   public ActionCallback requestFocus(final Content content, final boolean forced) {
     final Content toSelect = content == null ? getSelectedContent() : content;
-    if (toSelect == null) return new ActionCallback.Rejected();
+    if (toSelect == null) return ActionCallback.REJECTED;
     assert myContents.contains(toSelect);
 
 
@@ -658,7 +642,7 @@ public class ContentManagerImpl implements ContentManager, PropertyChangeListene
       toFocus.requestFocus();
     }
 
-    return new ActionCallback.Done();
+    return ActionCallback.DONE;
   }
 
   private static JComponent computeWillFocusComponent(Content toSelect) {

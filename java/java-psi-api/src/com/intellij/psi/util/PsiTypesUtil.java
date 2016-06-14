@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -57,6 +57,7 @@ public class PsiTypesUtil {
 
   private PsiTypesUtil() { }
 
+  @NotNull
   public static String getDefaultValueOfType(PsiType type) {
     if (type instanceof PsiArrayType) {
       int count = type.getArrayDimensions() - 1;
@@ -79,17 +80,10 @@ public class PsiTypesUtil {
       }
       return buffer.toString();
     }
-    else if (type instanceof PsiPrimitiveType) {
-      if (PsiType.BOOLEAN.equals(type)) {
-        return PsiKeyword.FALSE;
-      }
-      else {
-        return "0";
-      }
+    if (type instanceof PsiPrimitiveType) {
+      return PsiType.BOOLEAN.equals(type) ? PsiKeyword.FALSE : "0";
     }
-    else {
-      return PsiKeyword.NULL;
-    }
+    return PsiKeyword.NULL;
   }
 
   /**
@@ -144,6 +138,15 @@ public class PsiTypesUtil {
     return null;
   }
 
+  public static PsiType patchMethodGetClassReturnType(@NotNull PsiMethodReferenceExpression methodExpression,
+                                                      @NotNull PsiMethod method) {
+    if (isGetClass(method)) {
+      final PsiType qualifierType = PsiMethodReferenceUtil.getQualifierType(methodExpression);
+      return qualifierType != null ? createJavaLangClassType(methodExpression, qualifierType, true) : null;
+    }
+    return null;
+  }
+  
   public static PsiType patchMethodGetClassReturnType(@NotNull PsiExpression call,
                                                       @NotNull PsiReferenceExpression methodExpression,
                                                       @NotNull PsiMethod method,
@@ -192,15 +195,15 @@ public class PsiTypesUtil {
   }
 
   @Nullable
-  public static PsiType getExpectedTypeByParent(PsiExpression methodCall) {
-    final PsiElement parent = PsiUtil.skipParenthesizedExprUp(methodCall.getParent());
+  public static PsiType getExpectedTypeByParent(PsiElement element) {
+    final PsiElement parent = PsiUtil.skipParenthesizedExprUp(element.getParent());
     if (parent instanceof PsiVariable) {
-      if (PsiUtil.checkSameExpression(methodCall, ((PsiVariable)parent).getInitializer())) {
+      if (PsiUtil.checkSameExpression(element, ((PsiVariable)parent).getInitializer())) {
         return ((PsiVariable)parent).getType();
       }
     }
     else if (parent instanceof PsiAssignmentExpression) {
-      if (PsiUtil.checkSameExpression(methodCall, ((PsiAssignmentExpression)parent).getRExpression())) {
+      if (PsiUtil.checkSameExpression(element, ((PsiAssignmentExpression)parent).getRExpression())) {
         return ((PsiAssignmentExpression)parent).getLExpression().getType();
       }
     }
@@ -213,13 +216,19 @@ public class PsiTypesUtil {
         return ((PsiMethod)psiElement).getReturnType();
       }
     }
-    else if (PsiUtil.isCondition(methodCall, parent)) {
+    else if (PsiUtil.isCondition(element, parent)) {
       return PsiType.BOOLEAN.getBoxedType(parent);
     } 
     else if (parent instanceof PsiArrayInitializerExpression) {
       final PsiElement gParent = parent.getParent();
       if (gParent instanceof PsiNewExpression) {
         final PsiType type = ((PsiNewExpression)gParent).getType();
+        if (type instanceof PsiArrayType) {
+          return ((PsiArrayType)type).getComponentType();
+        }
+      }
+      else if (gParent instanceof PsiVariable) {
+        final PsiType type = ((PsiVariable)gParent).getType();
         if (type instanceof PsiArrayType) {
           return ((PsiArrayType)type).getComponentType();
         }
@@ -250,5 +259,54 @@ public class PsiTypesUtil {
       return false;
     }
     return true;
+  }
+  
+  public static boolean hasUnresolvedComponents(@NotNull PsiType type) {
+    return type.accept(new PsiTypeVisitor<Boolean>() {
+      @Nullable
+      @Override
+      public Boolean visitClassType(PsiClassType classType) {
+        final PsiClass psiClass = classType.resolve();
+        if (psiClass == null) {
+          return true;
+        }
+        for (PsiType param : classType.getParameters()) {
+          if (param.accept(this)) {
+            return true;
+          }
+        }
+        return super.visitClassType(classType);
+      }
+
+      @Nullable
+      @Override
+      public Boolean visitArrayType(PsiArrayType arrayType) {
+        return arrayType.getComponentType().accept(this);
+      }
+
+      @Nullable
+      @Override
+      public Boolean visitWildcardType(PsiWildcardType wildcardType) {
+        final PsiType bound = wildcardType.getBound();
+        return bound != null && bound.accept(this);
+      }
+
+      @Override
+      public Boolean visitType(PsiType type) {
+        return false;
+      }
+    });
+  }
+
+  public static PsiType getParameterType(PsiParameter[] parameters, int i, boolean varargs) {
+    final PsiParameter parameter = parameters[i < parameters.length ? i : parameters.length - 1];
+    PsiType parameterType = parameter.getType();
+    if (parameterType instanceof PsiEllipsisType && varargs) {
+      parameterType = ((PsiEllipsisType)parameterType).getComponentType();
+    }
+    if (!parameterType.isValid()) {
+      PsiUtil.ensureValidType(parameterType, "Invalid type of parameter " + parameter + " of " + parameter.getClass());
+    }
+    return parameterType;
   }
 }

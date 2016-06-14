@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,13 +30,13 @@ abstract class TypeInferenceTestBase extends GroovyResolveTestCase {
   final String basePath = TestUtils.testDataPath + "resolve/inference/"
 
   @Override
-  protected void setUp() {
+  void setUp() {
     super.setUp()
 
     myFixture.addClass("package java.math; public class BigDecimal extends Number implements Comparable<BigDecimal> {}");
   }
 
-  protected void doTest(@Language("Groovy") String text, @Nullable String type) {
+  protected void doTest(String text, @Nullable String type) {
     def file = myFixture.configureByText('_.groovy', text)
     def ref = file.findReferenceAt(myFixture.editor.caretModel.offset) as GrReferenceExpression
     def actual = ref.type

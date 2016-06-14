@@ -1,4 +1,4 @@
-<component>
+<idea-plugin>
   <actions>
     <group id="JavaGenerateGroup1">
       <action id="GenerateTestMethod" class="com.intellij.testIntegration.GenerateTestMethodAction"/>
@@ -37,6 +37,14 @@
       <add-to-group group-id="InspectCodeGroup" anchor="after" relative-to-action="ViewOfflineInspection"/>
     </action>
 
+    <action id="StubHierarchy" class="com.intellij.psi.stubsHierarchy.impl.test.BuildStubsHierarchyAction" text="Build Stub Hierarchy" internal="true">
+      <add-to-group group-id="InspectCodeGroup" anchor="after" relative-to-action="ViewOfflineInspection"/>
+    </action>
+
+    <action id="TestStubHierarchy" class="com.intellij.psi.stubsHierarchy.impl.test.TestStubHierarchyAction" text="Test Stub Hierarchy" internal="true">
+      <add-to-group group-id="InspectCodeGroup" anchor="after" relative-to-action="ViewOfflineInspection"/>
+    </action>
+
     <group id="AnalyzeJavaMenu">
       <action id="ShowPackageCycles" class="com.intellij.cyclicDependencies.actions.CyclicDependenciesAction"/>
       <separator/>
@@ -60,7 +68,6 @@
     <group id="RefactoringMenu2">
       <action id="MethodDuplicates" class="com.intellij.refactoring.actions.MethodDuplicatesAction"/>
       
-      <action id="InvertBoolean" class="com.intellij.refactoring.actions.InvertBooleanAction"/>
       <add-to-group group-id="RefactoringMenu" anchor="after" relative-to-action="Inline"/>
     </group>
 
@@ -69,12 +76,8 @@
     </action>
 
     <action id="IntroduceFunctionalParameter" class="com.intellij.refactoring.actions.IntroduceFunctionalParameterAction">
-      <add-to-group group-id="IntroduceActionsGroup" anchor="after" relative-to-action="IntroduceParameter"/>
+      <add-to-group group-id="IntroduceActionsGroup" anchor="before" relative-to-action="IntroduceParameterObject"/>
       <keyboard-shortcut first-keystroke="control shift alt P" keymap="$default"/>
-    </action>
-
-    <action id="IntroduceParameterObject" class="com.intellij.refactoring.actions.IntroduceParameterObjectAction">
-      <add-to-group group-id="IntroduceActionsGroup" anchor="after" relative-to-action="IntroduceFunctionalParameter"/>
     </action>
 
     <action id="RenameFile" class="com.intellij.refactoring.actions.RenameFileAction">
@@ -111,14 +114,6 @@
       <add-to-group group-id="XDebugger.ToolWindow.TopToolbar" anchor="before" relative-to-action="RunToCursor"/>
     </action>
 
-    <action id="Debugger.ShowLibraryFrames" class="com.intellij.debugger.actions.ShowLibraryFramesAction">
-      <add-to-group group-id="XDebugger.Frames.TopToolbar"/>
-    </action>
-
-    <action id="Debugger.AddSteppingFilter" class="com.intellij.debugger.actions.AddSteppingFilterAction" text="Add Stepping Filter...">
-      <add-to-group group-id="XDebugger.Frames.Tree.Popup"/>
-    </action>
-
     <group id="ToggleBreakpointAction">
       <action id="ToggleMethodBreakpoint" class="com.intellij.debugger.actions.ToggleMethodBreakpointAction"/>
       <action id="ToggleFieldBreakpoint" class="com.intellij.debugger.actions.ToggleFieldBreakpointAction"/>
@@ -150,6 +145,10 @@
             text="List Used Icons">
       <add-to-group group-id="Internal"/>
     </action>
+    <action id="ExpressionStatistics" internal="true" class="com.intellij.internal.ExpressionStatisticsAction"
+            text="Collect Java Expression Statistics">
+      <add-to-group group-id="Internal"/>
+    </action>
 
     <action id="StaticIconFields" internal="true" class="com.intellij.internal.StaticIconFieldsAction"
             text="List Static Field Initializers">
@@ -157,7 +156,6 @@
     </action>
 
     <group id="JavaDebuggerActions">
-      <!--<action id="Debugger.Inspect" class="com.intellij.debugger.actions.InspectAction"/>-->
       <action id="Debugger.CustomizeContextView" class="com.intellij.debugger.actions.CustomizeContextViewAction">
         <add-to-group group-id="XDebugger.Variables.Tree.Popup" anchor="last"/>
         <add-to-group group-id="XDebugger.Watches.Tree.Popup" anchor="last"/>
@@ -168,7 +166,7 @@
       <action id="Debugger.CustomizeThreadsView" class="com.intellij.debugger.actions.CustomizeThreadsViewAction">
         <add-to-group group-id="XDebugger.Frames.Tree.Popup" anchor="last"/>
       </action>
-      <action id="Debugger.EditFrameSource" class="com.intellij.debugger.actions.EditFrameSourceAction"/>
+      <action id="Debugger.EditFrameSource" class="com.intellij.debugger.actions.EditFrameSourceAction" use-shortcut-of="EditSource"/>
       <action id="Debugger.EditNodeSource" class="com.intellij.debugger.actions.EditSourceAction"/>
       <action id="Debugger.EditTypeSource" class="com.intellij.debugger.actions.JumpToObjectAction"/>
       <reference ref="Debugger.PopFrame"/>
@@ -178,15 +176,27 @@
       <action id="Debugger.AdjustArrayRange" class="com.intellij.debugger.actions.AdjustArrayRangeAction">
         <add-to-group group-id="XDebugger.ValueGroup" anchor="last"/>
       </action>
+      <action id="Debugger.ShowTypes" class="com.intellij.debugger.actions.ShowTypesAction" text="Show types">
+        <add-to-group group-id="XDebugger.ValueGroup" anchor="last"/>
+      </action>
       <!--<action id="Debugger.SetValue" class="com.intellij.debugger.actions.SetValueAction"/>-->
       <!--<action id="Debugger.ShowAsHex" class="com.intellij.debugger.actions.ShowAsHexAction" text="Show as Hex"/>-->
       <action id="Debugger.ResumeThread" class="com.intellij.debugger.actions.ResumeThreadAction"/>
       <action id="Debugger.FreezeThread" class="com.intellij.debugger.actions.FreezeThreadAction"/>
       <action id="Debugger.InterruptThread" class="com.intellij.debugger.actions.InterruptThreadAction"/>
-      <add-to-group group-id="DebuggerActions" anchor="first"/>
+
+      <action id="Debugger.ForceEarlyReturn" class="com.intellij.debugger.actions.ForceEarlyReturnAction">
+        <add-to-group group-id="XDebugger.Frames.Tree.Popup" anchor="after" relative-to-action="Debugger.PopFrame"/>
+      </action>
+
+      <action id="Debugger.AddSteppingFilter" class="com.intellij.debugger.actions.AddSteppingFilterAction" text="Add Stepping Filter...">
+        <add-to-group group-id="XDebugger.Frames.Tree.Popup"/>
+      </action>
     </group>
 
     <group id="Debugger.Representation">
+      <action id="Debugger.CreateRenderer" class="com.intellij.debugger.actions.CreateRendererAction" text="Create..."/>
+      <separator/>
       <action id="Debugger.AutoRenderer" class="com.intellij.debugger.actions.AutoRendererAction"/>
     </group>
 
@@ -205,7 +215,9 @@
       <add-to-group group-id="StructureViewCompileGroup" anchor="first"/>
     </group>
 
-    <action id="TypeHierarchy.BaseOnThisType" class="com.intellij.ide.hierarchy.type.TypeHierarchyBrowser$BaseOnThisTypeAction">
+    <action id="TypeHierarchy.BaseOnThisType"
+            class="com.intellij.ide.hierarchy.type.TypeHierarchyBrowser$BaseOnThisTypeAction"
+            use-shortcut-of="TypeHierarchy">
       <add-to-group group-id="TypeHierarchyPopupMenu" anchor="first"/>
     </action>
 
@@ -218,11 +230,15 @@
       <add-to-group group-id="MethodHierarchyPopupMenu" anchor="first"/>
     </group>
 
-    <action id="MethodHierarchy.BaseOnThisType" class="com.intellij.ide.hierarchy.method.MethodHierarchyBrowser$BaseOnThisMethodAction">
+    <action id="MethodHierarchy.BaseOnThisType"
+            class="com.intellij.ide.hierarchy.method.MethodHierarchyBrowser$BaseOnThisMethodAction"
+            use-shortcut-of="MethodHierarchy">
       <add-to-group group-id="MethodHierarchyPopupMenu" anchor="first"/>
     </action>
 
-    <action id="CallHierarchy.BaseOnThisType" class="com.intellij.ide.hierarchy.call.CallHierarchyBrowser$BaseOnThisMethodAction">
+    <action id="CallHierarchy.BaseOnThisType"
+            class="com.intellij.ide.hierarchy.call.CallHierarchyBrowser$BaseOnThisMethodAction"
+            use-shortcut-of="CallHierarchy">
       <add-to-group group-id="CallHierarchyPopupMenu" anchor="first"/>
     </action>
 
@@ -357,4 +373,4 @@
       <add-to-group group-id="FileChooserToolbar" anchor="last"/>
     </action>
   </actions>
-</component>
+</idea-plugin>

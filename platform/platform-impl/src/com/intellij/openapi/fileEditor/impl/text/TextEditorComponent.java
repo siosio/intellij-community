@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,18 +15,16 @@
  */
 package com.intellij.openapi.fileEditor.impl.text;
 
-import com.intellij.ide.ui.customization.CustomActionsSchema;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.DataProvider;
+import com.intellij.openapi.actionSystem.IdeActions;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorFactory;
-import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.event.DocumentAdapter;
 import com.intellij.openapi.editor.event.DocumentEvent;
-import com.intellij.openapi.editor.event.EditorMouseEvent;
-import com.intellij.openapi.editor.event.EditorMouseEventArea;
 import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.editor.ex.EditorMarkupModel;
 import com.intellij.openapi.editor.highlighter.EditorHighlighter;
@@ -49,15 +47,14 @@ import com.intellij.openapi.vfs.VirtualFilePropertyEvent;
 import com.intellij.openapi.wm.WindowManager;
 import com.intellij.openapi.wm.ex.StatusBarEx;
 import com.intellij.ui.components.JBLoadingPanel;
-import com.intellij.util.EditorPopupHandler;
 import com.intellij.util.FileContentUtilCore;
 import com.intellij.util.messages.MessageBusConnection;
+import com.intellij.util.ui.JBSwingUtilities;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
-import java.awt.event.MouseEvent;
 
 /**
  * @author Anton Katilin
@@ -74,7 +71,6 @@ class TextEditorComponent extends JBLoadingPanel implements DataProvider {
    */
   private final Document myDocument;
 
-  private final MyEditorMouseListener myEditorMouseListener;
   private final MyDocumentListener myDocumentListener;
   private final MyVirtualFileListener myVirtualFileListener;
   @NotNull private final Editor myEditor;
@@ -100,8 +96,6 @@ class TextEditorComponent extends JBLoadingPanel implements DataProvider {
     LOG.assertTrue(myDocument!=null);
     myDocumentListener = new MyDocumentListener();
     myDocument.addDocumentListener(myDocumentListener);
-
-    myEditorMouseListener = new MyEditorMouseListener();
 
     myEditor = createEditor();
     add(myEditor.getComponent(), BorderLayout.CENTER);
@@ -136,7 +130,7 @@ class TextEditorComponent extends JBLoadingPanel implements DataProvider {
     if (!myProject.isDefault()) { // There's no EditorHistoryManager for default project (which is used in diff command-line application)
       EditorHistoryManager.getInstance(myProject).updateHistoryEntry(myFile, false);
     }
-    disposeEditor(myEditor);
+    disposeEditor();
     myConnection.disconnect();
 
     myFile.getFileSystem().removeVirtualFileListener(myVirtualFileListener);
@@ -166,19 +160,15 @@ class TextEditorComponent extends JBLoadingPanel implements DataProvider {
     return myEditor;
   }
 
-  /**
-   * @return created editor. This editor should be released by {@link #disposeEditor(Editor) }
-   * method.
-   */
   @NotNull
   private Editor createEditor(){
     Editor editor = EditorFactory.getInstance().createEditor(myDocument, myProject);
     ((EditorMarkupModel) editor.getMarkupModel()).setErrorStripeVisible(true);
-    EditorHighlighter highlighter = EditorHighlighterFactory.getInstance().createEditorHighlighter(myFile, EditorColorsManager.getInstance().getGlobalScheme(), myProject);
-    ((EditorEx) editor).setHighlighter(highlighter);
+    ((EditorEx) editor).getGutterComponentEx().setForceShowRightFreePaintersArea(true);
+
     ((EditorEx) editor).setFile(myFile);
 
-    editor.addEditorMouseListener(myEditorMouseListener);
+    ((EditorEx)editor).setContextMenuGroupId(IdeActions.GROUP_EDITOR_POPUP);
 
     ((EditorImpl) editor).setDropHandler(new FileDropHandler(editor));
 
@@ -186,13 +176,8 @@ class TextEditorComponent extends JBLoadingPanel implements DataProvider {
     return editor;
   }
 
-  /**
-   * Disposes resources allocated by the specified editor view and registers all
-   * it's listeners
-   */
-  private void disposeEditor(@NotNull Editor editor){
-    EditorFactory.getInstance().releaseEditor(editor);
-    editor.removeEditorMouseListener(myEditorMouseListener);
+  private void disposeEditor(){
+    EditorFactory.getInstance().releaseEditor(myEditor);
   }
 
   /**
@@ -276,7 +261,7 @@ class TextEditorComponent extends JBLoadingPanel implements DataProvider {
   @Override
   public Object getData(final String dataId) {
     final Editor e = validateCurrentEditor();
-    if (e == null) return null;
+    if (e == null || e.isDisposed()) return null;
 
     // There's no FileEditorManager for default project (which is used in diff command-line application)
     if (!myProject.isDisposed() && !myProject.isDefault()) {
@@ -294,26 +279,6 @@ class TextEditorComponent extends JBLoadingPanel implements DataProvider {
   }
 
   /**
-   * Shows popup menu
-   */
-  private static final class MyEditorMouseListener extends EditorPopupHandler {
-    @Override
-    public void invokePopup(final EditorMouseEvent event) {
-      if (!event.isConsumed() && event.getArea() == EditorMouseEventArea.EDITING_AREA) {
-        ActionGroup group = (ActionGroup)CustomActionsSchema.getInstance().getCorrectedAction(IdeActions.GROUP_EDITOR_POPUP);
-        ActionPopupMenu popupMenu = ActionManager.getInstance().createActionPopupMenu(ActionPlaces.EDITOR_POPUP, group);
-        MouseEvent e = event.getMouseEvent();
-        final Component c = e.getComponent();
-        if (c != null && c.isShowing()) {
-          popupMenu.getComponent().show(c, e.getX(), e.getY());
-        }
-        e.consume();
-      }
-    }
-  }
-
-
-  /**
    * Updates "modified" property
    */
   private final class MyDocumentListener extends DocumentAdapter {
@@ -321,20 +286,22 @@ class TextEditorComponent extends JBLoadingPanel implements DataProvider {
      * We can reuse this runnable to decrease number of allocated object.
      */
     private final Runnable myUpdateRunnable;
+    private boolean myUpdateScheduled;
 
     public MyDocumentListener() {
-      myUpdateRunnable = new Runnable() {
-        @Override
-        public void run() {
-          updateModifiedProperty();
-        }
+      myUpdateRunnable = () -> {
+        myUpdateScheduled = false;
+        updateModifiedProperty();
       };
     }
 
     @Override
     public void documentChanged(DocumentEvent e) {
-      // document's timestamp is changed later on undo or PSI changes
-      ApplicationManager.getApplication().invokeLater(myUpdateRunnable);
+      if (!myUpdateScheduled) {
+        // document's timestamp is changed later on undo or PSI changes
+        ApplicationManager.getApplication().invokeLater(myUpdateRunnable);
+        myUpdateScheduled = true;
+      }
     }
   }
 
@@ -387,5 +354,16 @@ class TextEditorComponent extends JBLoadingPanel implements DataProvider {
   @NotNull
   public VirtualFile getFile() {
     return myFile;
+  }
+
+  @Override
+  public Color getBackground() {
+    //noinspection ConstantConditions
+    return myEditor == null ? super.getBackground() : myEditor.getContentComponent().getBackground();
+  }
+
+  @Override
+  protected Graphics getComponentGraphics(Graphics g) {
+    return JBSwingUtilities.runGlobalCGTransform(this, super.getComponentGraphics(g));
   }
 }

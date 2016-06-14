@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 package com.intellij.slicer;
 
 import com.intellij.analysis.AnalysisScope;
-import com.intellij.codeInsight.daemon.DaemonAnalyzerTestCase;
 import com.intellij.codeInsight.daemon.impl.HighlightInfo;
 import com.intellij.openapi.editor.RangeMarker;
 import com.intellij.psi.PsiDocumentManager;
@@ -30,23 +29,23 @@ import java.util.Map;
 /**
  * @author cdr
  */
-public class SliceForwardTest extends DaemonAnalyzerTestCase {
-  private final TIntObjectHashMap<IntArrayList> myFlownOffsets = new TIntObjectHashMap<IntArrayList>();
+public class SliceForwardTest extends SliceTestCase {
+  private final TIntObjectHashMap<IntArrayList> myFlownOffsets = new TIntObjectHashMap<>();
 
   private void dotest() throws Exception {
     configureByFile("/codeInsight/slice/forward/"+getTestName(false)+".java");
-    Map<String, RangeMarker> sliceUsageName2Offset = SliceBackwardTest.extractSliceOffsetsFromDocument(getEditor().getDocument());
+    Map<String, RangeMarker> sliceUsageName2Offset = SliceTestUtil.extractSliceOffsetsFromDocument(getEditor().getDocument());
     PsiDocumentManager.getInstance(getProject()).commitAllDocuments();
     PsiElement element = new SliceForwardHandler().getExpressionAtCaret(getEditor(), getFile());
     assertNotNull(element);
-    SliceBackwardTest.calcRealOffsets(element, sliceUsageName2Offset, myFlownOffsets);
+    SliceTestUtil.calcRealOffsets(element, sliceUsageName2Offset, myFlownOffsets);
     Collection<HighlightInfo> errors = highlightErrors();
     assertEmpty(errors);
     SliceAnalysisParams params = new SliceAnalysisParams();
     params.scope = new AnalysisScope(getProject());
     params.dataFlowToThis = false;
-    SliceUsage usage = SliceUsage.createRootUsage(element, params);
-    SliceBackwardTest.checkUsages(usage, myFlownOffsets);
+    SliceUsage usage = LanguageSlicing.getProvider(element).createRootUsage(element, params);
+    SliceTestUtil.checkUsages(usage, myFlownOffsets);
   }
 
   public void testSimple() throws Exception { dotest();}

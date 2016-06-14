@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ import com.intellij.codeInspection.*;
 import com.intellij.codeInspection.dataFlow.DfaPsiUtil;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.WriteExternalException;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
@@ -51,9 +52,9 @@ public class NullableStuffInspectionBase extends BaseJavaBatchLocalInspectionToo
   @SuppressWarnings({"WeakerAccess"}) public boolean REPORT_NOTNULL_PARAMETER_OVERRIDES_NULLABLE = true;
   @Deprecated @SuppressWarnings({"WeakerAccess"}) public boolean REPORT_NOT_ANNOTATED_PARAMETER_OVERRIDES_NOTNULL = true;
   @SuppressWarnings({"WeakerAccess"}) public boolean REPORT_NOT_ANNOTATED_GETTER = true;
-  @SuppressWarnings({"WeakerAccess"}) public boolean IGNORE_EXTERNAL_SUPER_NOTNULL = false;
+  @SuppressWarnings({"WeakerAccess"}) public boolean IGNORE_EXTERNAL_SUPER_NOTNULL;
   @SuppressWarnings({"WeakerAccess"}) public boolean REQUIRE_NOTNULL_FIELDS_INITIALIZED = true;
-  @SuppressWarnings({"WeakerAccess"}) public boolean REPORT_NOTNULL_PARAMETERS_OVERRIDES_NOT_ANNOTATED = false;
+  @SuppressWarnings({"WeakerAccess"}) public boolean REPORT_NOTNULL_PARAMETERS_OVERRIDES_NOT_ANNOTATED;
   @Deprecated @SuppressWarnings({"WeakerAccess"}) public boolean REPORT_NOT_ANNOTATED_SETTER_PARAMETER = true;
   @Deprecated @SuppressWarnings({"WeakerAccess"}) public boolean REPORT_ANNOTATION_NOT_PROPAGATED_TO_OVERRIDERS = true; // remains for test
   @SuppressWarnings({"WeakerAccess"}) public boolean REPORT_NULLS_PASSED_TO_NON_ANNOTATED_METHOD = true;
@@ -77,7 +78,8 @@ public class NullableStuffInspectionBase extends BaseJavaBatchLocalInspectionToo
   @Override
   @NotNull
   public PsiElementVisitor buildVisitor(@NotNull final ProblemsHolder holder, boolean isOnTheFly) {
-    if (!PsiUtil.isLanguageLevel5OrHigher(holder.getFile())) {
+    final PsiFile file = holder.getFile();
+    if (!PsiUtil.isLanguageLevel5OrHigher(file) || nullabilityAnnotationsNotAvailable(file)) {
       return new PsiElementVisitor() { };
     }
     return new JavaElementVisitor() {
@@ -103,11 +105,11 @@ public class NullableStuffInspectionBase extends BaseJavaBatchLocalInspectionToo
 
           checkAccessors(field, annotated, project, manager, anno, annoToRemove, holder);
 
-          if (REQUIRE_NOTNULL_FIELDS_INITIALIZED) {
-            checkNotNullFieldsInitialized(field, annotated, manager, holder);
-          }
-
           checkConstructorParameters(field, annotated, manager, anno, annoToRemove, holder);
+        }
+
+        if (REQUIRE_NOTNULL_FIELDS_INITIALIZED && !annotated.isDeclaredNullable) {
+          checkNotNullFieldsInitialized(field, manager, holder);
         }
       }
 
@@ -144,6 +146,13 @@ public class NullableStuffInspectionBase extends BaseJavaBatchLocalInspectionToo
         return false;
       }
     };
+  }
+
+  private static boolean nullabilityAnnotationsNotAvailable(final PsiFile file) {
+    final Project project = file.getProject();
+    final GlobalSearchScope scope = GlobalSearchScope.allScope(project);
+    final JavaPsiFacade facade = JavaPsiFacade.getInstance(project);
+    return ContainerUtil.find(NullableNotNullManager.getInstance(project).getNullables(), s -> facade.findClass(s, scope) != null) == null;
   }
 
   private static boolean checkNonStandardAnnotations(PsiField field,
@@ -245,17 +254,14 @@ public class NullableStuffInspectionBase extends BaseJavaBatchLocalInspectionToo
     LOG.assertTrue(parameter.isPhysical(), setter.getText());
   }
 
-  private static void checkNotNullFieldsInitialized(PsiField field,
-                                                    Annotated annotated,
-                                                    NullableNotNullManager manager, @NotNull ProblemsHolder holder) {
-    if (annotated.isDeclaredNotNull && !HighlightControlFlowUtil.isFieldInitializedAfterObjectConstruction(field)) {
-      final PsiAnnotation annotation = AnnotationUtil.findAnnotation(field, manager.getNotNulls());
-      if (annotation != null) {
-        holder.registerProblem(annotation.isPhysical() ? annotation : field.getNameIdentifier(),
-                               "Not-null fields must be initialized",
-                               ProblemHighlightType.GENERIC_ERROR_OR_WARNING);
-      }
-    }
+  private static void checkNotNullFieldsInitialized(PsiField field, NullableNotNullManager manager, @NotNull ProblemsHolder holder) {
+    PsiAnnotation annotation = manager.getNotNullAnnotation(field, false);
+    if (annotation == null || HighlightControlFlowUtil.isFieldInitializedAfterObjectConstruction(field)) return;
+
+    boolean byDefault = manager.isContainerAnnotation(annotation);
+    PsiJavaCodeReferenceElement name = annotation.getNameReferenceElement();
+    holder.registerProblem(annotation.isPhysical() && !byDefault ? annotation : field.getNameIdentifier(),
+                           (byDefault && name != null ? "@" + name.getReferenceName() : "Not-null") + " fields must be initialized");
   }
 
   private void checkConstructorParameters(PsiField field,
@@ -376,12 +382,7 @@ public class NullableStuffInspectionBase extends BaseJavaBatchLocalInspectionToo
     Annotated annotated = check(method, holder, method.getReturnType());
 
     List<PsiMethod> superMethods = ContainerUtil.map(
-      method.findSuperMethodSignaturesIncludingStatic(true), new Function<MethodSignatureBackedByPsiMethod, PsiMethod>() {
-        @Override
-        public PsiMethod fun(MethodSignatureBackedByPsiMethod signature) {
-          return signature.getMethod();
-        }
-      });
+      method.findSuperMethodSignaturesIncludingStatic(true), signature -> signature.getMethod());
 
     final NullableNotNullManager nullableManager = NullableNotNullManager.getInstance(holder.getProject());
 
@@ -503,7 +504,7 @@ public class NullableStuffInspectionBase extends BaseJavaBatchLocalInspectionToo
         final String defaultNotNull = nullableManager.getDefaultNotNull();
         final boolean superMethodApplicable = AnnotationUtil.isAnnotatingApplicable(method, defaultNotNull);
         PsiMethod[] overridings =
-          OverridingMethodsSearch.search(method, GlobalSearchScope.allScope(manager.getProject()), true).toArray(PsiMethod.EMPTY_ARRAY);
+          OverridingMethodsSearch.search(method).toArray(PsiMethod.EMPTY_ARRAY);
         boolean methodQuickFixSuggested = false;
         for (PsiMethod overriding : overridings) {
           if (!manager.isInProject(overriding)) continue;

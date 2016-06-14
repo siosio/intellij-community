@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,7 +32,6 @@ import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.codeStyle.*;
-import com.intellij.psi.codeStyle.autodetect.DetectableIndentOptionsProvider;
 import com.intellij.testFramework.LightIdeaTestCase;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.containers.ContainerUtil;
@@ -74,7 +73,7 @@ public abstract class AbstractJavaFormatterTest extends LightIdeaTestCase {
         if (line.length > 0 || shiftEmptyLines) {
           StringUtil.repeatSymbol(result, ' ', i);
         }
-        result.append(new String(line));
+        result.append(new String(line, CharsetToolkit.UTF8_CHARSET));
       }
       finally {
         first = false;
@@ -202,28 +201,20 @@ public abstract class AbstractJavaFormatterTest extends LightIdeaTestCase {
         new TextRange(doc.getLineStartOffset(myLineRange.getStartOffset()), doc.getLineEndOffset(myLineRange.getEndOffset()));
     }
     final PsiDocumentManager manager = PsiDocumentManager.getInstance(getProject());
-    CommandProcessor.getInstance().executeCommand(getProject(), new Runnable() {
-      @Override
-      public void run() {
-        ApplicationManager.getApplication().runWriteAction(new Runnable() {
-          @Override
-          public void run() {
-            document.replaceString(0, document.getTextLength(), text);
-            manager.commitDocument(document);
-            try {
-              TextRange rangeToUse = myTextRange;
-              if (rangeToUse == null) {
-                rangeToUse = file.getTextRange();
-              }
-              ACTIONS.get(action).run(file, rangeToUse.getStartOffset(), rangeToUse.getEndOffset());
-            }
-            catch (IncorrectOperationException e) {
-              assertTrue(e.getLocalizedMessage(), false);
-            }
-          }
-        });
+    CommandProcessor.getInstance().executeCommand(getProject(), () -> ApplicationManager.getApplication().runWriteAction(() -> {
+      document.replaceString(0, document.getTextLength(), text);
+      manager.commitDocument(document);
+      try {
+        TextRange rangeToUse = myTextRange;
+        if (rangeToUse == null) {
+          rangeToUse = file.getTextRange();
+        }
+        ACTIONS.get(action).run(file, rangeToUse.getStartOffset(), rangeToUse.getEndOffset());
       }
-    }, action == Action.REFORMAT ? ReformatCodeProcessor.COMMAND_NAME : "", "");
+      catch (IncorrectOperationException e) {
+        assertTrue(e.getLocalizedMessage(), false);
+      }
+    }), action == Action.REFORMAT ? ReformatCodeProcessor.COMMAND_NAME : "", "");
 
     return document.getText();
   }
@@ -244,7 +235,7 @@ public abstract class AbstractJavaFormatterTest extends LightIdeaTestCase {
     );
   }
 
-  private static String loadFile(String name) {
+  protected static String loadFile(String name) {
     String fullName = BASE_PATH + File.separatorChar + name;
     try {
       String text = FileUtil.loadFile(new File(fullName));

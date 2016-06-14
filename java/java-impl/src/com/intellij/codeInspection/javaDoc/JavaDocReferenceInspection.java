@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -134,23 +134,20 @@ public class JavaDocReferenceInspection extends JavaDocReferenceInspectionBase {
         Collections.sort(originalClasses, new PsiProximityComparator(referenceElement.getElement()));
         final JList list = new JBList(originalClasses.toArray(new PsiClass[originalClasses.size()]));
         list.setCellRenderer(new FQNameCellRenderer());
-        final Runnable runnable = new Runnable() {
-          @Override
-          public void run() {
-            if (!element.isValid()) return;
-            final int index = list.getSelectedIndex();
-            if (index < 0) return;
-            new WriteCommandAction(project, element.getContainingFile()){
-              @Override
-              protected void run(final Result result) throws Throwable {
-                final PsiClass psiClass = originalClasses.get(index);
-                if (psiClass.isValid()) {
-                  PsiDocumentManager.getInstance(project).commitAllDocuments();
-                  referenceElement.bindToElement(psiClass);
-                }
+        final Runnable runnable = () -> {
+          if (!element.isValid()) return;
+          final int index = list.getSelectedIndex();
+          if (index < 0) return;
+          new WriteCommandAction(project, element.getContainingFile()){
+            @Override
+            protected void run(@NotNull final Result result) throws Throwable {
+              final PsiClass psiClass = originalClasses.get(index);
+              if (psiClass.isValid()) {
+                PsiDocumentManager.getInstance(project).commitAllDocuments();
+                referenceElement.bindToElement(psiClass);
               }
-            }.execute();
-          }
+            }
+          }.execute();
         };
         final AsyncResult<DataContext> asyncResult = DataManager.getInstance().getDataContextFromFocus();
         asyncResult.doWhenDone(new Consumer<DataContext>() {

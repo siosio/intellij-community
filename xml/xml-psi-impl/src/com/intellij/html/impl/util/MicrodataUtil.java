@@ -24,6 +24,8 @@ import com.intellij.psi.PsiReference;
 import com.intellij.psi.XmlRecursiveElementVisitor;
 import com.intellij.psi.impl.source.resolve.reference.impl.providers.DependentNSReference;
 import com.intellij.psi.impl.source.resolve.reference.impl.providers.URLReference;
+import com.intellij.psi.util.CachedValueProvider;
+import com.intellij.psi.util.CachedValuesManager;
 import com.intellij.psi.xml.XmlAttribute;
 import com.intellij.psi.xml.XmlAttributeValue;
 import com.intellij.psi.xml.XmlFile;
@@ -66,27 +68,29 @@ public class MicrodataUtil {
     return null;
   }
 
-  private static Map<String, XmlTag> findScopesWithItemRef(@Nullable PsiFile file) {
+  private static Map<String, XmlTag> findScopesWithItemRef(@Nullable final PsiFile file) {
     if (!(file instanceof XmlFile)) return Collections.emptyMap();
-    final Map<String, XmlTag> result = new THashMap<String, XmlTag>();
-    file.accept(new XmlRecursiveElementVisitor() {
+    return CachedValuesManager.getCachedValue(file, new CachedValueProvider<Map<String, XmlTag>>() {
+      @Nullable
       @Override
-      public void visitXmlTag(final XmlTag tag) {
-        super.visitXmlTag(tag);
-        XmlAttribute refAttr = tag.getAttribute(ITEM_REF);
-        if (refAttr != null && tag.getAttribute(ITEM_SCOPE) != null) {
-          getReferencesForAttributeValue(refAttr.getValueElement(), new PairFunction<String, Integer, PsiReference>() {
-            @Nullable
-            @Override
-            public PsiReference fun(String t, Integer v) {
-              result.put(t, tag);
-              return null;
+      public Result<Map<String, XmlTag>> compute() {
+        final Map<String, XmlTag> result = new THashMap<String, XmlTag>();
+        file.accept(new XmlRecursiveElementVisitor() {
+          @Override
+          public void visitXmlTag(final XmlTag tag) {
+            super.visitXmlTag(tag);
+            XmlAttribute refAttr = tag.getAttribute(ITEM_REF);
+            if (refAttr != null && tag.getAttribute(ITEM_SCOPE) != null) {
+              getReferencesForAttributeValue(refAttr.getValueElement(), (t, v) -> {
+                result.put(t, tag);
+                return null;
+              });
             }
-          });
-        }
+          }
+        });
+        return Result.create(result, file);
       }
     });
-    return result;
   }
 
   public static List<String> extractProperties(PsiFile file, String type) {
@@ -116,17 +120,13 @@ public class MicrodataUtil {
   }
 
   public static PsiReference[] getUrlReferencesForAttributeValue(final XmlAttributeValue element) {
-    return getReferencesForAttributeValue(element, new PairFunction<String, Integer, PsiReference>() {
-      @Nullable
-      @Override
-      public PsiReference fun(String token, Integer offset) {
-        if (HtmlUtil.hasHtmlPrefix(token)) {
-          final TextRange range = TextRange.from(offset, token.length());
-          final URLReference urlReference = new URLReference(element, range, true);
-          return new DependentNSReference(element, range, urlReference, true);
-        }
-        return null;
+    return getReferencesForAttributeValue(element, (token, offset) -> {
+      if (HtmlUtil.hasHtmlPrefix(token)) {
+        final TextRange range = TextRange.from(offset, token.length());
+        final URLReference urlReference = new URLReference(element, range, true);
+        return new DependentNSReference(element, range, urlReference, true);
       }
+      return null;
     });
   }
 

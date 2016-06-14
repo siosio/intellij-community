@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,9 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.ide.CopyPasteManager;
+import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.DumbService;
+import com.intellij.openapi.project.IndexNotReadyException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Disposer;
@@ -216,7 +218,7 @@ public abstract class FinderRecursivePanel<T> extends JBSplitter implements Data
         updateRightComponent(true);
       }
     });
-    ListScrollingUtil.installActions(list);
+    ScrollingUtil.installActions(list);
 
     //    installSpeedSearch(list); // TODO
 
@@ -352,10 +354,20 @@ public abstract class FinderRecursivePanel<T> extends JBSplitter implements Data
 
         //noinspection unchecked
         final T t = (T)value;
-        setIcon(getItemIcon(t));
-        append(getItemText(t));
+        try {
+          setIcon(getItemIcon(t));
+          append(getItemText(t));
+        }
+        catch (IndexNotReadyException e) {
+          append("loading...");
+        }
 
-        doCustomizeCellRenderer(this, list, t, index, isSelected, cellHasFocus);
+        try {
+          doCustomizeCellRenderer(this, list, t, index, isSelected, cellHasFocus);
+        }
+        catch (IndexNotReadyException ignored) {
+          // ignore
+        }
 
         Color bg = isSelected ? UIUtil.getTreeSelectionBackground(cellHasFocus) : UIUtil.getTreeTextBackground();
         if (!isSelected && myFileColorManager.isEnabled()) {
@@ -383,7 +395,7 @@ public abstract class FinderRecursivePanel<T> extends JBSplitter implements Data
       }
 
       @Override
-      protected final void customizeCellRenderer(JList list, Object value, int index, boolean selected, boolean hasFocus) {
+      protected final void customizeCellRenderer(@NotNull JList list, Object value, int index, boolean selected, boolean hasFocus) {
       }
     };
   }
@@ -403,6 +415,10 @@ public abstract class FinderRecursivePanel<T> extends JBSplitter implements Data
     if (CommonDataKeys.NAVIGATABLE.is(dataId) && selectedValue instanceof Navigatable) {
       return selectedValue;
     }
+    if (LangDataKeys.MODULE.is(dataId) && selectedValue instanceof Module) {
+      return selectedValue;
+    }
+
     if (selectedValue instanceof DataProvider) {
       return ((DataProvider)selectedValue).getData(dataId);
     }
@@ -437,8 +453,9 @@ public abstract class FinderRecursivePanel<T> extends JBSplitter implements Data
       Object selectedValue = pathToSelect[i];
       panel.setSelectedValue(selectedValue);
       if (i < pathToSelect.length - 1) {
-        panel = (FinderRecursivePanel)panel.getSecondComponent();
-        assert panel != null : Arrays.toString(pathToSelect);
+        final JComponent component = panel.getSecondComponent();
+        assert component instanceof FinderRecursivePanel : Arrays.toString(pathToSelect);
+        panel = (FinderRecursivePanel)component;
       }
     }
 
@@ -500,40 +517,29 @@ public abstract class FinderRecursivePanel<T> extends JBSplitter implements Data
         final T oldValue = getSelectedValue();
         final int oldIndex = myList.getSelectedIndex();
 
-        ApplicationManager.getApplication().executeOnPooledThread(new Runnable() {
-          @Override
-          public void run() {
-            DumbService.getInstance(getProject()).runReadActionInSmartMode(new Runnable() {
-              @Override
-              public void run() {
-                try {
-                  final List<T> listItems = getListItems();
+        ApplicationManager.getApplication().executeOnPooledThread(() -> DumbService.getInstance(getProject()).runReadActionInSmartMode(() -> {
+          try {
+            final List<T> listItems = getListItems();
 
-                  SwingUtilities.invokeLater(new Runnable() {
-                    @Override
-                    public void run() {
-                      mergeListItems(myListModel, myList, listItems);
+            SwingUtilities.invokeLater(() -> {
+              mergeListItems(myListModel, myList, listItems);
 
-                      if (myList.isEmpty()) {
-                        createRightComponent(true);
-                      }
-                      else if (myList.getSelectedIndex() < 0) {
-                        myList.setSelectedIndex(myListModel.getSize() > oldIndex ? oldIndex : 0);
-                      }
-                      else {
-                        Object newValue = myList.getSelectedValue();
-                        updateRightComponent(oldValue == null || !oldValue.equals(newValue) || myList.isEmpty());
-                      }
-                    }
-                  });
-                }
-                finally {
-                  myList.setPaintBusy(false);
-                }
+              if (myList.isEmpty()) {
+                createRightComponent(true);
+              }
+              else if (myList.getSelectedIndex() < 0) {
+                myList.setSelectedIndex(myListModel.getSize() > oldIndex ? oldIndex : 0);
+              }
+              else {
+                Object newValue = myList.getSelectedValue();
+                updateRightComponent(oldValue == null || !oldValue.equals(newValue) || myList.isEmpty());
               }
             });
           }
-        });
+          finally {
+            myList.setPaintBusy(false);
+          }
+        }));
       }
     });
   }

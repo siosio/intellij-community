@@ -43,6 +43,7 @@ import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.awt.*;
@@ -57,6 +58,7 @@ public class ConfigurationContext {
   private static final Logger LOG = Logger.getInstance("#com.intellij.execution.actions.ConfigurationContext");
   private final Location<PsiElement> myLocation;
   private RunnerAndConfigurationSettings myConfiguration;
+  private boolean myInitialized = false;
   private Ref<RunnerAndConfigurationSettings> myExistingConfiguration;
   private final Module myModule;
   private final RunConfiguration myRuntimeConfiguration;
@@ -66,6 +68,7 @@ public class ConfigurationContext {
   private List<RuntimeConfigurationProducer> myPreferredProducers;
   private List<ConfigurationFromContext> myConfigurationsFromContext;
 
+  @NotNull
   public static ConfigurationContext getFromContext(DataContext dataContext) {
     final ConfigurationContext context = new ConfigurationContext(dataContext);
     final DataManager dataManager = DataManager.getInstance();
@@ -116,8 +119,10 @@ public class ConfigurationContext {
    * @return the configuration, or null if none of the producers were able to create a configuration from this context.
    */
   @Nullable
-  public RunnerAndConfigurationSettings getConfiguration() {
-    if (myConfiguration == null) createConfiguration();
+  public synchronized RunnerAndConfigurationSettings getConfiguration() {
+    if (myConfiguration == null && !myInitialized) {
+      createConfiguration();
+    }
     return myConfiguration;
   }
 
@@ -127,10 +132,12 @@ public class ConfigurationContext {
     myConfiguration = location != null && !DumbService.isDumb(location.getProject()) ?
         PreferredProducerFind.createConfiguration(location, this) :
         null;
+    myInitialized = true;
   }
 
-  public void setConfiguration(RunnerAndConfigurationSettings configuration) {
+  public synchronized void setConfiguration(@NotNull RunnerAndConfigurationSettings configuration) {
     myConfiguration = configuration;
+    myInitialized = true;
   }
 
   @Deprecated

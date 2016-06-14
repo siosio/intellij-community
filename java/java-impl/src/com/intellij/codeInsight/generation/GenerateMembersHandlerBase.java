@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -53,7 +53,7 @@ public abstract class GenerateMembersHandlerBase implements CodeInsightActionHan
   private static final Logger LOG = Logger.getInstance("#com.intellij.codeInsight.generation.GenerateMembersHandlerBase");
 
   private final String myChooserTitle;
-  protected boolean myToCopyJavaDoc = false;
+  protected boolean myToCopyJavaDoc;
 
   public GenerateMembersHandlerBase(String chooserTitle) {
     myChooserTitle = chooserTitle;
@@ -84,25 +84,19 @@ public abstract class GenerateMembersHandlerBase implements CodeInsightActionHan
       final ClassMember[] members = chooseOriginalMembers(aClass, project, editor);
       if (members == null) return;
 
-      WriteCommandAction.runWriteCommandAction(project, new Runnable() {
-        @Override
-        public void run() {
-          final int offset = editor.getCaretModel().getOffset();
-          try {
-            doGenerate(project, editor, aClass, members);
-          }
-          catch (GenerateCodeException e) {
-            final String message = e.getMessage();
-            ApplicationManager.getApplication().invokeLater(new Runnable() {
-              @Override
-              public void run() {
-                if (!editor.isDisposed()) {
-                  editor.getCaretModel().moveToOffset(offset);
-                  HintManager.getInstance().showErrorHint(editor, message);
-                }
-              }
-            }, project.getDisposed());
-          }
+      WriteCommandAction.runWriteCommandAction(project, () -> {
+        final int offset = editor.getCaretModel().getOffset();
+        try {
+          doGenerate(project, editor, aClass, members);
+        }
+        catch (GenerateCodeException e) {
+          final String message = e.getMessage();
+          ApplicationManager.getApplication().invokeLater(() -> {
+            if (!editor.isDisposed()) {
+              editor.getCaretModel().moveToOffset(offset);
+              HintManager.getInstance().showErrorHint(editor, message);
+            }
+          }, project.getDisposed());
         }
       });
     }
@@ -124,7 +118,9 @@ public abstract class GenerateMembersHandlerBase implements CodeInsightActionHan
     CharSequence docText = document.getCharsSequence();
     String textBeforeCaret = docText.subSequence(lineStartOffset, offset).toString();
     final String afterCaret = docText.subSequence(offset, document.getLineEndOffset(line)).toString();
-    if (textBeforeCaret.trim().length() > 0 && StringUtil.isEmptyOrSpaces(afterCaret) && !editor.getSelectionModel().hasSelection()) {
+    final PsiElement lBrace = aClass.getLBrace();
+    if (textBeforeCaret.trim().length() > 0 && StringUtil.isEmptyOrSpaces(afterCaret) &&
+        (lBrace == null || lBrace.getTextOffset() < offset) && !editor.getSelectionModel().hasSelection()) {
       EnterAction.insertNewLineAtCaret(editor);
       PsiDocumentManager.getInstance(project).commitDocument(document);
       offset = editor.getCaretModel().getOffset();
@@ -200,17 +196,12 @@ public abstract class GenerateMembersHandlerBase implements CodeInsightActionHan
       @Override
       public void templateFinished(Template template, boolean brokenOff) {
         if (index + 1 < templates.size()){
-          ApplicationManager.getApplication().invokeLater(new Runnable() {
+          ApplicationManager.getApplication().invokeLater(() -> new WriteCommandAction(myProject) {
             @Override
-            public void run() {
-              new WriteCommandAction(myProject) {
-                @Override
-                protected void run(Result result) throws Throwable {
-                  runTemplates(myProject, editor, templates, index + 1);
-                }
-              }.execute();
+            protected void run(@NotNull Result result) throws Throwable {
+              runTemplates(myProject, editor, templates, index + 1);
             }
-          });
+          }.execute());
         }
       }
     });
@@ -266,7 +257,7 @@ public abstract class GenerateMembersHandlerBase implements CodeInsightActionHan
                                                             boolean allowEmptySelection,
                                                             boolean copyJavadocCheckbox,
                                                             Project project) {
-    MemberChooser<ClassMember> chooser = new MemberChooser<ClassMember>(members, allowEmptySelection, true, project, false, getHeaderPanel(project)) {
+    MemberChooser<ClassMember> chooser = new MemberChooser<ClassMember>(members, allowEmptySelection, true, project, getHeaderPanel(project), getOptionControls()) {
       @Nullable
       @Override
       protected String getHelpId() {
@@ -280,6 +271,11 @@ public abstract class GenerateMembersHandlerBase implements CodeInsightActionHan
 
   @Nullable
   protected JComponent getHeaderPanel(Project project) {
+    return null;
+  }
+
+  @Nullable
+  protected JComponent[] getOptionControls() {
     return null;
   }
 

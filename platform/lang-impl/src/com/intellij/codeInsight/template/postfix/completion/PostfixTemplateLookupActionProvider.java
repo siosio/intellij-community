@@ -41,25 +41,18 @@ public class PostfixTemplateLookupActionProvider implements LookupActionProvider
       consumer.consume(new LookupElementAction(PlatformIcons.EDIT, "Edit postfix templates settings") {
         @Override
         public Result performLookupAction() {
-          final Project project = lookup.getEditor().getProject();
-          assert project != null;
-          ApplicationManager.getApplication().invokeLater(new Runnable() {
-            @Override
-            public void run() {
-              if (project.isDisposed()) return;
+          final Project project = lookup.getProject();
+          ApplicationManager.getApplication().invokeLater(() -> {
+            if (project.isDisposed()) return;
 
-              final PostfixTemplatesConfigurable configurable = new PostfixTemplatesConfigurable();
-              ShowSettingsUtil.getInstance().editConfigurable(project, configurable, new Runnable() {
-                @Override
-                public void run() {
-                  PostfixTemplatesCheckboxTree templatesTree = configurable.getTemplatesTree();
-                  if (templatesTree != null) {
-                    templatesTree.selectTemplate(template, PostfixTemplatesUtils
-                      .getLangForProvider(templateLookupElement.getProvider()));
-                  }
-                }
-              });
-            }
+            final PostfixTemplatesConfigurable configurable = new PostfixTemplatesConfigurable();
+            ShowSettingsUtil.getInstance().editConfigurable(project, configurable, () -> {
+              PostfixTemplatesCheckboxTree templatesTree = configurable.getTemplatesTree();
+              if (templatesTree != null) {
+                templatesTree.selectTemplate(template, PostfixTemplatesUtils
+                  .getLangForProvider(templateLookupElement.getProvider()));
+              }
+            });
           });
           return Result.HIDE_LOOKUP;
         }
@@ -70,12 +63,7 @@ public class PostfixTemplateLookupActionProvider implements LookupActionProvider
         consumer.consume(new LookupElementAction(AllIcons.Actions.Delete, String.format("Disable '%s' template", template.getKey())) {
           @Override
           public Result performLookupAction() {
-            ApplicationManager.getApplication().invokeLater(new Runnable() {
-              @Override
-              public void run() {
-                settings.disableTemplate(template, templateLookupElement.getProvider());
-              }
-            });
+            ApplicationManager.getApplication().invokeLater(() -> settings.disableTemplate(template, templateLookupElement.getProvider()));
             return Result.HIDE_LOOKUP;
           }
         });

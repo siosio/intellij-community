@@ -15,15 +15,47 @@
  */
 package com.intellij.execution.lineMarker;
 
+import com.intellij.ide.DataManager;
 import com.intellij.lang.LanguageExtension;
-import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.impl.SimpleDataContext;
 import com.intellij.psi.PsiElement;
+import com.intellij.util.Function;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-public abstract class RunLineMarkerContributor {
+import javax.swing.*;
 
-  final static LanguageExtension<RunLineMarkerContributor> EXTENSION = new LanguageExtension<RunLineMarkerContributor>("com.intellij.runLineMarkerContributor");
+public abstract class RunLineMarkerContributor {
+  static final LanguageExtension<RunLineMarkerContributor> EXTENSION = new LanguageExtension<RunLineMarkerContributor>("com.intellij.runLineMarkerContributor");
+
+  public static class Info {
+    public final Icon icon;
+    public final AnAction[] actions;
+    public final Function<PsiElement, String> tooltipProvider;
+
+    public Info(Icon icon, @Nullable Function<PsiElement, String> tooltipProvider, @NotNull AnAction... actions) {
+      this.icon = icon;
+      this.actions = actions;
+      this.tooltipProvider = tooltipProvider;
+    }
+
+    public Info(@NotNull final AnAction action) {
+      this(action.getTemplatePresentation().getIcon(), element -> getText(action, element), action);
+    }
+  }
 
   @Nullable
-  public abstract AnAction getAdditionalAction(PsiElement element);
+  public abstract Info getInfo(PsiElement element);
+
+  @Nullable("null means disabled")
+  protected static String getText(@NotNull AnAction action, @NotNull PsiElement element) {
+    DataContext parent = DataManager.getInstance().getDataContext();
+    DataContext dataContext = SimpleDataContext.getSimpleContext(CommonDataKeys.PSI_ELEMENT.getName(), element, parent);
+    AnActionEvent event = AnActionEvent.createFromAnAction(action, null, ActionPlaces.STATUS_BAR_PLACE, dataContext);
+    action.update(event);
+    Presentation presentation = event.getPresentation();
+    return presentation.isEnabled() && presentation.isVisible() ? presentation.getText() : null;
+  }
+
 }

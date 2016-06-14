@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import com.intellij.openapi.actionSystem.ex.ActionUtil;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.impl.ApplicationImpl;
 import com.intellij.openapi.command.WriteCommandAction;
@@ -21,6 +22,8 @@ import com.intellij.openapi.util.Disposer;
 import com.intellij.testFramework.LeakHunter;
 import com.intellij.testFramework.LightPlatformTestCase;
 import com.intellij.util.ReflectionUtil;
+import com.intellij.util.concurrency.AppExecutorUtil;
+import com.intellij.util.concurrency.AppScheduledExecutorService;
 import com.intellij.util.ui.UIUtil;
 import junit.framework.TestCase;
 
@@ -59,9 +62,14 @@ public class _LastInSuiteTest extends TestCase {
     UIUtil.invokeAndWaitIfNeeded(new Runnable() {
       @Override
       public void run() {
-        ((ApplicationImpl)ApplicationManager.getApplication()).setDisposeInProgress(true);
+        ApplicationImpl application = (ApplicationImpl)ApplicationManager.getApplication();
+        application.setDisposeInProgress(true);
         LightPlatformTestCase.disposeApplication();
         UIUtil.dispatchAllInvocationEvents();
+
+        System.out.println(application.writeActionStatistics());
+        System.out.println(ActionUtil.ACTION_UPDATE_PAUSES.statistics());
+        System.out.println(((AppScheduledExecutorService)AppExecutorUtil.getAppScheduledExecutorService()).statistics());
       }
     });
 
@@ -69,7 +77,7 @@ public class _LastInSuiteTest extends TestCase {
       LeakHunter.checkProjectLeak();
       Disposer.assertIsEmpty(true);
     }
-    catch (Exception e) {
+    catch (AssertionError | Exception e) {
       captureMemorySnapshot();
       throw e;
     }
@@ -90,6 +98,7 @@ public class _LastInSuiteTest extends TestCase {
       Method snapshot = ReflectionUtil.getMethod(Class.forName("com.intellij.util.ProfilingUtil"), "forceCaptureMemorySnapshot");
       if (snapshot != null) {
         snapshot.invoke(null);
+        System.out.println("Memory snapshot captured");
       }
     }
     catch (Exception ignored) { }

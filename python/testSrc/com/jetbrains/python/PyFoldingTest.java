@@ -40,4 +40,30 @@ public class PyFoldingTest extends PyTestCase {
   public void testImportBlock() {
     doTest();
   }
+
+  public void testBlocksFolding() {
+    doTest();
+  }
+
+  public void testLongStringsFolding() {
+    doTest();
+  }
+
+  public void testCollectionsFolding() {
+    doTest();
+  }
+
+  public void testMultilineComments() {
+    doTest();
+  }
+
+  public void testNestedFolding() {
+    doTest();
+  }
+
+  //PY-18928
+  public void testCustomFoldingWithComments() {
+    doTest();
+  }
+
 }

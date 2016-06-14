@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,6 +39,7 @@ public class ReferenceParserTest extends JavaParsingTestCase {
   public void testType7() { doTypeParserTest("Diamond<>"); }
   public void testType8() { doTypeParserTest("A|"); }
   public void testType9() { doTypeParserTest("A|B"); }
+  public void testType10() { doTypeParserTest("Diamond<@TA>"); }
 
   public void testTypeParams0() { doTypeParamsParserTest("<T>"); }
   public void testTypeParams1() { doTypeParamsParserTest("<T, U>"); }
@@ -50,10 +51,8 @@ public class ReferenceParserTest extends JavaParsingTestCase {
   public void testTypeParams7() { doTypeParamsParserTest("<T extends X, Y>"); }
   public void testTypeParams8() { doTypeParamsParserTest("<?>"); }
 
-  public void testAnyType() {
-    setLanguageLevel(LanguageLevel.JDK_1_9);
-    doTypeParamsParserTest("<any T>");
-  }
+  public void testAnyTypeParams() { setLanguageLevel(LanguageLevel.JDK_X); doTypeParamsParserTest("<any T>"); }
+  public void testAnyTypeArgs() { setLanguageLevel(LanguageLevel.JDK_X); doTypeParserTest("T<E_SRC, any, E_DST, ?>"); }
 
   private void doRefParserTest(String text, boolean incomplete) {
     doParserTest(text, builder -> JavaParser.INSTANCE.getReferenceParser().parseJavaCodeReference(builder, incomplete, false, false, false));

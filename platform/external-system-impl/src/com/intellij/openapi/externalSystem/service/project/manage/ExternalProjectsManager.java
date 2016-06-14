@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package com.intellij.openapi.externalSystem.service.project.manage;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.*;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.externalSystem.ExternalSystemManager;
 import com.intellij.openapi.externalSystem.model.DataNode;
 import com.intellij.openapi.externalSystem.model.ExternalProjectInfo;
@@ -43,14 +44,16 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static com.intellij.openapi.externalSystem.model.ProjectKeys.MODULE;
 import static com.intellij.openapi.externalSystem.model.ProjectKeys.TASK;
 
 /**
  * @author Vladislav.Soroka
  * @since 10/23/2014
  */
-@State(name = "ExternalProjectsManager", storages = {@Storage(file = StoragePathMacros.WORKSPACE_FILE)})
+@State(name = "ExternalProjectsManager", storages = {@Storage(StoragePathMacros.WORKSPACE_FILE)})
 public class ExternalProjectsManager implements PersistentStateComponent<ExternalProjectsState>, Disposable {
+  private static final Logger LOG = Logger.getInstance(ExternalProjectsManager.class);
 
   private final AtomicBoolean isInitialized = new AtomicBoolean();
   @NotNull
@@ -70,7 +73,6 @@ public class ExternalProjectsManager implements PersistentStateComponent<Externa
 
   public ExternalProjectsManager(@NotNull Project project) {
     myProject = project;
-    Disposer.register(project, this);
     myShortcutsManager = new ExternalSystemShortcutsManager(project);
     Disposer.register(this, myShortcutsManager);
     myTaskActivator = new ExternalSystemTaskActivator(project);
@@ -197,12 +199,7 @@ public class ExternalProjectsManager implements PersistentStateComponent<Externa
       public List<TasksActivation> getTasksActivation(@NotNull final ProjectSystemId systemId) {
         final Set<Map.Entry<String, TaskActivationState>> entries =
           myState.getExternalSystemsState().get(systemId.getId()).getExternalSystemsTaskActivation().entrySet();
-        return ContainerUtil.map(entries, new Function<Map.Entry<String, TaskActivationState>, TasksActivation>() {
-          @Override
-          public TasksActivation fun(Map.Entry<String, TaskActivationState> entry) {
-            return new TasksActivation(systemId, entry.getKey(), entry.getValue());
-          }
-        });
+        return ContainerUtil.map(entries, entry -> new TasksActivation(systemId, entry.getKey(), entry.getValue()));
       }
 
       @Override
@@ -211,10 +208,22 @@ public class ExternalProjectsManager implements PersistentStateComponent<Externa
       }
 
       @Override
-      public  Map<String, TaskActivationState> getProjectsTasksActivationMap(@NotNull final ProjectSystemId systemId) {
-          return myState.getExternalSystemsState().get(systemId.getId()).getExternalSystemsTaskActivation();
+      public Map<String, TaskActivationState> getProjectsTasksActivationMap(@NotNull final ProjectSystemId systemId) {
+        return myState.getExternalSystemsState().get(systemId.getId()).getExternalSystemsTaskActivation();
       }
     };
+  }
+
+  public boolean isIgnored(@NotNull ProjectSystemId systemId, @NotNull String projectPath) {
+    final ExternalProjectInfo projectInfo = ExternalSystemUtil.getExternalProjectInfo(myProject, systemId, projectPath);
+    if (projectInfo == null) return true;
+
+    return ExternalProjectsDataStorage.getInstance(myProject).isIgnored(projectInfo.getExternalProjectPath(), projectPath, MODULE);
+  }
+
+  public void setIgnored(@NotNull DataNode<?> dataNode, boolean isIgnored) {
+    ExternalProjectsDataStorage.getInstance(myProject).setIgnored(dataNode, isIgnored);
+    ExternalSystemKeymapExtension.updateActions(myProject, ExternalSystemApiUtil.findAllRecursively(dataNode, TASK));
   }
 
   @Override

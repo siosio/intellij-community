@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package com.intellij.testFramework;
 import com.intellij.openapi.application.Result;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.application.ex.PathManagerEx;
+import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.fileTypes.FileTypeRegistry;
@@ -26,22 +27,23 @@ import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.ModuleRootModificationUtil;
 import com.intellij.openapi.roots.OrderRootType;
 import com.intellij.openapi.util.DefaultJDOMExternalizer;
-import com.intellij.openapi.util.JDOMUtil;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VfsUtil;
+import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.PsiManagerImpl;
 import com.intellij.util.IncorrectOperationException;
+import com.intellij.util.JdomKt;
 import org.jdom.Element;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.List;
+import java.nio.file.Paths;
 import java.util.StringTokenizer;
 
 /**
@@ -93,7 +95,7 @@ public abstract class PsiTestCase extends ModuleTestCase {
   protected PsiFile createFile(@NotNull final Module module, @NotNull final VirtualFile vDir, @NotNull final String fileName, @NotNull final String text) throws IOException {
     return new WriteAction<PsiFile>() {
       @Override
-      protected void run(Result<PsiFile> result) throws Throwable {
+      protected void run(@NotNull Result<PsiFile> result) throws Throwable {
         if (!ModuleRootManager.getInstance(module).getFileIndex().isInSourceContent(vDir)) {
           addSourceContentToRoots(module, vDir);
         }
@@ -113,10 +115,9 @@ public abstract class PsiTestCase extends ModuleTestCase {
   }
 
   protected PsiElement configureByFileWithMarker(String filePath, String marker) throws Exception{
-    final VirtualFile vFile = LocalFileSystem.getInstance().findFileByPath(filePath.replace(File.separatorChar, '/'));
-    assertNotNull("file " + filePath + " not found", vFile);
+    final VirtualFile vFile = VfsTestUtil.findFileByCaseSensitivePath(filePath);
 
-    String fileText = VfsUtil.loadText(vFile);
+    String fileText = VfsUtilCore.loadText(vFile);
     fileText = StringUtil.convertLineSeparators(fileText);
 
     int offset = fileText.indexOf(marker);
@@ -151,14 +152,9 @@ public abstract class PsiTestCase extends ModuleTestCase {
 
   private PsiTestData loadData(String dataName) throws Exception {
     PsiTestData data = createData();
-    Element documentElement = JDOMUtil.load(new File(myDataRoot + "/" + "data.xml"));
-
-    final List nodes = documentElement.getChildren("data");
-
-    for (Object node1 : nodes) {
-      Element node = (Element)node1;
+    Element documentElement = JdomKt.loadElement(Paths.get(myDataRoot, "data.xml"));
+    for (Element node : documentElement.getChildren("data")) {
       String value = node.getAttributeValue("name");
-
       if (value.equals(dataName)) {
         DefaultJDOMExternalizer.readExternal(data, node);
         data.loadText(myDataRoot);
@@ -231,15 +227,15 @@ public abstract class PsiTestCase extends ModuleTestCase {
     return myFile;
   }
 
-  public com.intellij.openapi.editor.Document getDocument(PsiFile file) {
+  public Document getDocument(PsiFile file) {
     return PsiDocumentManager.getInstance(getProject()).getDocument(file);
   }
 
-  public com.intellij.openapi.editor.Document getDocument(VirtualFile file) {
+  public Document getDocument(VirtualFile file) {
     return FileDocumentManager.getInstance().getDocument(file);
   }
 
-  public void commitDocument(com.intellij.openapi.editor.Document document) {
+  public void commitDocument(Document document) {
     PsiDocumentManager.getInstance(getProject()).commitDocument(document);
   }
 }

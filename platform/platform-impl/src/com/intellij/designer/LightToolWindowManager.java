@@ -16,7 +16,6 @@
 package com.intellij.designer;
 
 import com.intellij.ide.util.PropertiesComponent;
-import com.intellij.openapi.actionSystem.ActionGroup;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.DefaultActionGroup;
 import com.intellij.openapi.application.ApplicationManager;
@@ -67,12 +66,7 @@ public abstract class LightToolWindowManager implements ProjectComponent {
 
     @Override
     public void fileClosed(@NotNull FileEditorManager source, @NotNull VirtualFile file) {
-      ApplicationManager.getApplication().invokeLater(new Runnable() {
-        @Override
-        public void run() {
-          bindToDesigner(getActiveDesigner());
-        }
-      });
+      ApplicationManager.getApplication().invokeLater(() -> bindToDesigner(getActiveDesigner()));
     }
 
     @Override
@@ -186,7 +180,7 @@ public abstract class LightToolWindowManager implements ProjectComponent {
   //
   //////////////////////////////////////////////////////////////////////////////////////////
 
-  public final ActionGroup createGearActions() {
+  public AnAction createGearActions() {
     DefaultActionGroup group = new DefaultActionGroup("In Editor Mode", true);
 
     if (myLeftEditorModeAction == null) {
@@ -218,7 +212,7 @@ public abstract class LightToolWindowManager implements ProjectComponent {
 
   protected final Object getContent(@NotNull DesignerEditorPanelFacade designer) {
     LightToolWindow toolWindow = (LightToolWindow)designer.getClientProperty(getComponentName());
-    return toolWindow.getContent();
+    return toolWindow == null ? null : toolWindow.getContent();
   }
 
   protected abstract LightToolWindow createContent(@NotNull DesignerEditorPanelFacade designer);
@@ -253,28 +247,16 @@ public abstract class LightToolWindowManager implements ProjectComponent {
     toolWindow.dispose();
   }
 
-  private final ParameterizedRunnable<DesignerEditorPanelFacade> myCreateAction = new ParameterizedRunnable<DesignerEditorPanelFacade>() {
-    @Override
-    public void run(DesignerEditorPanelFacade designer) {
-      designer.putClientProperty(getComponentName(), createContent(designer));
-    }
-  };
+  private final ParameterizedRunnable<DesignerEditorPanelFacade> myCreateAction =
+    designer -> designer.putClientProperty(getComponentName(), createContent(designer));
 
   private final ParameterizedRunnable<DesignerEditorPanelFacade> myUpdateAnchorAction =
-    new ParameterizedRunnable<DesignerEditorPanelFacade>() {
-      @Override
-      public void run(DesignerEditorPanelFacade designer) {
-        LightToolWindow toolWindow = (LightToolWindow)designer.getClientProperty(getComponentName());
-        toolWindow.updateAnchor(getEditorMode());
-      }
+    designer -> {
+      LightToolWindow toolWindow = (LightToolWindow)designer.getClientProperty(getComponentName());
+      toolWindow.updateAnchor(getEditorMode());
     };
 
-  private final ParameterizedRunnable<DesignerEditorPanelFacade> myDisposeAction = new ParameterizedRunnable<DesignerEditorPanelFacade>() {
-    @Override
-    public void run(DesignerEditorPanelFacade designer) {
-      disposeContent(designer);
-    }
-  };
+  private final ParameterizedRunnable<DesignerEditorPanelFacade> myDisposeAction = designer -> disposeContent(designer);
 
   private void runUpdateContent(ParameterizedRunnable<DesignerEditorPanelFacade> action) {
     for (FileEditor editor : myFileEditorManager.getAllEditors()) {
@@ -298,7 +280,7 @@ public abstract class LightToolWindowManager implements ProjectComponent {
     return value.equals("ToolWindow") ? null : ToolWindowAnchor.fromText(value);
   }
 
-  final void setEditorMode(@Nullable ToolWindowAnchor newState) {
+  protected final void setEditorMode(@Nullable ToolWindowAnchor newState) {
     ToolWindowAnchor oldState = getEditorMode();
     myPropertiesComponent.setValue(myEditorModeKey, newState == null ? "ToolWindow" : newState.toString());
 

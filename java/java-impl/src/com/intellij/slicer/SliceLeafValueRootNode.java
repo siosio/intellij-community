@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,12 +35,15 @@ import java.util.List;
 /**
  * @author cdr
  */
-public class SliceLeafValueRootNode extends SliceNode implements MyColoredTreeCellRenderer {
-  protected final List<SliceNode> myCachedChildren;
+class SliceLeafValueRootNode extends SliceNode implements MyColoredTreeCellRenderer {
+  final List<SliceNode> myCachedChildren;
 
-  public SliceLeafValueRootNode(@NotNull Project project, PsiElement leafExpression, SliceNode root, List<SliceNode> children,
-                                SliceAnalysisParams params) {
-    super(project, SliceUsage.createRootUsage(leafExpression, params), root.targetEqualUsages);
+  SliceLeafValueRootNode(@NotNull Project project,
+                         @NotNull PsiElement leafExpression,
+                         @NotNull SliceNode root,
+                         @NotNull List<SliceNode> children,
+                         @NotNull SliceAnalysisParams params) {
+    super(project, JavaSliceUsage.createRootUsage(leafExpression, params), root.targetEqualUsages);
     myCachedChildren = children;
   }
 
@@ -69,7 +72,7 @@ public class SliceLeafValueRootNode extends SliceNode implements MyColoredTreeCe
   }
 
   @Override
-  public void customizeCellRenderer(@NotNull SliceUsageCellRenderer renderer,
+  public void customizeCellRenderer(@NotNull SliceUsageCellRendererBase renderer,
                                     @NotNull JTree tree,
                                     Object value,
                                     boolean selected,
@@ -83,7 +86,7 @@ public class SliceLeafValueRootNode extends SliceNode implements MyColoredTreeCe
     if (usage instanceof UsageInfo2UsageAdapter) {
       PsiElement element = ((UsageInfo2UsageAdapter)usage).getElement();
       if (element == null) {
-        renderer.append(UsageViewBundle.message("node.invalid") + " ", SliceUsageCellRenderer.ourInvalidAttributes);
+        renderer.append(UsageViewBundle.message("node.invalid") + " ", SliceUsageCellRendererBase.ourInvalidAttributes);
       }
       else {
         appendElementText((UsageInfo2UsageAdapter)usage, element, renderer);
@@ -96,9 +99,9 @@ public class SliceLeafValueRootNode extends SliceNode implements MyColoredTreeCe
 
   private static void appendElementText(@NotNull UsageInfo2UsageAdapter usage,
                                         @NotNull final PsiElement element,
-                                        @NotNull final SliceUsageCellRenderer renderer) {
+                                        @NotNull final SliceUsageCellRendererBase renderer) {
     PsiFile file = element.getContainingFile();
-    List<TextChunk> result = new ArrayList<TextChunk>();
+    List<TextChunk> result = new ArrayList<>();
     ChunkExtractor.getExtractor(element.getContainingFile())
       .createTextChunks(usage, file.getText(), element.getTextRange().getStartOffset(), element.getTextRange().getEndOffset(),
                         false, result);

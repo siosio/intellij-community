@@ -197,12 +197,7 @@ public class GridCellImpl implements GridCell {
     if (myContents.containsKey(content)) return;
     myContents.put(content, null);
 
-    revalidateCell(new Runnable() {
-      @Override
-      public void run() {
-        myTabs.addTab(createTabInfoFor(content));
-      }
-    });
+    revalidateCell(() -> myTabs.addTab(createTabInfoFor(content)));
 
     updateSelection(myTabs.getComponent().getRootPane() != null);
   }
@@ -213,12 +208,7 @@ public class GridCellImpl implements GridCell {
     final TabInfo info = getTabFor(content);
     myContents.remove(content);
 
-    revalidateCell(new Runnable() {
-      @Override
-      public void run() {
-        myTabs.removeTab(info);
-      }
-    });
+    revalidateCell(() -> myTabs.removeTab(info));
 
     updateSelection(myTabs.getComponent().getRootPane() != null);
   }
@@ -282,7 +272,7 @@ public class GridCellImpl implements GridCell {
 
   public ActionCallback select(final Content content, final boolean requestFocus) {
     final TabInfo tabInfo = myContents.getValue(content);
-    return tabInfo != null ? myTabs.select(tabInfo, requestFocus) : new ActionCallback.Done();
+    return tabInfo != null ? myTabs.select(tabInfo, requestFocus) : ActionCallback.DONE;
   }
 
   public void processAlert(final Content content, final boolean activate) {
@@ -511,6 +501,6 @@ public class GridCellImpl implements GridCell {
 
   ActionCallback restore(Content content) {
     myMinimizedContents.remove(content);
-    return new ActionCallback.Done();
+    return ActionCallback.DONE;
   }
 }

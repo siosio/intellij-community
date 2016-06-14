@@ -15,7 +15,7 @@
  */
 package com.siyeh.ipp.interfacetoclass;
 
-import com.intellij.openapi.application.AccessToken;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
 import com.intellij.psi.presentation.java.ClassPresentationUtil;
@@ -40,7 +40,6 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Collection;
 
 import static com.intellij.openapi.application.ApplicationManager.getApplication;
-import static com.intellij.openapi.application.WriteAction.start;
 
 public class ConvertInterfaceToClassIntention extends Intention {
 
@@ -108,25 +107,22 @@ public class ConvertInterfaceToClassIntention extends Intention {
     final SearchScope searchScope = anInterface.getUseScope();
     final Query<PsiClass> query = ClassInheritorsSearch.search(anInterface, searchScope, false);
     final MultiMap<PsiElement, String> conflicts = new MultiMap<PsiElement, String>();
-    query.forEach(new Processor<PsiClass>() {
-      @Override
-      public boolean process(PsiClass aClass) {
-        final PsiReferenceList extendsList = aClass.getExtendsList();
-        if (extendsList == null) {
-          return true;
-        }
-        final PsiJavaCodeReferenceElement[] referenceElements = extendsList.getReferenceElements();
-        if (referenceElements.length > 0) {
-          final PsiElement target = referenceElements[0].resolve();
-          if (target != null) {
-            conflicts.putValue(aClass, IntentionPowerPackBundle.message(
-              "0.already.extends.1.and.will.not.compile.after.converting.2.to.a.class",
-              RefactoringUIUtil.getDescription(aClass, true), RefactoringUIUtil.getDescription(target, true),
-              RefactoringUIUtil.getDescription(anInterface, false)));
-          }
-        }
+    query.forEach(aClass -> {
+      final PsiReferenceList extendsList = aClass.getExtendsList();
+      if (extendsList == null) {
         return true;
       }
+      final PsiJavaCodeReferenceElement[] referenceElements = extendsList.getReferenceElements();
+      if (referenceElements.length > 0) {
+        final PsiElement target = referenceElements[0].resolve();
+        if (target != null) {
+          conflicts.putValue(aClass, IntentionPowerPackBundle.message(
+            "0.already.extends.1.and.will.not.compile.after.converting.2.to.a.class",
+            RefactoringUIUtil.getDescription(aClass, true), RefactoringUIUtil.getDescription(target, true),
+            RefactoringUIUtil.getDescription(anInterface, false)));
+        }
+      }
+      return true;
     });
 
     final PsiFunctionalExpression functionalExpression = FunctionalExpressionSearch.search(anInterface, searchScope).findFirst();
@@ -142,18 +138,8 @@ public class ConvertInterfaceToClassIntention extends Intention {
       if (getApplication().isUnitTestMode()) {
         throw new BaseRefactoringProcessor.ConflictsInTestsException(conflicts.values());
       }
-      final ConflictsDialog conflictsDialog = new ConflictsDialog(anInterface.getProject(), conflicts, new Runnable() {
-        @Override
-        public void run() {
-          final AccessToken token = start();
-          try {
-            convertInterfaceToClass(anInterface);
-          }
-          finally {
-            token.finish();
-          }
-        }
-      });
+      final ConflictsDialog conflictsDialog = new ConflictsDialog(anInterface.getProject(), conflicts,
+                                                                  () -> ApplicationManager.getApplication().runWriteAction(() -> convertInterfaceToClass(anInterface)));
       conflictsDialogOK = conflictsDialog.showAndGet();
     }
     if (conflictsDialogOK) {

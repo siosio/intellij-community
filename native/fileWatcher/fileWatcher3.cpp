@@ -127,7 +127,7 @@ void PrintRemapForSubstDrives() {
 const int BUFSIZE = 1024;
 
 void PrintDirectoryReparsePoint(const char *path) {
-    int size = strlen(path) + 2;
+    int size = (int)(strlen(path) + 2);
     char *directory = (char *) malloc(size);
     strcpy_s(directory, size, path);
     NormalizeSlashes(directory, '\\');
@@ -260,9 +260,6 @@ void PrintWatchRootReparsePoints() {
 // -- Watcher thread ----------------------------------------------------------
 
 void PrintChangeInfo(char *rootPath, FILE_NOTIFY_INFORMATION *info) {
-    char FileNameBuffer[_MAX_PATH];
-    int converted = WideCharToMultiByte(CP_ACP, 0, info->FileName, info->FileNameLength / sizeof(WCHAR), FileNameBuffer, _MAX_PATH - 1, NULL, NULL);
-    FileNameBuffer[converted] = '\0';
     char *command;
     if (info->Action == FILE_ACTION_ADDED || info->Action == FILE_ACTION_RENAMED_OLD_NAME) {
         command = "CREATE";
@@ -276,6 +273,10 @@ void PrintChangeInfo(char *rootPath, FILE_NOTIFY_INFORMATION *info) {
     else {
         return;  // unknown command
     }
+
+    char FileNameBuffer[2*_MAX_PATH + 1];
+    int converted = WideCharToMultiByte(CP_UTF8, 0, info->FileName, info->FileNameLength / sizeof(WCHAR), FileNameBuffer, 2*_MAX_PATH, NULL, NULL);
+    FileNameBuffer[converted] = '\0';
 
     EnterCriticalSection(&csOutput);
     puts(command);
@@ -305,7 +306,7 @@ DWORD WINAPI WatcherThread(void *param) {
     HANDLE hRootDir = CreateFileA(rootPath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, NULL);
 
-    int buffer_size = 10240;
+    int buffer_size = 1024 * 1024;
     char *buffer = new char[buffer_size];
 
     HANDLE handles[2];

@@ -18,7 +18,6 @@ package org.zmlx.hg4idea.repo;
 
 import com.intellij.dvcs.repo.RepositoryImpl;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Condition;
@@ -43,6 +42,7 @@ public class HgRepositoryImpl extends RepositoryImpl implements HgRepository {
 
   private static final Logger LOG = Logger.getInstance(HgRepositoryImpl.class);
 
+  @NotNull private HgVcs myVcs;
   @NotNull private final HgRepositoryReader myReader;
   @NotNull private final VirtualFile myHgDir;
   @NotNull private volatile HgRepoInfo myInfo;
@@ -56,6 +56,7 @@ public class HgRepositoryImpl extends RepositoryImpl implements HgRepository {
   private HgRepositoryImpl(@NotNull VirtualFile rootDir, @NotNull HgVcs vcs,
                            @NotNull Disposable parentDisposable) {
     super(vcs.getProject(), rootDir, parentDisposable);
+    myVcs = vcs;
     myHgDir = rootDir.findChild(HgUtil.DOT_HG);
     assert myHgDir != null : ".hg directory wasn't found under " + rootDir.getPresentableUrl();
     myReader = new HgRepositoryReader(vcs, VfsUtilCore.virtualToIoFile(myHgDir));
@@ -105,10 +106,10 @@ public class HgRepositoryImpl extends RepositoryImpl implements HgRepository {
     return branchOrBookMarkName;
   }
 
-  @Nullable
+  @NotNull
   @Override
   public AbstractVcs getVcs() {
-    return HgVcs.getInstance(getProject());
+    return myVcs;
   }
 
   @Override
@@ -130,7 +131,7 @@ public class HgRepositoryImpl extends RepositoryImpl implements HgRepository {
 
   @Override
   @NotNull
-  public Map<String, Set<Hash>> getBranches() {
+  public Map<String, LinkedHashSet<Hash>> getBranches() {
     return myInfo.getBranches();
   }
 
@@ -226,13 +227,11 @@ public class HgRepositoryImpl extends RepositoryImpl implements HgRepository {
         myOpenedBranches = HgBranchesCommand.collectNames(branchCommandResult);
       }
 
-      ApplicationManager.getApplication().executeOnPooledThread(new Runnable() {
+      HgUtil.executeOnPooledThread(new Runnable() {
         public void run() {
-          if (!project.isDisposed()) {
-            project.getMessageBus().syncPublisher(HgVcs.STATUS_TOPIC).update(project, getRoot());
-          }
+          project.getMessageBus().syncPublisher(HgVcs.STATUS_TOPIC).update(project, getRoot());
         }
-      });
+      }, project);
     }
   }
 

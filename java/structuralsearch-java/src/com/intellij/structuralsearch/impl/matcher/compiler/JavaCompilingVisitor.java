@@ -1,3 +1,18 @@
+/*
+ * Copyright 2000-2015 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.intellij.structuralsearch.impl.matcher.compiler;
 
 import com.intellij.dupLocator.iterators.NodeIterator;
@@ -119,19 +134,6 @@ public class JavaCompilingVisitor extends JavaRecursiveElementWalkingVisitor {
       }
     }
     super.visitLiteralExpression(expression);
-  }
-
-  @Override
-  public void visitClassInitializer(final PsiClassInitializer initializer) {
-    super.visitClassInitializer(initializer);
-    PsiStatement[] psiStatements = initializer.getBody().getStatements();
-    if (psiStatements.length == 1 && psiStatements[0] instanceof PsiExpressionStatement) {
-      MatchingHandler handler = myCompilingVisitor.getContext().getPattern().getHandler(psiStatements[0]);
-
-      if (handler instanceof SubstitutionHandler) {
-        myCompilingVisitor.getContext().getPattern().setHandler(initializer, new SubstitutionHandler((SubstitutionHandler)handler));
-      }
-    }
   }
 
   @Override
@@ -307,13 +309,8 @@ public class JavaCompilingVisitor extends JavaRecursiveElementWalkingVisitor {
     final PsiElement previousNonWhiteSpace = PsiTreeUtil.skipSiblingsBackward(psiDeclarationStatement, PsiWhiteSpace.class);
 
     if (previousNonWhiteSpace instanceof PsiComment) {
-      ((DeclarationStatementHandler)handler)
-        .setCommentHandler(myCompilingVisitor.getContext().getPattern().getHandler(previousNonWhiteSpace));
-
-      myCompilingVisitor.getContext().getPattern().setHandler(
-        previousNonWhiteSpace,
-        handler
-      );
+      ((DeclarationStatementHandler)handler).setCommentHandler(myCompilingVisitor.getContext().getPattern().getHandler(previousNonWhiteSpace));
+      myCompilingVisitor.getContext().getPattern().setHandler(previousNonWhiteSpace, handler);
     }
 
     // detect typed symbol, it will have no variable
@@ -525,12 +522,9 @@ public class JavaCompilingVisitor extends JavaRecursiveElementWalkingVisitor {
     final PsiClass[] classes = cache.getClassesByName(className, (GlobalSearchScope)scope);
     final List<PsiClass> results = new ArrayList<PsiClass>();
 
-    final Processor<PsiClass> processor = new Processor<PsiClass>() {
-      @Override
-      public boolean process(PsiClass aClass) {
-        results.add(aClass);
-        return true;
-      }
+    final Processor<PsiClass> processor = aClass -> {
+      results.add(aClass);
+      return true;
     };
 
     for (PsiClass aClass : classes) {

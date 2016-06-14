@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,8 @@ import com.intellij.openapi.wm.IdeGlassPane;
 import com.intellij.openapi.wm.IdeGlassPaneUtil;
 import com.intellij.ui.Gray;
 import com.intellij.ui.JBColor;
+import com.intellij.ui.OnePixelSplitter;
+import com.intellij.util.Producer;
 import com.intellij.util.ui.JBUI;
 
 import javax.swing.*;
@@ -34,7 +36,10 @@ import java.awt.event.MouseEvent;
  * @author Konstantin Bulenkov
  */
 public class OnePixelDivider extends Divider {
-  public static final Color BACKGROUND = new JBColor(Gray.xC5, Gray.x51);
+  public static final Color BACKGROUND = new JBColor(() -> {
+    final Color bg = UIManager.getColor("OnePixelDivider.background");
+    return bg != null ? bg : new JBColor(Gray.xC5, Gray.x51);
+  });
 
   private boolean myVertical;
   private Splittable mySplitter;
@@ -52,9 +57,29 @@ public class OnePixelDivider extends Divider {
     mySwitchOrientationEnabled = false;
     setFocusable(false);
     enableEvents(AWTEvent.MOUSE_EVENT_MASK | AWTEvent.MOUSE_MOTION_EVENT_MASK);
-    //setOpaque(false);
     setOrientation(vertical);
     setBackground(BACKGROUND);
+  }
+
+  @Override
+  public void paint(Graphics g) {
+    final Rectangle bounds = g.getClipBounds();
+    if (mySplitter instanceof OnePixelSplitter) {
+      final Producer<Insets> blindZone = ((OnePixelSplitter)mySplitter).getBlindZone();
+      if (blindZone != null) {
+        final Insets insets = blindZone.produce();
+        if (insets != null) {
+          bounds.x += insets.left;
+          bounds.y += insets.top;
+          bounds.width -= insets.left + insets.right;
+          bounds.height -= insets.top + insets.bottom;
+          g.setColor(getBackground());
+          g.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+          return;
+        }
+      }
+    }
+    super.paint(g);
   }
 
   @Override
@@ -84,6 +109,9 @@ public class OnePixelDivider extends Divider {
     public void mousePressed(MouseEvent e) {
       setDragging(isInDragZone(e));
       _processMouseEvent(e);
+      if (myDragging) {
+        e.consume();
+      }
     }
 
     boolean isInDragZone(MouseEvent e) {
@@ -189,6 +217,7 @@ public class OnePixelDivider extends Divider {
           mySplitter.setProportion(proportion);
         }
       }
+      e.consume();
     }
   }
 

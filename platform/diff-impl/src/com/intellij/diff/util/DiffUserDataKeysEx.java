@@ -15,10 +15,17 @@
  */
 package com.intellij.diff.util;
 
-import com.intellij.diff.tools.util.LineFragmentCache;
+import com.intellij.diff.comparison.ComparisonPolicy;
+import com.intellij.diff.fragments.LineFragment;
+import com.intellij.diff.merge.MergeResult;
+import com.intellij.diff.merge.MergeTool;
 import com.intellij.openapi.diff.DiffNavigationContext;
 import com.intellij.openapi.editor.LogicalPosition;
+import com.intellij.openapi.progress.ProgressIndicator;
+import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.util.Couple;
 import com.intellij.openapi.util.Key;
+import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -45,14 +52,37 @@ public interface DiffUserDataKeysEx extends DiffUserDataKeys {
   Key<LogicalPosition[]> EDITORS_CARET_POSITION = Key.create("Diff.EditorsCaretPosition");
 
   Key<DiffNavigationContext> NAVIGATION_CONTEXT = Key.create("Diff.NavigationContext");
-  Key<LineFragmentCache> LINE_FRAGMENT_CACHE = Key.create("Diff.LineFragmentCache");
+
+  interface DiffComputer {
+    @NotNull
+    List<LineFragment> compute(@NotNull CharSequence text1,
+                               @NotNull CharSequence text2,
+                               @NotNull ComparisonPolicy policy,
+                               boolean innerChanges,
+                               @NotNull ProgressIndicator indicator);
+  }
+  Key<DiffComputer> CUSTOM_DIFF_COMPUTER = Key.create("Diff.CustomDiffComputer");
 
   //
   // DiffContext
   //
 
-  Key<String> PLACE = Key.create("Diff.Place");
   Key<JComponent> BOTTOM_PANEL = Key.create("Diff.BottomPanel"); // Could implement Disposable
 
   Key<Boolean> SHOW_READ_ONLY_LOCK = Key.create("Diff.ShowReadOnlyLock");
+
+  //
+  // MergeContext / MergeRequest
+  //
+
+  // return false if merge window should be prevented from closing and canceling resolve.
+  Key<Condition<MergeTool.MergeViewer>> MERGE_CANCEL_HANDLER = Key.create("Diff.MergeCancelHandler");
+  // (title, message)
+  Key<Couple<String>> MERGE_CANCEL_MESSAGE = Key.create("Diff.MergeCancelMessage");
+  // null -> default
+  Key<Function<MergeResult, String>> MERGE_ACTION_CAPTIONS = Key.create("Diff.MergeActionCaptions");
+
+
+  Key<String> VCS_DIFF_LEFT_CONTENT_TITLE = Key.create("Diff.Left.Panel.Title");
+  Key<String> VCS_DIFF_RIGHT_CONTENT_TITLE = Key.create("Diff.Right.Panel.Title");
 }

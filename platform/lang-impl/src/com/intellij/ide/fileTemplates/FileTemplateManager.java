@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,11 +35,11 @@ public abstract class FileTemplateManager{
   public static final int RECENT_TEMPLATES_SIZE = 25;
 
   @NonNls 
-  public static final String INTERNAL_HTML_TEMPLATE_NAME = "Html";
+  public static final String INTERNAL_HTML_TEMPLATE_NAME = "HTML4 File";
   @NonNls 
-  public static final String INTERNAL_HTML5_TEMPLATE_NAME = "Html5";
+  public static final String INTERNAL_HTML5_TEMPLATE_NAME = "HTML File";
   @NonNls 
-  public static final String INTERNAL_XHTML_TEMPLATE_NAME = "Xhtml";
+  public static final String INTERNAL_XHTML_TEMPLATE_NAME = "XHTML File";
   @NonNls 
   public static final String FILE_HEADER_TEMPLATE_NAME = "File Header";
 
@@ -93,8 +93,9 @@ public abstract class FileTemplateManager{
   @NotNull 
   public abstract Properties getDefaultProperties();
 
-  @Deprecated /** Use {@link #getDefaultProperties()} instead */
+  /** Use {@link #getDefaultProperties()} instead */
   @NotNull
+  @Deprecated
   public Properties getDefaultProperties(@NotNull Project project) {
     Properties properties = getDefaultProperties();
     properties.setProperty(PROJECT_NAME_VARIABLE, project.getName());
@@ -116,6 +117,7 @@ public abstract class FileTemplateManager{
   public abstract void addRecentName(@NotNull @NonNls String name);
 
   public abstract FileTemplate getInternalTemplate(@NotNull @NonNls String templateName);
+  public abstract FileTemplate findInternalTemplate(@NotNull @NonNls String templateName);
 
   @NotNull 
   public abstract FileTemplate[] getInternalTemplates();

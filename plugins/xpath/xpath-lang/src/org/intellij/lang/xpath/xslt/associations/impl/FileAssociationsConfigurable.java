@@ -55,7 +55,7 @@ public class FileAssociationsConfigurable implements SearchableConfigurable, Con
     public JComponent createComponent() {
         myEditor = new ReadAction<AssociationsEditor>() {
             @Override
-            protected void run(Result<AssociationsEditor> result) throws Throwable {
+            protected void run(@NotNull Result<AssociationsEditor> result) throws Throwable {
                 result.setResult(new AssociationsEditor(myProject, myState.state));
             }
         }.execute().getResultObject();
@@ -94,19 +94,16 @@ public class FileAssociationsConfigurable implements SearchableConfigurable, Con
     public static void editAssociations(Project project, final PsiFile file) {
         final FileAssociationsConfigurable instance = new FileAssociationsConfigurable(project);
 
-        ShowSettingsUtil.getInstance().editConfigurable(project, instance, new Runnable() {
-            @Override
-            public void run() {
-                final AssociationsEditor editor = instance.getEditor();
-                if (file != null) {
-                    editor.select(file);
-                }
+        ShowSettingsUtil.getInstance().editConfigurable(project, instance, () -> {
+            final AssociationsEditor editor = instance.getEditor();
+            if (file != null) {
+                editor.select(file);
             }
         });
     }
 
     @State(name = "XSLT-Support.FileAssociations.UIState",
-            storages = @Storage(file = StoragePathMacros.WORKSPACE_FILE)
+            storages = @Storage(StoragePathMacros.WORKSPACE_FILE)
     )
     public static class UIState implements PersistentStateComponent<TreeState> {
         private TreeState state;

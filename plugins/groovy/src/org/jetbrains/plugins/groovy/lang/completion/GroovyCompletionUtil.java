@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ import com.intellij.codeInsight.completion.*;
 import com.intellij.codeInsight.completion.originInfo.OriginInfoProvider;
 import com.intellij.codeInsight.lookup.LookupElement;
 import com.intellij.codeInsight.lookup.LookupElementBuilder;
-import com.intellij.codeInsight.lookup.LookupItem;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.RangeMarker;
@@ -326,7 +325,7 @@ public class GroovyCompletionUtil {
   private static boolean getterMatches(PrefixMatcher matcher, PsiMethod element, String importedName) {
     return GroovyPropertyUtils.isSimplePropertyGetter(element) &&
            (matcher.prefixMatches(GroovyPropertyUtils.getGetterNameNonBoolean(importedName)) ||
-            element.getReturnType() == PsiType.BOOLEAN && matcher.prefixMatches(GroovyPropertyUtils.getGetterNameBoolean(importedName)));
+            PsiType.BOOLEAN.equals(element.getReturnType()) && matcher.prefixMatches(GroovyPropertyUtils.getGetterNameBoolean(importedName)));
   }
 
   public static LookupElement createClassLookupItem(PsiClass psiClass) {
@@ -370,12 +369,7 @@ public class GroovyCompletionUtil {
       String tailText = getPackageText((PsiClass)element);
       final PsiClass psiClass = (PsiClass)element;
       if ((substitutor == null || substitutor.getSubstitutionMap().isEmpty()) && psiClass.getTypeParameters().length > 0) {
-        tailText = "<" + StringUtil.join(psiClass.getTypeParameters(), new Function<PsiTypeParameter, String>() {
-          @Override
-          public String fun(PsiTypeParameter psiTypeParameter) {
-            return psiTypeParameter.getName();
-          }
-        }, "," + (showSpaceAfterComma(psiClass) ? " " : "")) + ">" + tailText;
+        tailText = "<" + StringUtil.join(psiClass.getTypeParameters(), psiTypeParameter -> psiTypeParameter.getName(), "," + (showSpaceAfterComma(psiClass) ? " " : "")) + ">" + tailText;
       }
       builder = builder.withTailText(tailText, true);
     }
@@ -425,12 +419,7 @@ public class GroovyCompletionUtil {
     final GroovyResolveResult[] constructors = ResolveUtil.getAllClassConstructors(clazz, PsiSubstitutor.EMPTY, null, place);
 
 
-    boolean hasSetters = ContainerUtil.find(clazz.getAllMethods(), new Condition<PsiMethod>() {
-      @Override
-      public boolean value(PsiMethod method) {
-        return GroovyPropertyUtils.isSimplePropertySetter(method);
-      }
-    }) != null;
+    boolean hasSetters = ContainerUtil.find(clazz.getAllMethods(), method -> GroovyPropertyUtils.isSimplePropertySetter(method)) != null;
 
     boolean hasParameters = false;
     boolean hasAccessibleConstructors = false;
@@ -450,7 +439,7 @@ public class GroovyCompletionUtil {
     return !hasAccessibleConstructors && (hasParameters || hasSetters);
   }
 
-  public static void addImportForItem(PsiFile file, int startOffset, LookupItem item) throws IncorrectOperationException {
+  public static void addImportForItem(PsiFile file, int startOffset, LookupElement item) throws IncorrectOperationException {
     PsiDocumentManager.getInstance(file.getProject()).commitAllDocuments();
 
     Object o = item.getObject();
@@ -683,5 +672,17 @@ public class GroovyCompletionUtil {
       position = parent;
     }
     return false;
+  }
+
+  @Nullable
+  public static PsiType getQualifierType(@Nullable PsiElement qualifier) {
+    PsiType qualifierType = qualifier instanceof GrExpression ? ((GrExpression)qualifier).getType() : null;
+    if (ResolveUtil.resolvesToClass(qualifier)) {
+      PsiType type = ResolveUtil.unwrapClassType(qualifierType);
+      if (type != null) {
+        qualifierType = type;
+      }
+    }
+    return qualifierType;
   }
 }

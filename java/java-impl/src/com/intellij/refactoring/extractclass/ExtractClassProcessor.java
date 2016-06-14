@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -81,9 +81,10 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
   private final String newClassName;
   private final String delegateFieldName;
   private final boolean requiresBackpointer;
-  private boolean delegationRequired = false;
+  private boolean delegationRequired;
   private final ExtractEnumProcessor myExtractEnumProcessor;
   private final PsiClass myClass;
+  private boolean extractInnerClass;
 
   public ExtractClassProcessor(PsiClass sourceClass,
                                List<PsiField> fields,
@@ -139,8 +140,8 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
     }
     myClass = new WriteCommandAction<PsiClass>(myProject, getCommandName()){
       @Override
-      protected void run(Result<PsiClass> result) throws Throwable {
-        result.setResult(buildClass());
+      protected void run(@NotNull Result<PsiClass> result) throws Throwable {
+        result.setResult(buildClass(false));
       }
     }.execute().getResultObject();
     myExtractEnumProcessor = new ExtractEnumProcessor(myProject, this.enumConstants, myClass);
@@ -148,6 +149,10 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
 
   public PsiClass getCreatedClass() {
     return myClass;
+  }
+
+  public void setExtractInnerClass(boolean extractInnerClass) {
+    this.extractInnerClass = extractInnerClass;
   }
 
   @Override
@@ -158,15 +163,11 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
                                                 myClass.getContainingFile().getContainingDirectory().getVirtualFile())) {
       conflicts.putValue(sourceClass, "Extracted class won't be accessible in " + RefactoringUIUtil.getDescription(sourceClass, true));
     }
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      public void run() {
-        myClass.delete();
-      }
-    });
+    ApplicationManager.getApplication().runWriteAction(() -> myClass.delete());
     final Project project = sourceClass.getProject();
     final GlobalSearchScope scope = GlobalSearchScope.allScope(project);
     final PsiClass existingClass =
-      JavaPsiFacade.getInstance(project).findClass(StringUtil.getQualifiedName(newPackageName, newClassName), scope);
+      JavaPsiFacade.getInstance(project).findClass(getQualifiedName(), scope);
     if (existingClass != null) {
       conflicts.putValue(existingClass, RefactorJBundle.message("cannot.perform.the.refactoring") +
                     RefactorJBundle.message("there.already.exists.a.class.with.the.chosen.name"));
@@ -191,6 +192,10 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
     }
     checkConflicts(refUsages, conflicts);
     return showConflicts(conflicts, refUsages.get());
+  }
+
+  private String getQualifiedName() {
+    return extractInnerClass ? newClassName : StringUtil.getQualifiedName(newPackageName, newClassName);
   }
 
 
@@ -263,7 +268,7 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
   }
 
   protected void performRefactoring(@NotNull UsageInfo[] usageInfos) {
-    final PsiClass psiClass = buildClass();
+    final PsiClass psiClass = buildClass(true);
     if (psiClass == null) return;
     if (delegationRequired) {
       buildDelegate();
@@ -412,7 +417,7 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
     final String delegateVisibility = calculateDelegateVisibility();
     if (delegateVisibility.length() > 0) fieldBuffer.append(delegateVisibility).append(' ');
     fieldBuffer.append("final ");
-    final String fullyQualifiedName = StringUtil.getQualifiedName(newPackageName, newClassName);
+    final String fullyQualifiedName = getQualifiedName();
     fieldBuffer.append(fullyQualifiedName);
     if (!typeParams.isEmpty()) {
       fieldBuffer.append('<');
@@ -497,7 +502,7 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
     assert innerName != null;
     final String sourceClassQualifiedName = sourceClass.getQualifiedName();
     assert sourceClassQualifiedName != null;
-    final String newInnerClassName = StringUtil.getQualifiedName(newPackageName, newClassName) + innerName.substring(sourceClassQualifiedName.length());
+    final String newInnerClassName = getQualifiedName() + innerName.substring(sourceClassQualifiedName.length());
     boolean hasExternalReference = false;
     for (PsiReference reference : calls) {
       final PsiElement referenceElement = reference.getElement();
@@ -552,7 +557,7 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
     final Project project = psiManager.getProject();
     final GlobalSearchScope scope = GlobalSearchScope.allScope(project);
     final Iterable<PsiReference> calls = ReferencesSearch.search(method, scope);
-    final String fullyQualifiedName = StringUtil.getQualifiedName(newPackageName, newClassName);
+    final String fullyQualifiedName = getQualifiedName();
     for (PsiReference reference : calls) {
       final PsiElement referenceElement = reference.getElement();
 
@@ -594,7 +599,7 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
     final Project project = psiManager.getProject();
     final GlobalSearchScope scope = GlobalSearchScope.allScope(project);
 
-    final String qualifiedName = StringUtil.getQualifiedName(newPackageName, newClassName);
+    final String qualifiedName = getQualifiedName();
     @NonNls String getter = null;
     if (myGenerateAccessors) {
       getter = GenerateMembersUtil.suggestGetterName(field);
@@ -652,7 +657,7 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
   }
 
 
-  private PsiClass buildClass() {
+  private PsiClass buildClass(boolean normalizeDeclaration) {
     final PsiManager manager = sourceClass.getManager();
     final Project project = sourceClass.getProject();
     final ExtractedClassBuilder extractedClassBuilder = new ExtractedClassBuilder();
@@ -682,7 +687,20 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
       extractedClassBuilder.setFieldsNeedingSetters(visitor.getFieldsNeedingSetter());
     }
 
-    final String classString = extractedClassBuilder.buildBeanClass();
+    final String classString = extractedClassBuilder.buildBeanClass(normalizeDeclaration);
+    if (extractInnerClass) {
+      final PsiFileFactory factory = PsiFileFactory.getInstance(project);
+      final PsiJavaFile newFile = (PsiJavaFile)factory.createFileFromText(newClassName + ".java", JavaFileType.INSTANCE, classString);
+      final PsiClass psiClass = newFile.getClasses()[0];
+      if (!psiClass.isEnum()) {
+        final PsiModifierList modifierList = psiClass.getModifierList();
+        assert modifierList != null;
+        modifierList.setModifierProperty(PsiModifier.STATIC, true);
+      }
+      final PsiElement addedClass = sourceClass.add(psiClass);
+      return (PsiClass)CodeStyleManager.getInstance(manager)
+        .reformat(JavaCodeStyleManager.getInstance(project).shortenClassReferences(addedClass));
+    }
 
     try {
       final PsiFile containingFile = sourceClass.getContainingFile();
@@ -881,11 +899,7 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
     protected abstract boolean hasGetterOrSetter(final PsiMethod[] getters);
 
     protected boolean isProhibitedReference(PsiExpression expression) {
-      return BackpointerUtil.isBackpointerReference(expression, new Condition<PsiField>() {
-        public boolean value(final PsiField field) {
-          return NecessaryAccessorsVisitor.this.isProhibitedReference(field);
-        }
-      });
+      return BackpointerUtil.isBackpointerReference(expression, field -> NecessaryAccessorsVisitor.this.isProhibitedReference(field));
     }
 
     protected abstract boolean isProhibitedReference(PsiField field);

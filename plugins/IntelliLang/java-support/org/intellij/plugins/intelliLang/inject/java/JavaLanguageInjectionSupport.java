@@ -17,13 +17,13 @@
 package org.intellij.plugins.intelliLang.inject.java;
 
 import com.intellij.codeInsight.AnnotationUtil;
-import com.intellij.codeInsight.daemon.impl.quickfix.OrderEntryFix;
 import com.intellij.lang.Language;
 import com.intellij.lang.injection.MultiHostRegistrar;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.application.Result;
 import com.intellij.openapi.command.WriteCommandAction;
+import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.project.Project;
@@ -114,15 +114,14 @@ public class JavaLanguageInjectionSupport extends AbstractLanguageInjectionSuppo
 
     if (injectionsMap.isEmpty() && annotations.isEmpty()) return false;
     final ArrayList<BaseInjection> originalInjections = new ArrayList<BaseInjection>(injectionsMap.keySet());
-    final List<BaseInjection> newInjections = ContainerUtil.mapNotNull(originalInjections, new NullableFunction<BaseInjection, BaseInjection>() {
-      public BaseInjection fun(final BaseInjection injection) {
-        final Pair<PsiMethod, Integer> pair = injectionsMap.get(injection);
-        final String placeText = getPatternStringForJavaPlace(pair.first, pair.second);
-        final BaseInjection newInjection = injection.copy();
-        newInjection.setPlaceEnabled(placeText, false);
-        return InjectorUtils.canBeRemoved(newInjection)? null : newInjection;
-      }
-    });
+    final List<BaseInjection> newInjections = ContainerUtil.mapNotNull(originalInjections,
+                                                                       (NullableFunction<BaseInjection, BaseInjection>)injection -> {
+                                                                         final Pair<PsiMethod, Integer> pair = injectionsMap.get(injection);
+                                                                         final String placeText = getPatternStringForJavaPlace(pair.first, pair.second);
+                                                                         final BaseInjection newInjection = injection.copy();
+                                                                         newInjection.setPlaceEnabled(placeText, false);
+                                                                         return InjectorUtils.canBeRemoved(newInjection)? null : newInjection;
+                                                                       });
     configuration.replaceInjectionsWithUndo(project, newInjections, originalInjections, annotations);
     return true;
   }
@@ -161,11 +160,9 @@ public class JavaLanguageInjectionSupport extends AbstractLanguageInjectionSuppo
     builder.addCancelAction();
     builder.setCenterPanel(panel.getComponent());
     builder.setTitle(EditInjectionSettingsAction.EDIT_INJECTION_TITLE);
-    builder.setOkOperation(new Runnable() {
-      public void run() {
-        panel.apply();
-        builder.getDialogWrapper().close(DialogWrapper.OK_EXIT_CODE);
-      }
+    builder.setOkOperation(() -> {
+      panel.apply();
+      builder.getDialogWrapper().close(DialogWrapper.OK_EXIT_CODE);
     });
     if (builder.show() == DialogWrapper.OK_EXIT_CODE) {
       return new BaseInjection(methodParameterInjection.getSupportId()).copyFrom(methodParameterInjection);
@@ -213,20 +210,23 @@ public class JavaLanguageInjectionSupport extends AbstractLanguageInjectionSuppo
                                                 final PsiModifierListOwner modifierListOwner,
                                                 @NotNull PsiLanguageInjectionHost host,
                                                 final String languageId) {
-    return doAddLanguageAnnotation(project, modifierListOwner, host, languageId, new Processor<PsiLanguageInjectionHost>() {
-      @Override
-      public boolean process(PsiLanguageInjectionHost host) {
-        final Configuration.AdvancedConfiguration configuration = Configuration.getProjectInstance(project).getAdvancedConfiguration();
-        boolean allowed = configuration.isSourceModificationAllowed();
-        configuration.setSourceModificationAllowed(true);
-        try {
-          return doInjectInJava(project, host, host, languageId);
-        }
-        finally {
-          configuration.setSourceModificationAllowed(allowed);
-        }
+    return doAddLanguageAnnotation(project, modifierListOwner, host, languageId, host1 -> {
+      final Configuration.AdvancedConfiguration configuration = Configuration.getProjectInstance(project).getAdvancedConfiguration();
+      boolean allowed = configuration.isSourceModificationAllowed();
+      configuration.setSourceModificationAllowed(true);
+      try {
+        return doInjectInJava(project, host1, host1, languageId);
+      }
+      finally {
+        configuration.setSourceModificationAllowed(allowed);
       }
     });
+  }
+
+  private static boolean isAnnotationsJarInPath(Module module) {
+    if (module == null) return false;
+    return JavaPsiFacade.getInstance(module.getProject())
+             .findClass(AnnotationUtil.LANGUAGE, GlobalSearchScope.moduleWithDependenciesAndLibrariesScope(module)) != null;
   }
 
   public static boolean doAddLanguageAnnotation(Project project,
@@ -234,7 +234,7 @@ public class JavaLanguageInjectionSupport extends AbstractLanguageInjectionSuppo
                                                 @NotNull final PsiLanguageInjectionHost host,
                                                 final String languageId,
                                                 Processor<PsiLanguageInjectionHost> annotationFixer) {
-    final boolean addAnnotation = OrderEntryFix.isAnnotationsJarInPath(ModuleUtilCore.findModuleForPsiElement(modifierListOwner))
+    final boolean addAnnotation = isAnnotationsJarInPath(ModuleUtilCore.findModuleForPsiElement(modifierListOwner))
       && PsiUtil.isLanguageLevel5OrHigher(modifierListOwner)
       && modifierListOwner.getModifierList() != null;
     final PsiStatement statement = PsiTreeUtil.getParentOfType(host, PsiStatement.class);

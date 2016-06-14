@@ -213,7 +213,8 @@ public class TaskVcsTest extends CodeInsightFixtureTestCase {
 
     LocalChangeList defaultChangeListActive = myChangeListManager.findChangeList(LocalChangeList.DEFAULT_NAME);
     assertNotNull(defaultChangeListActive);
-    assertTrue(defaultChangeListActive.isDefault());
+    assertTrue(myChangeListManager.getDefaultListName(), defaultChangeListActive.isDefault());
+
     LocalChangeList defaultChangeListInactive = myChangeListManager.findChangeList("Default (1)");
     assertNotNull(defaultChangeListInactive);
     LocalChangeList anotherChangeList = myChangeListManager.findChangeList("TEST-001 Summary");
@@ -303,9 +304,7 @@ public class TaskVcsTest extends CodeInsightFixtureTestCase {
     assertEquals(2, myTaskManager.getLocalTasks().size()); // extra task created
     assertEquals(2, myChangeListManager.getChangeListsCopy().size());
 
-    assertTrue(ContainerUtil.exists(myTaskManager.getLocalTasks(), task -> {
-      return task.getSummary().equals("New Changelist");
-    }));
+    assertTrue(ContainerUtil.exists(myTaskManager.getLocalTasks(), task -> task.getSummary().equals("New Changelist")));
   }
 
   private LocalChangeList addChangeList(String title, String comment) {
@@ -381,6 +380,12 @@ public class TaskVcsTest extends CodeInsightFixtureTestCase {
 
     LocalTaskImpl strange = new LocalTaskImpl("1", "very long and strange summary");
     assertEquals("very-long", myTaskManager.suggestBranchName(strange));
+
+    myTaskManager.getState().branchNameFormat = "{id} {summary}";
+
+    LocalTaskImpl withIllegalSymbolsInIssue = new LocalTaskImpl("1", "contains Illegal$Symbols");
+    withIllegalSymbolsInIssue.setIssue(true);
+    assertEquals("1-contains-Illegal$Symbols", myTaskManager.suggestBranchName(withIllegalSymbolsInIssue));
   }
 
   private TestRepository myRepository;
@@ -478,7 +483,8 @@ public class TaskVcsTest extends CodeInsightFixtureTestCase {
       myTaskManager = null;
       myVcs = null;
       myChangeListManager = null;
+
+      super.tearDown();
     }
-    super.tearDown();
   }
 }

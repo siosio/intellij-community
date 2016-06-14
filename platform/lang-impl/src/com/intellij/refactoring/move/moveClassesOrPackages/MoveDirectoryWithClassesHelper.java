@@ -121,9 +121,9 @@ public abstract class MoveDirectoryWithClassesHelper {
     }
 
     private static class MyUsageInfo extends UsageInfo {
-      private final PsiFileSystemItem myFile;
+      private final @NotNull PsiFileSystemItem myFile;
 
-      public MyUsageInfo(@NotNull PsiReference reference, PsiFileSystemItem file) {
+      public MyUsageInfo(@NotNull PsiReference reference, @NotNull PsiFileSystemItem file) {
         super(reference);
         myFile = file;
       }
@@ -132,13 +132,10 @@ public abstract class MoveDirectoryWithClassesHelper {
       @Nullable
       public PsiReference getReference() {
         PsiElement element = getElement();
-        if (element == null) {
-          return null;
-        }
-        else {
-          final ProperTextRange rangeInElement = getRangeInElement();
-          return rangeInElement != null ? element.findReferenceAt(rangeInElement.getStartOffset()) : element.getReference();
-        }
+        if (element == null) return null;
+        final ProperTextRange rangeInElement = getRangeInElement();
+        PsiReference reference = rangeInElement != null ? element.findReferenceAt(rangeInElement.getStartOffset()) : element.getReference();
+        return reference != null && reference.getRangeInElement().equals(rangeInElement) ? reference : null;
       }
     }
   }

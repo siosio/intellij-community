@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.wm.StatusBar;
 import com.intellij.openapi.wm.impl.IdeFrameImpl;
 import com.intellij.util.Alarm;
+import com.intellij.util.BitUtil;
 import com.intellij.util.ReflectionUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -57,7 +58,7 @@ import java.util.EventListener;
 public final class SwingCleanuper implements ApplicationComponent{
   private final Alarm myAlarm;
 
-  public SwingCleanuper(Application application, ProjectManager projectManager) {
+  public SwingCleanuper(@NotNull Application application, ProjectManager projectManager) {
     myAlarm = new Alarm(application);
     projectManager.addProjectManagerListener(new ProjectManagerAdapter(){
         public void projectOpened(final Project project) {
@@ -70,86 +71,82 @@ public final class SwingCleanuper implements ApplicationComponent{
         public void projectClosed(final Project project){
           myAlarm.cancelAllRequests();
           myAlarm.addRequest(
-            new Runnable() {
-              public void run() {
-                // request focus into some focusable component inside IdeFrame
-                final IdeFrameImpl frame;
-                final Window window=KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusedWindow();
-                if(window instanceof IdeFrameImpl){
-                  frame=(IdeFrameImpl)window;
-                }else{
-                  frame=(IdeFrameImpl)SwingUtilities.getAncestorOfClass(IdeFrameImpl.class,window);
+            () -> {
+              // request focus into some focusable component inside IdeFrame
+              final IdeFrameImpl frame;
+              final Window window=KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusedWindow();
+              if(window instanceof IdeFrameImpl){
+                frame=(IdeFrameImpl)window;
+              }else{
+                frame=(IdeFrameImpl)SwingUtilities.getAncestorOfClass(IdeFrameImpl.class,window);
+              }
+              if(frame!=null){
+                final Application app = ApplicationManager.getApplication();
+                if (app != null && app.isActive()) {
+                  StatusBar statusBar = frame.getStatusBar();
+                  if (statusBar != null) ((JComponent)statusBar).requestFocus();
                 }
-                if(frame!=null){
-                  final Application app = ApplicationManager.getApplication();
-                  if (app != null && app.isActive()) {
-                    StatusBar statusBar = frame.getStatusBar();
-                    if (statusBar != null) ((JComponent)statusBar).requestFocus();
-                  }
-                }
+              }
 
-                //noinspection SSBasedInspection
-                SwingUtilities.invokeLater(
-                  new Runnable() {
-                    public void run() {
+              //noinspection SSBasedInspection
+              SwingUtilities.invokeLater(
+                () -> {
 
-                      // KeyboardFocusManager.newFocusOwner
-                      ReflectionUtil.resetStaticField(KeyboardFocusManager.class, "newFocusOwner");
+                  // KeyboardFocusManager.newFocusOwner
+                  ReflectionUtil.resetStaticField(KeyboardFocusManager.class, "newFocusOwner");
 
-                      // Clear "realOppositeComponent", "realOppositeWindow"
-                      final KeyboardFocusManager focusManager = KeyboardFocusManager.getCurrentKeyboardFocusManager();
-                      resetField(focusManager, Component.class, "realOppositeComponent");
-                      resetField(focusManager, Window.class, "realOppositeWindow");
+                  // Clear "realOppositeComponent", "realOppositeWindow"
+                  final KeyboardFocusManager focusManager = KeyboardFocusManager.getCurrentKeyboardFocusManager();
+                  resetField(focusManager, Component.class, "realOppositeComponent");
+                  resetField(focusManager, Window.class, "realOppositeWindow");
 
 
-                      // Memory leak on static field in BasicPopupMenuUI
+                  // Memory leak on static field in BasicPopupMenuUI
 
-                      try {
-                        Object helperObject = ReflectionUtil.getStaticFieldValue(BasicPopupMenuUI.class, Object.class, "menuKeyboardHelper");
-                        if (helperObject != null) {
-                          resetField(helperObject, Component.class, "lastFocused");
-                        }
-                      }
-                      catch (Exception e) {
-                        // Ignore
-                      }
-
-                      // Memory leak on javax.swing.TransferHandler$SwingDragGestureRecognizer.component
-
-                      try{
-                        DragGestureRecognizer recognizer = ReflectionUtil.getStaticFieldValue(TransferHandler.class, DragGestureRecognizer.class, "recognizer");
-
-                        if (recognizer != null) { // that is memory leak
-                          recognizer.setComponent(null);
-                        }
-                      }
-                      catch (Exception e){
-                        // Ignore
-                      }
-                      try {
-                        fixJTextComponentMemoryLeak();
-                      }
-                      catch(Exception e) {
-                        // Ignore
-                      }
-
-                      focusManager.setGlobalCurrentFocusCycleRoot(null); //Remove focus leaks
-
-                      try {
-                        final Method m = ReflectionUtil.getDeclaredMethod(KeyboardFocusManager.class,"setGlobalFocusOwner", Component.class);
-                        m.invoke(focusManager, new Object[]{null});
-                      }
-                      catch (Exception e) {
-                        // Ignore
-                      }
-
-                      ReflectionUtil.resetStaticField(KeyboardFocusManager.class, "newFocusOwner");
-                      ReflectionUtil.resetStaticField(KeyboardFocusManager.class, "permanentFocusOwner");
-                      ReflectionUtil.resetStaticField(KeyboardFocusManager.class, "currentFocusCycleRoot");
+                  try {
+                    Object helperObject = ReflectionUtil.getStaticFieldValue(BasicPopupMenuUI.class, Object.class, "menuKeyboardHelper");
+                    if (helperObject != null) {
+                      resetField(helperObject, Component.class, "lastFocused");
                     }
                   }
-                );
-              }
+                  catch (Exception e) {
+                    // Ignore
+                  }
+
+                  // Memory leak on javax.swing.TransferHandler$SwingDragGestureRecognizer.component
+
+                  try{
+                    DragGestureRecognizer recognizer = ReflectionUtil.getStaticFieldValue(TransferHandler.class, DragGestureRecognizer.class, "recognizer");
+
+                    if (recognizer != null) { // that is memory leak
+                      recognizer.setComponent(null);
+                    }
+                  }
+                  catch (Exception e){
+                    // Ignore
+                  }
+                  try {
+                    fixJTextComponentMemoryLeak();
+                  }
+                  catch(Exception e) {
+                    // Ignore
+                  }
+
+                  focusManager.setGlobalCurrentFocusCycleRoot(null); //Remove focus leaks
+
+                  try {
+                    final Method m = ReflectionUtil.getDeclaredMethod(KeyboardFocusManager.class,"setGlobalFocusOwner", Component.class);
+                    m.invoke(focusManager, new Object[]{null});
+                  }
+                  catch (Exception e) {
+                    // Ignore
+                  }
+
+                  ReflectionUtil.resetStaticField(KeyboardFocusManager.class, "newFocusOwner");
+                  ReflectionUtil.resetStaticField(KeyboardFocusManager.class, "permanentFocusOwner");
+                  ReflectionUtil.resetStaticField(KeyboardFocusManager.class, "currentFocusCycleRoot");
+                }
+              );
             },
             2500
           );
@@ -157,82 +154,103 @@ public final class SwingCleanuper implements ApplicationComponent{
       }
     );
 
-    Toolkit.getDefaultToolkit().addAWTEventListener(new AWTEventListener() {
+    if (SystemInfo.isMac) {
+      Toolkit.getDefaultToolkit().addAWTEventListener(new AWTEventListener() {
 
-      private final Field myNativeAXResourceField;
-      {
-        Field field = null;
-        if (SystemInfo.isMac) {
+        private Field nativeAXResource_Field = null;
+        private Field accessibleContext_Field = null;
+
+        {
           try {
-            field = ReflectionUtil.findField(AccessibleContext.class, Object.class, "nativeAXResource");
+            nativeAXResource_Field = ReflectionUtil.findField(AccessibleContext.class, Object.class, "nativeAXResource");
+            accessibleContext_Field = ReflectionUtil.findField(Component.class, AccessibleContext.class, "accessibleContext");
           }
           catch (NoSuchFieldException ignored) {
           }
         }
-        myNativeAXResourceField = field;
-      }
 
-      @Override
-      public void eventDispatched(AWTEvent event) {
-        if (!SystemInfo.isMac || !Registry.is("ide.mac.fix.accessibleLeak")) return;
+        @Override
+        public void eventDispatched(AWTEvent event) {
+          if (!Registry.is("ide.mac.fix.accessibleLeak")) return;
 
-        HierarchyEvent he = (HierarchyEvent)event;
-        if ((he.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) > 0) {
-          if (he.getComponent() != null && !he.getComponent().isShowing()) {
-            Component c = he.getComponent();
-            if (c instanceof JTextComponent) {
-              JTextComponent textComponent = (JTextComponent)c;
+          HierarchyEvent he = (HierarchyEvent)event;
+          if (BitUtil.isSet(he.getChangeFlags(), HierarchyEvent.SHOWING_CHANGED)) {
+            if (he.getComponent() != null && !he.getComponent().isShowing()) {
+              Component c = he.getComponent();
+              if (c instanceof JTextComponent) {
+                JTextComponent textComponent = (JTextComponent)c;
 
-              CaretListener[] carets = textComponent.getListeners(CaretListener.class);
-              for (CaretListener each : carets) {
-                if (isCAccessibleListener(each)) {
-                  textComponent.removeCaretListener(each);
-                }
-              }
-
-              Document document = textComponent.getDocument();
-              if (document instanceof AbstractDocument) {
-                DocumentListener[] documentListeners = ((AbstractDocument)document).getDocumentListeners();
-                for (DocumentListener each : documentListeners) {
+                CaretListener[] carets = textComponent.getListeners(CaretListener.class);
+                for (CaretListener each : carets) {
                   if (isCAccessibleListener(each)) {
-                    document.removeDocumentListener(each);
+                    textComponent.removeCaretListener(each);
+                  }
+                }
+
+                Document document = textComponent.getDocument();
+                if (document instanceof AbstractDocument) {
+                  DocumentListener[] documentListeners = ((AbstractDocument)document).getDocumentListeners();
+                  for (DocumentListener each : documentListeners) {
+                    if (isCAccessibleListener(each)) {
+                      document.removeDocumentListener(each);
+                    }
                   }
                 }
               }
-            } else if (c instanceof JProgressBar) {
-              JProgressBar bar = (JProgressBar)c;
-              ChangeListener[] changeListeners = bar.getChangeListeners();
-              for (ChangeListener each : changeListeners) {
-                if (isCAccessibleListener(each)) {
-                  bar.removeChangeListener(each);
+              else if (c instanceof JProgressBar) {
+                JProgressBar bar = (JProgressBar)c;
+                ChangeListener[] changeListeners = bar.getChangeListeners();
+                for (ChangeListener each : changeListeners) {
+                  if (isCAccessibleListener(each)) {
+                    bar.removeChangeListener(each);
+                  }
                 }
               }
-            } else if (c instanceof JSlider) {
-              JSlider slider = (JSlider)c;
-              ChangeListener[] changeListeners = slider.getChangeListeners();
-              for (ChangeListener each : changeListeners) {
-                if (isCAccessibleListener(each)) {
-                  slider.removeChangeListener(each);
+              else if (c instanceof JSlider) {
+                JSlider slider = (JSlider)c;
+                ChangeListener[] changeListeners = slider.getChangeListeners();
+                for (ChangeListener each : changeListeners) {
+                  if (isCAccessibleListener(each)) {
+                    slider.removeChangeListener(each);
+                  }
                 }
               }
-            }
 
-            AccessibleContext ac = c.getAccessibleContext();
-            if (ac != null && myNativeAXResourceField != null) {
-              try {
-                Object resource = myNativeAXResourceField.get(ac);
-                if (resource != null && resource.getClass().getName().equals("apple.awt.CAccessible")) {
-                  Field accessible = ReflectionUtil.findField(resource.getClass(), Accessible.class, "accessible");
-                  accessible.set(resource, null);
+              if (accessibleContext_Field != null && nativeAXResource_Field != null) {
+                try {
+                  // Component's AccessibleContext is not necessarily initialized. In this case we don't want to force its creation.
+                  // So, first we check the Component.accessibleContext field. The field has a protected access and it's a common
+                  // Swing pattern to set it in the Component.getAccessibleContext() method when it's overriden by a subclass
+                  // (and we're to follow it).
+                  AccessibleContext ac = (AccessibleContext)accessibleContext_Field.get(c);
+                  if (ac != null) {
+                    // The getter may have a side effect, so call it to get the up-to-date context.
+                    ac = c.getAccessibleContext();
+                    if (ac != null) {
+                      Object resource = nativeAXResource_Field.get(ac);
+                      if (resource != null && isCAccessible(resource)) {
+                        Field accessible = ReflectionUtil.findField(resource.getClass(), Accessible.class, "accessible");
+                        accessible.set(resource, null);
+                      }
+                    }
+                  }
+                } catch (Exception ignored) {
                 }
-              }
-              catch (Exception ignored) {
               }
             }
           }
         }
-      }
-    }, AWTEvent.HIERARCHY_EVENT_MASK);
+      }, AWTEvent.HIERARCHY_EVENT_MASK);
+    }
+  }
+
+  private static boolean isCAccessible(Object resource) {
+    final String name = resource.getClass().getName();
+    return isCAccessible(name);
+  }
+
+  static boolean isCAccessible(String name) {
+    return name.equals("apple.awt.CAccessible") || name.equals("sun.lwawt.macosx.CAccessible");
   }
 
   private static boolean isCAccessibleListener(EventListener listener) {

@@ -110,15 +110,10 @@ public class GotoTaskAction extends GotoActionBase implements DumbAware {
   private static void showOpenTaskDialog(final Project project, final Task task) {
     JBPopup hint = DocumentationManager.getInstance(project).getDocInfoHint();
     if (hint != null) hint.cancel();
-    ApplicationManager.getApplication().invokeLater(new Runnable() {
-      @Override
-      public void run() {
-        new OpenTaskDialog(project, task).show();
-      }
-    });
+    ApplicationManager.getApplication().invokeLater(() -> new OpenTaskDialog(project, task).show());
   }
 
-  private static class GotoTaskPopupModel extends SimpleChooseByNameModel {
+  private static class GotoTaskPopupModel extends SimpleChooseByNameModel implements DumbAware {
     private ListCellRenderer myListCellRenderer;
 
 

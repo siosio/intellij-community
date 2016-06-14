@@ -18,9 +18,6 @@ package com.intellij.diff.impl;
 import com.intellij.diff.DiffDialogHints;
 import com.intellij.diff.util.DiffUserDataKeys;
 import com.intellij.diff.util.DiffUtil;
-import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.actionSystem.CommonShortcuts;
-import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.WindowWrapper;
 import com.intellij.openapi.ui.WindowWrapperBuilder;
@@ -56,22 +53,13 @@ public abstract class DiffWindowBase {
       .setProject(myProject)
       .setParent(myHints.getParent())
       .setDimensionServiceKey(dialogGroupKey)
-      .setOnShowCallback(new Runnable() {
-        @Override
-        public void run() {
-          myProcessor.updateRequest();
-          myProcessor.requestFocus(); // TODO: not needed for modal dialogs. Make a flag in WindowWrapperBuilder ?
-        }
+      .setPreferredFocusedComponent(() -> myProcessor.getPreferredFocusedComponent())
+      .setOnShowCallback(() -> {
+        myProcessor.updateRequest();
       })
       .build();
     myWrapper.setImage(ImageLoader.loadFromResource("/diff/Diff.png"));
     Disposer.register(myWrapper, myProcessor);
-
-    new DumbAwareAction() {
-      public void actionPerformed(final AnActionEvent e) {
-        myWrapper.close();
-      }
-    }.registerCustomShortcutSet(CommonShortcuts.getCloseActiveWindow(), myProcessor.getComponent());
   }
 
   public void show() {

@@ -56,7 +56,7 @@ public class HgMergeCommand {
   }
 
   @Nullable
-  private HgCommandResult execute() {
+  private HgCommandResult executeInCurrentThread() {
     HgPromptCommandExecutor commandExecutor = new HgPromptCommandExecutor(project);
     commandExecutor.setShowOutput(true);
     List<String> arguments = new LinkedList<String>();
@@ -76,8 +76,8 @@ public class HgMergeCommand {
   }
 
   @Nullable
-  public HgCommandResult merge() throws VcsException {
-    HgCommandResult commandResult = ensureSuccess(execute());
+  public HgCommandResult mergeSynchronously() throws VcsException {
+    HgCommandResult commandResult = ensureSuccess(executeInCurrentThread());
     try {
       HgUtil.markDirectoryDirty(project, repo.getRoot());
     }
@@ -105,11 +105,11 @@ public class HgMergeCommand {
     final HgMergeCommand hgMergeCommand = new HgMergeCommand(project, repository);
     hgMergeCommand.setRevision(branchName);//there is no difference between branch or revision or bookmark as parameter to merge,
     // we need just a string
-    new Task.Backgroundable(project, "Merging changes...") {
+    new Task.Backgroundable(project, "Merging Changes...") {
       @Override
       public void run(@NotNull ProgressIndicator indicator) {
         try {
-          HgCommandResult result = hgMergeCommand.merge();
+          HgCommandResult result = hgMergeCommand.mergeSynchronously();
           if (HgErrorUtil.isAncestorMergeError(result)) {
             //skip and notify
             VcsNotifier.getInstance(project).notifyMinorWarning("Merging is skipped for " + repositoryRoot.getPresentableName(),
@@ -117,7 +117,7 @@ public class HgMergeCommand {
             return;
           }
           new HgConflictResolver(project, updatedFiles).resolve(repositoryRoot);
-          if (HgConflictResolver.findConflicts(project, repositoryRoot).isEmpty() && onSuccessHandler != null) {
+          if (!HgConflictResolver.hasConflicts(project, repositoryRoot) && onSuccessHandler != null) {
             onSuccessHandler.run();    // for example commit changes
           }
         }

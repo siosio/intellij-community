@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ import com.intellij.ide.util.treeView.NodeDescriptor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
-import com.intellij.ui.ListScrollingUtil;
+import com.intellij.ui.ScrollingUtil;
 import com.intellij.util.Alarm;
 import com.intellij.util.containers.HashMap;
 import gnu.trove.THashSet;
@@ -146,11 +146,11 @@ public abstract class AbstractListBuilder {
   }
 
   protected void selectItem(int i) {
-    ListScrollingUtil.selectItem(myList, i);
+    ScrollingUtil.selectItem(myList, i);
   }
 
   protected void ensureSelectionExist() {
-    ListScrollingUtil.ensureSelectionExists(myList);
+    ScrollingUtil.ensureSelectionExists(myList);
   }
 
   public final void selectElement(final Object element, VirtualFile virtualFile) {
@@ -273,12 +273,7 @@ public abstract class AbstractListBuilder {
     myCurrentParent = parentElement;
     final Alarm alarm = new Alarm(Alarm.ThreadToUse.SHARED_THREAD);
     alarm.addRequest(
-        new Runnable() {
-        @Override
-        public void run() {
-          myList.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
-        }
-      },
+      () -> myList.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR)),
       200
     );
 
@@ -302,12 +297,7 @@ public abstract class AbstractListBuilder {
     final int n = alarm.cancelAllRequests();
     if (n == 0) {
       alarm.addRequest(
-          new Runnable() {
-          @Override
-          public void run() {
-            myList.setCursor(Cursor.getDefaultCursor());
-          }
-        },
+        () -> myList.setCursor(Cursor.getDefaultCursor()),
         0
       );
     }

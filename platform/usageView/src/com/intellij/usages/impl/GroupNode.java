@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,7 +44,7 @@ public class GroupNode extends Node implements Navigatable, Comparable<GroupNode
   private final Map<UsageGroup, GroupNode> mySubgroupNodes = new THashMap<UsageGroup, GroupNode>();
   private final List<UsageNode> myUsageNodes = new SmartList<UsageNode>();
   @NotNull private final UsageViewTreeModelBuilder myUsageTreeModel;
-  private volatile int myRecursiveUsageCount = 0;
+  private volatile int myRecursiveUsageCount;
 
   public GroupNode(@Nullable UsageGroup group, int ruleIndex, @NotNull UsageViewTreeModelBuilder treeModel) {
     super(treeModel);
@@ -85,12 +85,7 @@ public class GroupNode extends Node implements Navigatable, Comparable<GroupNode
 
   void addNode(@NotNull final DefaultMutableTreeNode node, @NotNull Consumer<Runnable> edtQueue) {
     if (!getBuilder().isDetachedMode()) {
-      edtQueue.consume(new Runnable() {
-        @Override
-        public void run() {
-          myTreeModel.insertNodeInto(node, GroupNode.this, getNodeInsertionIndex(node));
-        }
-      });
+      edtQueue.consume(() -> myTreeModel.insertNodeInto(node, GroupNode.this, getNodeInsertionIndex(node)));
     }
   }
 
@@ -205,12 +200,9 @@ public class GroupNode extends Node implements Navigatable, Comparable<GroupNode
     }
 
     if (!getBuilder().isDetachedMode()) {
-      edtQueue.consume(new Runnable() {
-        @Override
-        public void run() {
-          myTreeModel.insertNodeInto(node, GroupNode.this, getNodeIndex(node));
-          incrementUsageCount();
-        }
+      edtQueue.consume(() -> {
+        myTreeModel.insertNodeInto(node, GroupNode.this, getNodeIndex(node));
+        incrementUsageCount();
       });
     }
     return node;
@@ -221,6 +213,7 @@ public class GroupNode extends Node implements Navigatable, Comparable<GroupNode
     return index >= 0 ? index : -index-1;
   }
 
+  @SuppressWarnings("Duplicates")
   private int indexedBinarySearch(@NotNull UsageNode key) {
     int low = 0;
     int high = getChildCount() - 1;
@@ -228,27 +221,14 @@ public class GroupNode extends Node implements Navigatable, Comparable<GroupNode
     while (low <= high) {
       int mid = (low + high) / 2;
       TreeNode treeNode = getChildAt(mid);
-      int cmp;
-      if (treeNode instanceof UsageNode) {
-        UsageNode midVal = (UsageNode)treeNode;
-        cmp = midVal.compareTo(key);
-      }
-      else {
-        cmp = -1;
-      }
-      if (cmp < 0) {
-        low = mid + 1;
-      }
-      else if (cmp > 0) {
-        high = mid - 1;
-      }
-      else {
-        return mid; // key found
-      }
+      int cmp = treeNode instanceof UsageNode ? ((UsageNode)treeNode).compareTo(key) : -1;
+      if (cmp < 0) low = mid + 1;
+      else if (cmp > 0) high = mid - 1;
+      else return mid;
     }
-    return -(low + 1);  // key not found
-  }
 
+    return -(low + 1);
+  }
 
   private void incrementUsageCount() {
     GroupNode groupNode = this;

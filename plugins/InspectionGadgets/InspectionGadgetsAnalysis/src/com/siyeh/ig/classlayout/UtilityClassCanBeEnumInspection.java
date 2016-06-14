@@ -19,6 +19,7 @@ import com.intellij.codeInspection.ProblemDescriptor;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
 import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.util.PsiUtil;
 import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.BaseInspection;
 import com.siyeh.ig.BaseInspectionVisitor;
@@ -71,6 +72,9 @@ public class UtilityClassCanBeEnumInspection extends BaseInspection {
     @Override
     protected void doFix(Project project, ProblemDescriptor descriptor) {
       final PsiElement element = descriptor.getPsiElement();
+      if (!PsiUtil.isLanguageLevel5OrHigher(element)) {
+        return;
+      }
       final PsiElement parent = element.getParent();
       if (!(parent instanceof PsiClass)) {
         return;
@@ -95,6 +99,11 @@ public class UtilityClassCanBeEnumInspection extends BaseInspection {
   @Override
   public BaseInspectionVisitor buildVisitor() {
     return new UtilityClassCanBeEnumVisitor();
+  }
+
+  @Override
+  public boolean shouldInspect(PsiFile file) {
+    return PsiUtil.isLanguageLevel5OrHigher(file);
   }
 
   private static class UtilityClassCanBeEnumVisitor extends BaseInspectionVisitor {

@@ -16,10 +16,10 @@
 
 package com.intellij.ide.favoritesTreeView;
 
-import com.intellij.history.LocalHistory;
-import com.intellij.history.LocalHistoryAction;
 import com.intellij.icons.AllIcons;
-import com.intellij.ide.*;
+import com.intellij.ide.CopyPasteDelegator;
+import com.intellij.ide.ExporterToTextFile;
+import com.intellij.ide.IdeView;
 import com.intellij.ide.dnd.aware.DnDAwareTree;
 import com.intellij.ide.favoritesTreeView.actions.*;
 import com.intellij.ide.projectView.PresentationData;
@@ -29,11 +29,9 @@ import com.intellij.ide.projectView.impl.nodes.LibraryGroupElement;
 import com.intellij.ide.projectView.impl.nodes.NamedLibraryElement;
 import com.intellij.ide.projectView.impl.nodes.ProjectViewDirectoryHelper;
 import com.intellij.ide.ui.customization.CustomizationUtil;
-import com.intellij.ide.util.DeleteHandler;
 import com.intellij.ide.util.DirectoryChooserUtil;
 import com.intellij.ide.util.EditorHelper;
 import com.intellij.ide.util.treeView.AbstractTreeNode;
-import com.intellij.ide.util.treeView.NodeDescriptor;
 import com.intellij.ide.util.treeView.NodeRenderer;
 import com.intellij.navigation.ItemPresentation;
 import com.intellij.openapi.Disposable;
@@ -43,10 +41,7 @@ import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.roots.ui.configuration.actions.ModuleDeleteProvider;
 import com.intellij.openapi.util.Disposer;
-import com.intellij.openapi.vfs.JarFileSystem;
-import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.openapi.wm.ex.ToolWindowEx;
@@ -99,8 +94,6 @@ public class FavoritesTreeViewPanel extends JPanel implements DataProvider, Dock
   protected Project myProject;
   protected DnDAwareTree myTree;
 
-  private final MyDeletePSIElementProvider myDeletePSIElementProvider = new MyDeletePSIElementProvider();
-  private final ModuleDeleteProvider myDeleteModuleProvider = new ModuleDeleteProvider();
   private final AutoScrollToSourceHandler myAutoScrollToSourceHandler;
 
   private final IdeView myIdeView = new MyIdeView();
@@ -128,24 +121,21 @@ public class FavoritesTreeViewPanel extends JPanel implements DataProvider, Dock
     ToolTipManager.sharedInstance().registerComponent(myTree);
     final FavoritesComparator favoritesComparator =
       new FavoritesComparator(ProjectView.getInstance(project), FavoritesProjectViewPane.ID);
-    myBuilder.setNodeDescriptorComparator(new Comparator<NodeDescriptor>() {
-      @Override
-      public int compare(NodeDescriptor o1, NodeDescriptor o2) {
-        if (o1 instanceof FavoritesTreeNodeDescriptor && o2 instanceof FavoritesTreeNodeDescriptor) {
-          final FavoritesListNode listNode1 = FavoritesTreeUtil.extractParentList((FavoritesTreeNodeDescriptor)o1);
-          final FavoritesListNode listNode2 = FavoritesTreeUtil.extractParentList((FavoritesTreeNodeDescriptor)o2);
-          if (listNode1.equals(listNode2)) {
-            final Comparator<FavoritesTreeNodeDescriptor> comparator = myFavoritesManager.getCustomComparator(listNode1.getName());
-            if (comparator != null) {
-              return comparator.compare((FavoritesTreeNodeDescriptor)o1, (FavoritesTreeNodeDescriptor)o2);
-            }
-            else {
-              return favoritesComparator.compare(o1, o2);
-            }
+    myBuilder.setNodeDescriptorComparator((o1, o2) -> {
+      if (o1 instanceof FavoritesTreeNodeDescriptor && o2 instanceof FavoritesTreeNodeDescriptor) {
+        final FavoritesListNode listNode1 = FavoritesTreeUtil.extractParentList((FavoritesTreeNodeDescriptor)o1);
+        final FavoritesListNode listNode2 = FavoritesTreeUtil.extractParentList((FavoritesTreeNodeDescriptor)o2);
+        if (listNode1.equals(listNode2)) {
+          final Comparator<FavoritesTreeNodeDescriptor> comparator = myFavoritesManager.getCustomComparator(listNode1.getName());
+          if (comparator != null) {
+            return comparator.compare((FavoritesTreeNodeDescriptor)o1, (FavoritesTreeNodeDescriptor)o2);
+          }
+          else {
+            return favoritesComparator.compare(o1, o2);
           }
         }
-        return o1.getIndex() - o2.getIndex();
       }
+      return o1.getIndex() - o2.getIndex();
     });
     myTree.setCellRenderer(new NodeRenderer() {
       @Override
@@ -205,11 +195,11 @@ public class FavoritesTreeViewPanel extends JPanel implements DataProvider, Dock
     addActionButton.getTemplatePresentation().setIcon(CommonActionsPanel.Buttons.ADD.getIcon());
     addActionButton.setShortcut(CommonActionsPanel.getCommonShortcut(CommonActionsPanel.Buttons.ADD));
 
-    AnActionButton editActionButton = AnActionButton.fromAction(new EditFavoritesAction());
+    AnActionButton editActionButton = AnActionButton.fromAction(ActionManager.getInstance().getAction("EditFavorites"));
     editActionButton.setShortcut(CommonShortcuts.CTRL_ENTER);
 
     AnActionButton deleteActionButton = new DeleteFromFavoritesAction();
-    deleteActionButton.setShortcut(CommonActionsPanel.getCommonShortcut(CommonActionsPanel.Buttons.REMOVE));
+    deleteActionButton.setShortcut(CustomShortcutSet.fromString("DELETE", "BACK_SPACE"));
 
     //final AnAction exportToTextFileAction = CommonActionsManager.getInstance().createExportToTextFileAction(createTextExporter());
     //AnActionButton exportActionButton = AnActionButton.fromAction(exportToTextFileAction);
@@ -279,6 +269,7 @@ public class FavoritesTreeViewPanel extends JPanel implements DataProvider, Dock
       public void removeSettingsChangedListener(ChangeListener listener) {
       }
 
+      @NotNull
       @Override
       public String getReportText() {
         final StringBuilder sb = new StringBuilder();
@@ -326,6 +317,7 @@ public class FavoritesTreeViewPanel extends JPanel implements DataProvider, Dock
         return sb.toString();
       }
 
+      @NotNull
       @Override
       public String getDefaultFilePath() {
         return myProject.getBasePath() + File.separator + "Favorites.txt";
@@ -461,13 +453,6 @@ public class FavoritesTreeViewPanel extends JPanel implements DataProvider, Dock
     }
     if (LangDataKeys.MODULE_CONTEXT_ARRAY.is(dataId)) {
       return getSelectedModules();
-    }
-
-    if (PlatformDataKeys.DELETE_ELEMENT_PROVIDER.is(dataId)) {
-      final Object[] elements = getSelectedNodeElements();
-      return elements != null && elements.length >= 1 && elements[0] instanceof Module
-             ? myDeleteModuleProvider
-             : myDeletePSIElementProvider;
     }
     if (ModuleGroup.ARRAY_DATA_KEY.is(dataId)) {
       final List<ModuleGroup> selectedElements = getSelectedElements(ModuleGroup.class);
@@ -662,59 +647,6 @@ public class FavoritesTreeViewPanel extends JPanel implements DataProvider, Dock
         mgr.addRoots(node.getValue(), nodes);
       }
       myBuilder.select(nodes.toArray(), null);
-    }
-  }
-
-  private final class MyDeletePSIElementProvider implements DeleteProvider {
-    @Override
-    public boolean canDeleteElement(@NotNull DataContext dataContext) {
-      final PsiElement[] elements = getElementsToDelete();
-      return DeleteHandler.shouldEnableDeleteAction(elements);
-    }
-
-    @Override
-    public void deleteElement(@NotNull DataContext dataContext) {
-      List<PsiElement> allElements = Arrays.asList(getElementsToDelete());
-      List<PsiElement> validElements = new ArrayList<PsiElement>();
-      for (PsiElement psiElement : allElements) {
-        if (psiElement != null && psiElement.isValid()) validElements.add(psiElement);
-      }
-      final PsiElement[] elements = PsiUtilCore.toPsiElementArray(validElements);
-
-      LocalHistoryAction a = LocalHistory.getInstance().startAction(IdeBundle.message("progress.deleting"));
-      try {
-        DeleteHandler.deletePsiElement(elements, myProject);
-      }
-      finally {
-        a.finish();
-      }
-    }
-
-    private PsiElement[] getElementsToDelete() {
-      ArrayList<PsiElement> result = new ArrayList<PsiElement>();
-      Object[] elements = getSelectedNodeElements();
-      for (int idx = 0; elements != null && idx < elements.length; idx++) {
-        if (elements[idx] instanceof PsiElement) {
-          final PsiElement element = (PsiElement)elements[idx];
-          result.add(element);
-          if (element instanceof PsiDirectory) {
-            final VirtualFile virtualFile = ((PsiDirectory)element).getVirtualFile();
-            final String path = virtualFile.getPath();
-            if (path.endsWith(JarFileSystem.JAR_SEPARATOR)) { // if is jar-file root
-              final VirtualFile vFile =
-                LocalFileSystem.getInstance().findFileByPath(path.substring(0, path.length() - JarFileSystem.JAR_SEPARATOR.length()));
-              if (vFile != null) {
-                final PsiFile psiFile = PsiManager.getInstance(myProject).findFile(vFile);
-                if (psiFile != null) {
-                  elements[idx] = psiFile;
-                }
-              }
-            }
-          }
-        }
-      }
-
-      return PsiUtilCore.toPsiElementArray(result);
     }
   }
 

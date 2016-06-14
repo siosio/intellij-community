@@ -17,6 +17,7 @@ package org.jetbrains.idea.maven.importing;
 
 import com.intellij.compiler.CompilerConfiguration;
 import com.intellij.compiler.impl.javaCompiler.javac.JavacConfiguration;
+import com.intellij.idea.Bombed;
 import com.intellij.openapi.application.Result;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.module.Module;
@@ -25,10 +26,12 @@ import com.intellij.openapi.roots.LanguageLevelModuleExtensionImpl;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.pom.java.LanguageLevel;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.idea.maven.MavenImportingTestCase;
 import org.jetbrains.idea.maven.project.MavenProject;
 
 import java.io.File;
+import java.util.Calendar;
 import java.util.List;
 
 public class StructureImportingTest extends MavenImportingTestCase {
@@ -361,7 +364,7 @@ public class StructureImportingTest extends MavenImportingTestCase {
     executeGoal("parent", "install");
 
     new WriteAction() {
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         parent.delete(null);
       }
     }.execute();
@@ -642,6 +645,32 @@ public class StructureImportingTest extends MavenImportingTestCase {
     assertEquals(LanguageLevel.JDK_1_4, getLanguageLevelForModule());
   }
 
+  public void testLanguageLevelFromDefaultCompileExecutionConfiguration() throws Exception {
+    importProject("<groupId>test</groupId>" +
+                  "<artifactId>project</artifactId>" +
+                  "<version>1</version>" +
+
+                  "<build>" +
+                  "  <plugins>" +
+                  "    <plugin>" +
+                  "      <groupId>org.apache.maven.plugins</groupId>" +
+                  "      <artifactId>maven-compiler-plugin</artifactId>" +
+                  "      <executions>" +
+                  "        <execution>" +
+                  "          <id>default-compile</id>" +
+                  "             <configuration>" +
+                  "                <source>1.8</source>" +
+                  "             </configuration>" +
+                  "        </execution>" +
+                  "      </executions>" +
+                  "    </plugin>" +
+                  "  </plugins>" +
+                  "</build>");
+
+    assertModules("project");
+    assertEquals(LanguageLevel.JDK_1_8, getLanguageLevelForModule());
+  }
+
   public void testLanguageLevel6() throws Exception {
     importProject("<groupId>test</groupId>" +
                   "<artifactId>project</artifactId>" +
@@ -864,6 +893,34 @@ public class StructureImportingTest extends MavenImportingTestCase {
     assertEquals("1.3", targetLevel);
   }
 
+  public void testSettingTargetLevelFromDefaultCompileExecutionConfiguration() throws Exception {
+    importProject("<groupId>test</groupId>" +
+                  "<artifactId>project</artifactId>" +
+                  "<version>1</version>" +
+
+                  "<build>" +
+                  "  <plugins>" +
+                  "    <plugin>" +
+                  "      <groupId>org.apache.maven.plugins</groupId>" +
+                  "      <artifactId>maven-compiler-plugin</artifactId>" +
+                  "      <executions>" +
+                  "        <execution>" +
+                  "          <id>default-compile</id>" +
+                  "             <configuration>" +
+                  "                <target>1.9</target>" +
+                  "             </configuration>" +
+                  "        </execution>" +
+                  "      </executions>" +
+                  "    </plugin>" +
+                  "  </plugins>" +
+                  "</build>");
+
+    assertModules("project");
+    Module module = getModule("project");
+    String targetLevel = CompilerConfiguration.getInstance(myProject).getBytecodeTargetLevel(module);
+    assertEquals("1.9", targetLevel);
+  }
+
   public void testSettingTargetLevelFromParent() throws Exception {
     createProjectPom("<groupId>test</groupId>" +
                      "<artifactId>project</artifactId>" +
@@ -988,6 +1045,7 @@ public class StructureImportingTest extends MavenImportingTestCase {
     assertModules("project", "m");
   }
 
+  @Bombed(user = "Vladislav.Soroka", year=2020, month = Calendar.APRIL, day = 1, description = "temporary disabled")
   public void testFileProfileActivationInParentPom() throws Exception {
     createProjectPom("<groupId>test</groupId>" +
                      "<artifactId>project</artifactId>" +

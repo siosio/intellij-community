@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,7 +29,6 @@ import com.intellij.execution.ui.ConsoleView;
 import com.intellij.execution.ui.ConsoleViewContentType;
 import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.execution.ui.RunnerLayoutUi;
-import com.intellij.notification.Notification;
 import com.intellij.notification.NotificationGroup;
 import com.intellij.notification.NotificationListener;
 import com.intellij.openapi.Disposable;
@@ -44,18 +43,14 @@ import com.intellij.openapi.ui.MessageType;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Disposer;
-import com.intellij.openapi.util.registry.Registry;
-import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.ToolWindowId;
 import com.intellij.ui.AppUIUtil;
-import com.intellij.util.Consumer;
 import com.intellij.util.EventDispatcher;
 import com.intellij.util.SmartList;
 import com.intellij.util.containers.SmartHashSet;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.xdebugger.*;
 import com.intellij.xdebugger.breakpoints.*;
-import com.intellij.xdebugger.evaluation.XDebuggerEvaluator;
 import com.intellij.xdebugger.frame.XExecutionStack;
 import com.intellij.xdebugger.frame.XStackFrame;
 import com.intellij.xdebugger.frame.XSuspendContext;
@@ -65,7 +60,7 @@ import com.intellij.xdebugger.impl.evaluate.XDebuggerEditorLinePainter;
 import com.intellij.xdebugger.impl.evaluate.quick.common.ValueLookupManager;
 import com.intellij.xdebugger.impl.frame.XValueMarkers;
 import com.intellij.xdebugger.impl.frame.XWatchesViewImpl;
-import com.intellij.xdebugger.impl.settings.XDebuggerSettingsManager;
+import com.intellij.xdebugger.impl.settings.XDebuggerSettingManagerImpl;
 import com.intellij.xdebugger.impl.ui.XDebugSessionData;
 import com.intellij.xdebugger.impl.ui.XDebugSessionTab;
 import com.intellij.xdebugger.impl.ui.XDebuggerUIConstants;
@@ -77,7 +72,6 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
-import javax.swing.event.HyperlinkEvent;
 import javax.swing.event.HyperlinkListener;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -91,8 +85,8 @@ public class XDebugSessionImpl implements XDebugSession {
                                                                                                false);
   private XDebugProcess myDebugProcess;
   private final Map<XBreakpoint<?>, CustomizedBreakpointPresentation> myRegisteredBreakpoints =
-    new THashMap<XBreakpoint<?>, CustomizedBreakpointPresentation>();
-  private final Set<XBreakpoint<?>> myInactiveSlaveBreakpoints = Collections.synchronizedSet(new SmartHashSet<XBreakpoint<?>>());
+    new THashMap<>();
+  private final Set<XBreakpoint<?>> myInactiveSlaveBreakpoints = Collections.synchronizedSet(new SmartHashSet<>());
   private boolean myBreakpointsDisabled;
   private final XDebuggerManagerImpl myDebuggerManager;
   private MyBreakpointListener myBreakpointListener;
@@ -114,9 +108,9 @@ public class XDebugSessionImpl implements XDebugSession {
   private final AtomicBoolean myStopped = new AtomicBoolean();
   private boolean myPauseActionSupported;
   private final AtomicBoolean myShowTabOnSuspend;
-  private final List<AnAction> myRestartActions = new SmartList<AnAction>();
-  private final List<AnAction> myExtraStopActions = new SmartList<AnAction>();
-  private final List<AnAction> myExtraActions = new SmartList<AnAction>();
+  private final List<AnAction> myRestartActions = new SmartList<>();
+  private final List<AnAction> myExtraStopActions = new SmartList<>();
+  private final List<AnAction> myExtraActions = new SmartList<>();
   private ConsoleView myConsoleView;
   private final Icon myIcon;
 
@@ -262,10 +256,9 @@ public class XDebugSessionImpl implements XDebugSession {
     return myTopFramePosition;
   }
 
-  public XDebugSessionTab init(@NotNull XDebugProcess process, @NotNull XDebugSessionData sessionData, @Nullable RunContentDescriptor contentToReuse) {
+  XDebugSessionTab init(@NotNull XDebugProcess process, @Nullable RunContentDescriptor contentToReuse) {
     LOG.assertTrue(myDebugProcess == null);
     myDebugProcess = process;
-    mySessionData = sessionData;
 
     if (myDebugProcess.checkCanInitBreakpoints()) {
       initBreakpoints();
@@ -285,6 +278,14 @@ public class XDebugSessionImpl implements XDebugSession {
     }
 
     return mySessionTab;
+  }
+
+  void initSessionData(@Nullable XDebugSessionData sessionData) {
+    String currentConfigurationName = getConfigurationName();
+    if (sessionData == null || !sessionData.getConfigurationName().equals(currentConfigurationName)) {
+      sessionData = new XDebugSessionData(getWatchExpressions(), currentConfigurationName);
+    }
+    mySessionData = sessionData;
   }
 
   public void reset() {
@@ -344,7 +345,7 @@ public class XDebugSessionImpl implements XDebugSession {
       return;
     }
 
-    Set<XBreakpointType<?, ?>> breakpointTypes = new THashSet<XBreakpointType<?, ?>>();
+    Set<XBreakpointType<?, ?>> breakpointTypes = new THashSet<>();
     for (XBreakpointHandler<?> handler : myDebugProcess.getBreakpointHandlers()) {
       breakpointTypes.add(getBreakpointTypeClass(handler));
     }
@@ -389,12 +390,7 @@ public class XDebugSessionImpl implements XDebugSession {
   private <B extends XBreakpoint<?>> void handleBreakpoint(final XBreakpointHandler<B> handler, final B b, final boolean register,
                                                            final boolean temporary) {
     if (register) {
-      boolean active = ApplicationManager.getApplication().runReadAction(new Computable<Boolean>() {
-        @Override
-        public Boolean compute() {
-          return isBreakpointActive(b);
-        }
-      });
+      boolean active = ApplicationManager.getApplication().runReadAction((Computable<Boolean>)() -> isBreakpointActive(b));
       if (active) {
         synchronized (myRegisteredBreakpoints) {
           myRegisteredBreakpoints.put(b, new CustomizedBreakpointPresentation());
@@ -478,24 +474,21 @@ public class XDebugSessionImpl implements XDebugSession {
     if (ignoreBreakpoints) {
       disableBreakpoints();
     }
-    doResume();
-    myDebugProcess.startStepOver();
+    myDebugProcess.startStepOver(doResume());
   }
 
   @Override
   public void stepInto() {
     if (!myDebugProcess.checkCanPerformCommands()) return;
 
-    doResume();
-    myDebugProcess.startStepInto();
+    myDebugProcess.startStepInto(doResume());
   }
 
   @Override
   public void stepOut() {
     if (!myDebugProcess.checkCanPerformCommands()) return;
 
-    doResume();
-    myDebugProcess.startStepOut();
+    myDebugProcess.startStepOut(doResume());
   }
 
   @Override
@@ -510,8 +503,7 @@ public class XDebugSessionImpl implements XDebugSession {
   public void forceStepInto() {
     if (!myDebugProcess.checkCanPerformCommands()) return;
 
-    doResume();
-    myDebugProcess.startForceStepInto();
+    myDebugProcess.startForceStepInto(doResume());
   }
 
   @Override
@@ -521,8 +513,7 @@ public class XDebugSessionImpl implements XDebugSession {
     if (ignoreBreakpoints) {
       disableBreakpoints();
     }
-    doResume();
-    myDebugProcess.runToPosition(position);
+    myDebugProcess.runToPosition(position, doResume());
   }
 
   @Override
@@ -547,35 +538,39 @@ public class XDebugSessionImpl implements XDebugSession {
   public void resume() {
     if (!myDebugProcess.checkCanPerformCommands()) return;
 
-    doResume();
-    myDebugProcess.resume();
+    myDebugProcess.resume(doResume());
   }
 
-  public void doResume() {
-    if (!myPaused.getAndSet(false)) return;
+  @Nullable
+  private XSuspendContext doResume() {
+    if (!myPaused.getAndSet(false)) {
+      return null;
+    }
 
     myDispatcher.getMulticaster().beforeSessionResume();
-    myDebuggerManager.setActiveSession(this, null, false, null);
+    XSuspendContext context = mySuspendContext;
     mySuspendContext = null;
     myCurrentExecutionStack = null;
     myCurrentStackFrame = null;
     myTopFramePosition = null;
     myActiveNonLineBreakpoint = null;
-    UIUtil.invokeLaterIfNeeded(new Runnable() {
-      @Override
-      public void run() {
-        if (mySessionTab != null) {
-          mySessionTab.getUi().clearAttractionBy(XDebuggerUIConstants.LAYOUT_VIEW_BREAKPOINT_CONDITION);
-        }
+    updateExecutionPosition();
+    UIUtil.invokeLaterIfNeeded(() -> {
+      if (mySessionTab != null) {
+        mySessionTab.getUi().clearAttractionBy(XDebuggerUIConstants.LAYOUT_VIEW_BREAKPOINT_CONDITION);
       }
     });
     myDispatcher.getMulticaster().sessionResumed();
+    return context;
   }
 
   @Override
   public void updateExecutionPosition() {
-    boolean isTopFrame = isTopFrameSelected();
-    myDebuggerManager.updateExecutionPoint(getCurrentPosition(), !isTopFrame, getPositionIconRenderer(isTopFrame));
+    // allowed only for the active session
+    if (myDebuggerManager.getCurrentSession() == this) {
+      boolean isTopFrame = isTopFrameSelected();
+      myDebuggerManager.updateExecutionPoint(getCurrentPosition(), !isTopFrame, getPositionIconRenderer(isTopFrame));
+    }
   }
 
   public boolean isTopFrameSelected() {
@@ -598,11 +593,6 @@ public class XDebugSessionImpl implements XDebugSession {
   }
 
   @Override
-  public void setCurrentStackFrame(@NotNull XExecutionStack executionStack, @NotNull XStackFrame frame) {
-    setCurrentStackFrame(myCurrentExecutionStack, frame, frame == executionStack.getTopFrame());
-  }
-
-  @Override
   public void setCurrentStackFrame(@NotNull XExecutionStack executionStack, @NotNull XStackFrame frame, boolean isTopFrame) {
     if (mySuspendContext == null) return;
 
@@ -617,15 +607,9 @@ public class XDebugSessionImpl implements XDebugSession {
     }
   }
 
-  public void activateSession() {
-    XSourcePosition position = myCurrentStackFrame != null ? myCurrentStackFrame.getSourcePosition() : null;
-    if (position != null) {
-      boolean isTopFrame = isTopFrameSelected();
-      myDebuggerManager.setActiveSession(this, position, !isTopFrame, getPositionIconRenderer(isTopFrame));
-    }
-    else {
-      myDebuggerManager.setActiveSession(this, null, false, null);
-    }
+  void activateSession() {
+    myDebuggerManager.setCurrentSession(this);
+    updateExecutionPosition();
   }
 
   public XBreakpoint<?> getActiveNonLineBreakpoint() {
@@ -691,37 +675,15 @@ public class XDebugSessionImpl implements XDebugSession {
   private boolean breakpointReached(@NotNull final XBreakpoint<?> breakpoint, @Nullable String evaluatedLogExpression,
                                    @NotNull XSuspendContext suspendContext, boolean doProcessing) {
     if (doProcessing) {
-      XDebuggerEvaluator evaluator = XDebuggerUtilImpl.getEvaluator(suspendContext);
-      String condition = breakpoint.getCondition();
-      if (condition != null && evaluator != null) {
-        LOG.debug("evaluating condition: " + condition);
-        boolean result = evaluator.evaluateCondition(condition);
-        LOG.debug("condition evaluates to " + result);
-        if (!result) {
-          return false;
-        }
-      }
-
       if (breakpoint.isLogMessage()) {
-        String text = StringUtil.decapitalize(XBreakpointUtil.getDisplayText(breakpoint));
-        final XSourcePosition position = breakpoint.getSourcePosition();
-        final OpenFileHyperlinkInfo hyperlinkInfo =
+        XSourcePosition position = breakpoint.getSourcePosition();
+        OpenFileHyperlinkInfo hyperlinkInfo =
           position != null ? new OpenFileHyperlinkInfo(myProject, position.getFile(), position.getLine()) : null;
-        printMessage(XDebuggerBundle.message("xbreakpoint.reached.text") + " ", text, hyperlinkInfo);
+        printMessage(XDebuggerBundle.message("xbreakpoint.reached.text") + " ", XBreakpointUtil.getShortText(breakpoint), hyperlinkInfo);
       }
 
       if (evaluatedLogExpression != null) {
         printMessage(evaluatedLogExpression, null, null);
-      }
-      else {
-        String expression = breakpoint.getLogExpression();
-        if (expression != null && evaluator != null) {
-          LOG.debug("evaluating log expression: " + expression);
-          final String message = evaluator.evaluateMessage(expression);
-          if (message != null) {
-            printMessage(message, null, null);
-          }
-        }
       }
 
       processDependencies(breakpoint);
@@ -733,25 +695,11 @@ public class XDebugSessionImpl implements XDebugSession {
 
     myActiveNonLineBreakpoint =
       (!(breakpoint instanceof XLineBreakpoint) || ((XLineBreakpoint)breakpoint).getType().canBeHitInOtherPlaces()) ? breakpoint : null;
-    positionReached(suspendContext);
 
-    UIUtil.invokeLaterIfNeeded(new Runnable() {
-      @Override
-      public void run() {
-        if (mySessionTab != null) {
-          if (XDebuggerSettingsManager.getInstanceImpl().getGeneralSettings().isShowDebuggerOnBreakpoint()) {
-            mySessionTab.toFront(true, new Runnable() {
-              @Override
-              public void run() {
-                updateExecutionPosition();
-              }
-            });
-          }
-          mySessionTab.getUi().attractBy(XDebuggerUIConstants.LAYOUT_VIEW_BREAKPOINT_CONDITION);
-        }
-      }
-    });
+    // set this session active on breakpoint, update execution position will be called inside positionReached
+    myDebuggerManager.setCurrentSession(this);
 
+    positionReachedInternal(suspendContext, true);
 
     if (doProcessing && breakpoint instanceof XLineBreakpoint<?> && ((XLineBreakpoint)breakpoint).isTemporary()) {
       handleTemporaryBreakpointHit(breakpoint);
@@ -760,7 +708,7 @@ public class XDebugSessionImpl implements XDebugSession {
   }
 
   private void handleTemporaryBreakpointHit(final XBreakpoint<?> breakpoint) {
-    addSessionListener(new XDebugSessionAdapter() {
+    addSessionListener(new XDebugSessionListener() {
       private void removeBreakpoint() {
         XDebuggerUtil.getInstance().removeBreakpoint(myProject, breakpoint);
         removeSessionListener(this);
@@ -798,23 +746,23 @@ public class XDebugSessionImpl implements XDebugSession {
   }
 
   private void printMessage(final String message, final String hyperLinkText, @Nullable final HyperlinkInfo info) {
-    AppUIUtil.invokeOnEdt(new Runnable() {
-      @Override
-      public void run() {
-        myConsoleView.print(message, ConsoleViewContentType.SYSTEM_OUTPUT);
-        if (info != null) {
-          myConsoleView.printHyperlink(hyperLinkText, info);
-        }
-        else if (hyperLinkText != null) {
-          myConsoleView.print(hyperLinkText, ConsoleViewContentType.SYSTEM_OUTPUT);
-        }
-        myConsoleView.print("\n", ConsoleViewContentType.SYSTEM_OUTPUT);
+    AppUIUtil.invokeOnEdt(() -> {
+      myConsoleView.print(message, ConsoleViewContentType.SYSTEM_OUTPUT);
+      if (info != null) {
+        myConsoleView.printHyperlink(hyperLinkText, info);
       }
+      else if (hyperLinkText != null) {
+        myConsoleView.print(hyperLinkText, ConsoleViewContentType.SYSTEM_OUTPUT);
+      }
+      myConsoleView.print("\n", ConsoleViewContentType.SYSTEM_OUTPUT);
     });
   }
 
-  @Override
-  public void positionReached(@NotNull final XSuspendContext suspendContext) {
+  public void unsetPaused() {
+    myPaused.set(false);
+  }
+
+  private void positionReachedInternal(@NotNull final XSuspendContext suspendContext, boolean attract) {
     enableBreakpoints();
     mySuspendContext = suspendContext;
     myCurrentExecutionStack = suspendContext.getActiveExecutionStack();
@@ -824,21 +772,47 @@ public class XDebugSessionImpl implements XDebugSession {
 
     myPaused.set(true);
 
-    if (myTopFramePosition != null) {
-      myDebuggerManager.setActiveSession(this, myTopFramePosition, false, getPositionIconRenderer(true));
-    }
+    updateExecutionPosition();
 
     if (myShowTabOnSuspend.compareAndSet(true, false)) {
-      UIUtil.invokeLaterIfNeeded(new Runnable() {
-        @Override
-        public void run() {
-          initSessionTab(null);
-          showSessionTab();
-        }
+      UIUtil.invokeLaterIfNeeded(() -> {
+        initSessionTab(null);
+        showSessionTab();
       });
     }
 
     myDispatcher.getMulticaster().sessionPaused();
+
+    // user attractions should only be made if event happens independently (e.g. program paused/suspended)
+    // and should not be made when user steps in the code
+    if (attract) {
+      UIUtil.invokeLaterIfNeeded(() -> {
+        if (mySessionTab != null) {
+
+          if (XDebuggerSettingManagerImpl.getInstanceImpl().getGeneralSettings().isShowDebuggerOnBreakpoint()) {
+            mySessionTab.toFront(true, this::updateExecutionPosition);
+          }
+
+          if (myTopFramePosition == null) {
+            // if there is no source position available, we should somehow tell the user that session is stopped.
+            // the best way is to show the stack frames.
+            XDebugSessionTab.showFramesView(this);
+          }
+
+          mySessionTab.getUi().attractBy(XDebuggerUIConstants.LAYOUT_VIEW_BREAKPOINT_CONDITION);
+        }
+      });
+    }
+  }
+
+  @Override
+  public void positionReached(@NotNull final XSuspendContext suspendContext) {
+    positionReached(suspendContext, false);
+  }
+
+  public void positionReached(@NotNull XSuspendContext suspendContext, boolean attract) {
+    myActiveNonLineBreakpoint = null;
+    positionReachedInternal(suspendContext, attract);
   }
 
   @Override
@@ -868,9 +842,20 @@ public class XDebugSessionImpl implements XDebugSession {
       return;
     }
 
-    myDebugProcess.stopAsync().done(new Consumer<Void>() {
-      @Override
-      public void consume(Void aVoid) {
+    try {
+      if (breakpointsInitialized) {
+        XBreakpointManagerImpl breakpointManager = myDebuggerManager.getBreakpointManager();
+        if (myBreakpointListener != null) {
+          breakpointManager.removeBreakpointListener(myBreakpointListener);
+        }
+        if (myDependentBreakpointListener != null) {
+          breakpointManager.getDependentBreakpointManager().removeListener(myDependentBreakpointListener);
+        }
+      }
+    }
+    finally {
+      //noinspection unchecked
+      myDebugProcess.stopAsync().done(aVoid -> {
         if (!myProject.isDisposed()) {
           myProject.getMessageBus().syncPublisher(XDebuggerManager.TOPIC).processStopped(myDebugProcess);
         }
@@ -880,41 +865,31 @@ public class XDebugSessionImpl implements XDebugSession {
           mySessionTab.detachFromSession();
         }
         else if (myConsoleView != null) {
-          AppUIUtil.invokeOnEdt(new Runnable() {
-            @Override
-            public void run() {
-              Disposer.dispose(myConsoleView);
-            }
-          });
+          AppUIUtil.invokeOnEdt(() -> Disposer.dispose(myConsoleView));
         }
 
         myTopFramePosition = null;
         myCurrentExecutionStack = null;
         myCurrentStackFrame = null;
         mySuspendContext = null;
-        if (myDebuggerManager.getCurrentSession() == XDebugSessionImpl.this) {
-          myDebuggerManager.updateExecutionPoint(null, false, null);
-        }
-        if (breakpointsInitialized) {
-          XBreakpointManagerImpl breakpointManager = myDebuggerManager.getBreakpointManager();
-          if (myBreakpointListener != null) {
-            breakpointManager.removeBreakpointListener(myBreakpointListener);
-          }
-          if (myDependentBreakpointListener != null) {
-            breakpointManager.getDependentBreakpointManager().removeListener(myDependentBreakpointListener);
-          }
-        }
+
+        updateExecutionPosition();
+
         if (myValueMarkers != null) {
           myValueMarkers.clear();
         }
-        if (XDebuggerSettingsManager.getInstanceImpl().getGeneralSettings().isUnmuteOnStop()) {
+        if (XDebuggerSettingManagerImpl.getInstanceImpl().getGeneralSettings().isUnmuteOnStop()) {
           mySessionData.setBreakpointsMuted(false);
         }
-        myDebuggerManager.removeSession(XDebugSessionImpl.this);
+        myDebuggerManager.removeSession(this);
         myDispatcher.getMulticaster().sessionStopped();
         myProject.putUserData(XDebuggerEditorLinePainter.CACHE, null);
-      }
-    });
+
+        synchronized (myRegisteredBreakpoints) {
+          myRegisteredBreakpoints.clear();
+        }
+      });
+    }
   }
 
   public boolean isInactiveSlaveBreakpoint(final XBreakpoint<?> breakpoint) {
@@ -946,12 +921,7 @@ public class XDebugSessionImpl implements XDebugSession {
 
   @Override
   public void reportMessage(@NotNull final String message, @NotNull final MessageType type, @Nullable final HyperlinkListener listener) {
-    NotificationListener notificationListener = listener == null ? null : new NotificationListener() {
-      @Override
-      public void hyperlinkUpdate(@NotNull Notification notification, @NotNull HyperlinkEvent event) {
-        listener.hyperlinkUpdate(event);
-      }
-    };
+    NotificationListener notificationListener = listener == null ? null : (NotificationListener)(notification, event) -> listener.hyperlinkUpdate(event);
     NOTIFICATION_GROUP.createNotification("", message, type.toNotificationType(), notificationListener).notify(myProject);
   }
 
@@ -965,6 +935,9 @@ public class XDebugSessionImpl implements XDebugSession {
 
     @Override
     public void breakpointRemoved(@NotNull final XBreakpoint<?> breakpoint) {
+      if (getActiveNonLineBreakpoint() == breakpoint) {
+        myActiveNonLineBreakpoint = null;
+      }
       processAllHandlers(breakpoint, false);
     }
 
@@ -993,7 +966,8 @@ public class XDebugSessionImpl implements XDebugSession {
     }
   }
 
-  private String getWatchesKey() {
+  @NotNull
+  private String getConfigurationName() {
     if (myEnvironment != null) {
       RunProfile profile = myEnvironment.getRunProfile();
       if (profile instanceof RunConfiguration) {
@@ -1005,13 +979,15 @@ public class XDebugSessionImpl implements XDebugSession {
 
   public void setWatchExpressions(@NotNull XExpression[] watchExpressions) {
     mySessionData.setWatchExpressions(watchExpressions);
-    myDebuggerManager.getWatchesManager().setWatches(getWatchesKey(), watchExpressions);
-    if (Registry.is("debugger.watches.in.variables")) {
-      rebuildViews();
-    }
+    myDebuggerManager.getWatchesManager().setWatches(getConfigurationName(), watchExpressions);
   }
 
   XExpression[] getWatchExpressions() {
-    return myDebuggerManager.getWatchesManager().getWatches(getWatchesKey());
+    return myDebuggerManager.getWatchesManager().getWatches(getConfigurationName());
+  }
+
+  @Nullable
+  public ExecutionEnvironment getExecutionEnvironment() {
+    return myEnvironment;
   }
 }

@@ -1,11 +1,26 @@
+/*
+ * Copyright 2000-2015 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.jetbrains.plugins.gradle.service;
 
 import com.intellij.openapi.externalSystem.service.execution.ExternalSystemJdkException;
 import com.intellij.openapi.externalSystem.service.execution.ExternalSystemJdkUtil;
 import com.intellij.openapi.externalSystem.service.notification.callback.OpenExternalSystemSettingsCallback;
-import com.intellij.openapi.externalSystem.service.project.PlatformFacade;
 import com.intellij.openapi.externalSystem.util.ExternalSystemConstants;
 import com.intellij.openapi.module.Module;
+import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.JdkUtil;
 import com.intellij.openapi.projectRoots.Sdk;
@@ -15,7 +30,6 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.JarFileSystem;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.ContainerUtilRt;
 import org.gradle.StartParameter;
@@ -35,7 +49,6 @@ import org.jetbrains.plugins.gradle.util.GradleUtil;
 import org.jetbrains.plugins.groovy.config.GroovyConfigUtils;
 
 import java.io.File;
-import java.io.FileFilter;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -68,12 +81,7 @@ public class GradleInstallationManager {
     GRADLE_ENV_PROPERTY_NAME = System.getProperty("gradle.home.env.key", "GRADLE_HOME");
   }
 
-  @NotNull private final PlatformFacade myPlatformFacade;
   @Nullable private Ref<File> myCachedGradleHomeFromPath;
-
-  public GradleInstallationManager(@NotNull PlatformFacade facade) {
-    myPlatformFacade = facade;
-  }
 
   /**
    * Allows to get file handles for the gradle binaries to use.
@@ -432,12 +440,9 @@ public class GradleInstallationManager {
     if(files == null) return null;
     final LocalFileSystem localFileSystem = LocalFileSystem.getInstance();
     final JarFileSystem jarFileSystem = JarFileSystem.getInstance();
-    return ContainerUtil.mapNotNull(files, new Function<File, VirtualFile>() {
-      @Override
-      public VirtualFile fun(File file) {
-        final VirtualFile virtualFile = localFileSystem.refreshAndFindFileByIoFile(file);
-        return virtualFile != null ? jarFileSystem.getJarRootForLocalFile(virtualFile) : null;
-      }
+    return ContainerUtil.mapNotNull(files, file -> {
+      final VirtualFile virtualFile = localFileSystem.refreshAndFindFileByIoFile(file);
+      return virtualFile != null ? jarFileSystem.getJarRootForLocalFile(virtualFile) : null;
     });
   }
 
@@ -446,7 +451,7 @@ public class GradleInstallationManager {
     if (project == null) return null;
 
     if(rootProjectPath == null) {
-      for (Module module : myPlatformFacade.getModules(project)) {
+      for (Module module : ModuleManager.getInstance(project).getModules()) {
         rootProjectPath = module.getOptionValue(ExternalSystemConstants.ROOT_PROJECT_PATH_KEY);
         List<File> result = findGradleSdkClasspath(project, rootProjectPath);
         if(!result.isEmpty()) return result;
@@ -530,12 +535,8 @@ public class GradleInstallationManager {
       return null;
     }
 
-    File[] distFiles = localDistribution.getDistributionDir().listFiles(new FileFilter() {
-      @Override
-      public boolean accept(File f) {
-        return f.isDirectory() && StringUtil.startsWith(f.getName(), "gradle-");
-      }
-    });
+    File[] distFiles = localDistribution.getDistributionDir().listFiles(
+      f -> f.isDirectory() && StringUtil.startsWith(f.getName(), "gradle-"));
 
     return distFiles == null || distFiles.length == 0 ? null : distFiles[0];
   }

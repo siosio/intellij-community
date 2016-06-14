@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,14 +36,13 @@ import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.testFramework.IdeaTestUtil;
 import com.intellij.util.PathUtil;
-import com.intellij.util.Processor;
 import com.intellij.util.containers.ContainerUtil;
 import org.gradle.util.GradleVersion;
 import org.gradle.wrapper.GradleWrapperMain;
 import org.intellij.lang.annotations.Language;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.plugins.gradle.VersionMatcherRule;
+import org.jetbrains.plugins.gradle.tooling.VersionMatcherRule;
 import org.jetbrains.plugins.gradle.settings.DistributionType;
 import org.jetbrains.plugins.gradle.settings.GradleProjectSettings;
 import org.jetbrains.plugins.gradle.settings.GradleSettings;
@@ -106,7 +105,7 @@ public abstract class GradleImportingTestCase extends ExternalSystemImportingTes
       }
     }.execute();
     myProjectSettings = new GradleProjectSettings();
-    GradleSettings.getInstance(myProject).setGradleVmOptions("-Xmx64m -XX:MaxPermSize=64m");
+    GradleSettings.getInstance(myProject).setGradleVmOptions("-Xmx128m -XX:MaxPermSize=64m");
     System.setProperty(ExternalSystemExecutionSettings.REMOTE_PROCESS_IDLE_TTL_IN_MS_KEY, String.valueOf(GRADLE_DAEMON_TTL_MS));
     configureWrapper();
   }
@@ -139,21 +138,8 @@ public abstract class GradleImportingTestCase extends ExternalSystemImportingTes
   @Override
   protected void collectAllowedRoots(final List<String> roots) throws IOException {
     roots.add(myJdkHome);
-    FileUtil.processFilesRecursively(new File(myJdkHome), new Processor<File>() {
-      @Override
-      public boolean process(File file) {
-        try {
-          String path = file.getCanonicalPath();
-          if (!FileUtil.isAncestor(myJdkHome, path, false)) {
-            roots.add(path);
-          }
-        }
-        catch (IOException ignore) { }
-        return true;
-      }
-    });
-
-    roots.add(PathManager.getOptionsPath());
+    roots.addAll(collectRootsInside(myJdkHome));
+    roots.add(PathManager.getConfigPath());
   }
 
   @Override
@@ -176,8 +162,13 @@ public abstract class GradleImportingTestCase extends ExternalSystemImportingTes
     return "build.gradle";
   }
 
+  protected void importProjectUsingSingeModulePerGradleProject() {
+    getCurrentExternalProjectSettings().setResolveModulePerSourceSet(false);
+    importProject();
+  }
+
   @Override
-  protected void importProject(@NonNls @Language("Groovy") String config) throws IOException {
+  protected void importProject() {
     ExternalSystemApiUtil.subscribe(myProject, GradleConstants.SYSTEM_ID, new ExternalSystemSettingsListenerAdapter() {
       @Override
       public void onProjectsLinked(@NotNull Collection settings) {
@@ -187,11 +178,28 @@ public abstract class GradleImportingTestCase extends ExternalSystemImportingTes
         }
       }
     });
+    super.importProject();
+  }
+
+  protected void importProjectUsingSingeModulePerGradleProject(@NonNls @Language("Groovy") String config) throws IOException {
+    getCurrentExternalProjectSettings().setResolveModulePerSourceSet(false);
+    importProject(config);
+  }
+
+  @Override
+  protected void importProject(@NonNls @Language("Groovy") String config) throws IOException {
+    config = "allprojects {\n" +
+              "  repositories {\n" +
+              "    maven {\n" +
+              "        url 'http://maven.labs.intellij.net/repo1'\n" +
+              "    }\n" +
+              "  }" +
+              "}\n" + config;
     super.importProject(config);
   }
 
   @Override
-  protected ExternalProjectSettings getCurrentExternalProjectSettings() {
+  protected GradleProjectSettings getCurrentExternalProjectSettings() {
     return myProjectSettings;
   }
 

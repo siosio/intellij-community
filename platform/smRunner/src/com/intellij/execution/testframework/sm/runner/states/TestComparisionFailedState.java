@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ package com.intellij.execution.testframework.sm.runner.states;
 import com.intellij.execution.process.ProcessOutputTypes;
 import com.intellij.execution.testframework.CompositePrintable;
 import com.intellij.execution.testframework.Printer;
-import com.intellij.execution.testframework.sm.runner.ui.TestsPresentationUtil;
 import com.intellij.execution.testframework.stacktrace.DiffHyperlink;
 import com.intellij.execution.ui.ConsoleViewContentType;
 import com.intellij.openapi.util.text.StringUtil;
@@ -46,8 +45,17 @@ public class TestComparisionFailedState extends TestFailedState {
                                     @NotNull final String actualText,
                                     @NotNull final String expectedText,
                                     @Nullable final String filePath) {
+    this(localizedMessage, stackTrace, actualText, expectedText, filePath, null);
+  }
+  
+  public TestComparisionFailedState(@Nullable final String localizedMessage,
+                                    @Nullable final String stackTrace,
+                                    @NotNull final String actualText,
+                                    @NotNull final String expectedText,
+                                    @Nullable final String expectedFilePath,
+                                    @Nullable final String actualFilePath) {
     super(localizedMessage, stackTrace);
-    myHyperlink = new DiffHyperlink(expectedText, actualText, filePath);
+    myHyperlink = new DiffHyperlink(expectedText, actualText, expectedFilePath, actualFilePath, true);
 
     myErrorMsgPresentation = StringUtil.isEmptyOrSpaces(localizedMessage) ? "" : localizedMessage;
     myStacktracePresentation = StringUtil.isEmptyOrSpaces(stackTrace) ? "" : stackTrace;
@@ -59,14 +67,14 @@ public class TestComparisionFailedState extends TestFailedState {
     printer.mark();
 
     // Error msg
-    TestsPresentationUtil.printWithAnsiColoring(printer, myErrorMsgPresentation, ProcessOutputTypes.STDERR);
+    printer.printWithAnsiColoring(myErrorMsgPresentation, ProcessOutputTypes.STDERR);
 
     // Diff link
     myHyperlink.printOn(printer);
 
     // Stacktrace
     printer.print(CompositePrintable.NEW_LINE, ConsoleViewContentType.ERROR_OUTPUT);
-    TestsPresentationUtil.printWithAnsiColoring(printer, myStacktracePresentation, ProcessOutputTypes.STDERR);
+    printer.printWithAnsiColoring(myStacktracePresentation, ProcessOutputTypes.STDERR);
     printer.print(CompositePrintable.NEW_LINE, ConsoleViewContentType.ERROR_OUTPUT);
   }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -84,26 +84,22 @@ public class ToggleReadOnlyAttributePanel extends FileEditorManagerAdapter imple
   }
 
   public Consumer<MouseEvent> getClickConsumer() {
-    return new Consumer<MouseEvent>() {
-      public void consume(MouseEvent mouseEvent) {
-        final VirtualFile file = getCurrentFile();
-        if (!isReadOnlyApplicableForFile(file)) {
-          return;
-        }
-        FileDocumentManager.getInstance().saveAllDocuments();
-
-        ApplicationManager.getApplication().runWriteAction(new Runnable() {
-          public void run() {
-            try {
-              ReadOnlyAttributeUtil.setReadOnlyAttribute(file, file.isWritable());
-              myStatusBar.updateWidget(ID());
-            }
-            catch (IOException e) {
-              Messages.showMessageDialog(getProject(), e.getMessage(), UIBundle.message("error.dialog.title"), Messages.getErrorIcon());
-            }
-          }
-        });
+    return mouseEvent -> {
+      final VirtualFile file = getCurrentFile();
+      if (!isReadOnlyApplicableForFile(file)) {
+        return;
       }
+      FileDocumentManager.getInstance().saveAllDocuments();
+
+      ApplicationManager.getApplication().runWriteAction(() -> {
+        try {
+          ReadOnlyAttributeUtil.setReadOnlyAttribute(file, file.isWritable());
+          myStatusBar.updateWidget(ID());
+        }
+        catch (IOException e) {
+          Messages.showMessageDialog(getProject(), e.getMessage(), UIBundle.message("error.dialog.title"), Messages.getErrorIcon());
+        }
+      });
     };
   }
 
@@ -131,6 +127,8 @@ public class ToggleReadOnlyAttributePanel extends FileEditorManagerAdapter imple
 
   @Override
   public void selectionChanged(@NotNull FileEditorManagerEvent event) {
-    myStatusBar.updateWidget(ID());
+    if (myStatusBar != null) {
+      myStatusBar.updateWidget(ID());
+    }
   }
 }

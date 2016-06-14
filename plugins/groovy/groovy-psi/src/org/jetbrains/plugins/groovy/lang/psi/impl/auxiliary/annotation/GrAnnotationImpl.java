@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 
 package org.jetbrains.plugins.groovy.lang.psi.impl.auxiliary.annotation;
 
+import com.intellij.codeInsight.AnnotationTargetUtil;
 import com.intellij.lang.ASTNode;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
@@ -54,12 +55,8 @@ import org.jetbrains.plugins.groovy.lang.resolve.ResolveUtil;
 public class GrAnnotationImpl extends GrStubElementBase<GrAnnotationStub> implements GrAnnotation, StubBasedPsiElement<GrAnnotationStub> {
   private static final Logger LOG = Logger.getInstance("#org.jetbrains.plugins.groovy.lang.psi.impl.auxiliary.annotation.GrAnnotationImpl");
 
-  private static final PairFunction<Project, String, PsiAnnotation> ANNOTATION_CREATOR = new PairFunction<Project, String, PsiAnnotation>() {
-    @Override
-    public PsiAnnotation fun(Project project, String text) {
-      return GroovyPsiElementFactory.getInstance(project).createAnnotationFromText(text);
-    }
-  };
+  private static final PairFunction<Project, String, PsiAnnotation> ANNOTATION_CREATOR =
+    (project, text) -> GroovyPsiElementFactory.getInstance(project).createAnnotationFromText(text);
 
   public GrAnnotationImpl(@NotNull ASTNode node) {
     super(node);
@@ -240,6 +237,6 @@ public class GrAnnotationImpl extends GrStubElementBase<GrAnnotationStub> implem
   }
 
   public static boolean isAnnotationApplicableTo(GrAnnotation annotation, @NotNull TargetType... elementTypeFields) {
-    return elementTypeFields.length == 0 || PsiImplUtil.findApplicableTarget(annotation, elementTypeFields) != null;
+    return elementTypeFields.length == 0 || AnnotationTargetUtil.findAnnotationTarget(annotation, elementTypeFields) != null;
   }
 }

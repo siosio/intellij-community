@@ -1,5 +1,5 @@
 /*
- * Copyright 2005-2015 Bas Leijdekkers
+ * Copyright 2005-20164 Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,29 +31,23 @@ public class ExpressionUtils {
   private ExpressionUtils() {}
 
   @Nullable
-  public static Object computeConstantExpression(
-    @Nullable PsiExpression expression) {
+  public static Object computeConstantExpression(@Nullable PsiExpression expression) {
     return computeConstantExpression(expression, false);
   }
 
   @Nullable
-  public static Object computeConstantExpression(
-    @Nullable PsiExpression expression,
-    boolean throwConstantEvaluationOverflowException) {
+  public static Object computeConstantExpression(@Nullable PsiExpression expression, boolean throwConstantEvaluationOverflowException) {
     if (expression == null) {
       return null;
     }
     final Project project = expression.getProject();
     final JavaPsiFacade psiFacade = JavaPsiFacade.getInstance(project);
-    final PsiConstantEvaluationHelper constantEvaluationHelper =
-      psiFacade.getConstantEvaluationHelper();
-    return constantEvaluationHelper.computeConstantExpression(expression,
-                                                              throwConstantEvaluationOverflowException);
+    final PsiConstantEvaluationHelper constantEvaluationHelper = psiFacade.getConstantEvaluationHelper();
+    return constantEvaluationHelper.computeConstantExpression(expression, throwConstantEvaluationOverflowException);
   }
 
   public static boolean isConstant(PsiField field) {
-    if (!field.hasModifierProperty(PsiModifier.FINAL) ||
-        !field.hasModifierProperty(PsiModifier.STATIC)) {
+    if (!field.hasModifierProperty(PsiModifier.FINAL)) {
       return false;
     }
     if (CollectionUtils.isEmptyArray(field)) {
@@ -61,6 +55,20 @@ public class ExpressionUtils {
     }
     final PsiType type = field.getType();
     return ClassUtils.isImmutable(type);
+  }
+
+  public static boolean hasExpressionCount(@Nullable PsiExpressionList expressionList, int count) {
+    return ControlFlowUtils.hasChildrenOfTypeCount(expressionList, count, PsiExpression.class);
+  }
+
+  @Nullable
+  public static PsiExpression getFirstExpressionInList(@Nullable PsiExpressionList expressionList) {
+    return PsiTreeUtil.getChildOfType(expressionList, PsiExpression.class);
+  }
+
+  @Nullable
+  public static PsiExpression getOnlyExpressionInList(@Nullable PsiExpressionList expressionList) {
+    return ControlFlowUtils.getOnlyChildOfType(expressionList, PsiExpression.class);
   }
 
   public static boolean isDeclaredConstant(PsiExpression expression) {

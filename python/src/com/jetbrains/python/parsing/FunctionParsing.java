@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import com.intellij.lang.WhitespacesBinders;
 import com.intellij.psi.tree.IElementType;
 import com.jetbrains.python.PyElementTypes;
 import com.jetbrains.python.PyTokenTypes;
+import org.jetbrains.annotations.NotNull;
 
 import static com.jetbrains.python.PyBundle.message;
 
@@ -33,23 +34,25 @@ public class FunctionParsing extends Parsing {
     super(context);
   }
 
-  public void parseFunctionDeclaration() {
+  public void parseFunctionDeclaration(@NotNull PsiBuilder.Marker endMarker, boolean async) {
     assertCurrentToken(PyTokenTypes.DEF_KEYWORD);
-    final PsiBuilder.Marker functionMarker = myBuilder.mark();
-    parseFunctionInnards(functionMarker);
+    parseFunctionInnards(endMarker, async);
   }
 
   protected IElementType getFunctionType() {
     return FUNCTION_TYPE;
   }
 
-  protected void parseFunctionInnards(PsiBuilder.Marker functionMarker) {
+  protected void parseFunctionInnards(@NotNull PsiBuilder.Marker functionMarker, boolean async) {
     myBuilder.advanceLexer();
     parseIdentifierOrSkip(PyTokenTypes.LPAR);
     parseParameterList();
     parseReturnTypeAnnotation();
     checkMatches(PyTokenTypes.COLON, message("PARSE.expected.colon"));
-    getStatementParser().parseSuite(functionMarker, getFunctionType(), myContext.emptyParsingScope().withFunction(true));
+    final ParsingContext context = getParsingContext();
+    context.pushScope(context.getScope().withFunction(async));
+    getStatementParser().parseSuite(functionMarker, getFunctionType());
+    context.popScope();
   }
 
   public void parseReturnTypeAnnotation() {
@@ -63,7 +66,7 @@ public class FunctionParsing extends Parsing {
     }
   }
 
-  public void parseDecoratedDeclaration(ParsingScope scope) {
+  public void parseDecoratedDeclaration() {
     assertCurrentToken(PyTokenTypes.AT); // ??? need this?
     final PsiBuilder.Marker decoratorStartMarker = myBuilder.mark();
     final PsiBuilder.Marker decoListMarker = myBuilder.mark();
@@ -92,15 +95,25 @@ public class FunctionParsing extends Parsing {
     }
     if (decorated) decoListMarker.done(PyElementTypes.DECORATOR_LIST);
     //else decoListMarker.rollbackTo();
-    parseDeclarationAfterDecorator(decoratorStartMarker, scope);
+    parseDeclarationAfterDecorator(decoratorStartMarker);
   }
 
-  protected void parseDeclarationAfterDecorator(PsiBuilder.Marker endMarker, ParsingScope scope) {
+  private void parseDeclarationAfterDecorator(PsiBuilder.Marker endMarker) {
+    if (myBuilder.getTokenType() == PyTokenTypes.ASYNC_KEYWORD) {
+      myBuilder.advanceLexer();
+      parseDeclarationAfterDecorator(endMarker, true);
+    }
+    else {
+      parseDeclarationAfterDecorator(endMarker, false);
+    }
+  }
+
+  protected void parseDeclarationAfterDecorator(PsiBuilder.Marker endMarker, boolean async) {
     if (myBuilder.getTokenType() == PyTokenTypes.DEF_KEYWORD) {
-      parseFunctionInnards(endMarker); // it calls endMarker.done()
+      parseFunctionInnards(endMarker, async);
     }
     else if (myBuilder.getTokenType() == PyTokenTypes.CLASS_KEYWORD) {
-      getStatementParser().parseClassDeclaration(endMarker, scope);
+      getStatementParser().parseClassDeclaration(endMarker);
     }
     else {
       myBuilder.error(message("PARSE.expected.@.or.def"));
@@ -188,13 +201,8 @@ public class FunctionParsing extends Parsing {
       isStarParameter = true;
     }
     if (matchToken(PyTokenTypes.IDENTIFIER)) {
-      if (!isLambda && myContext.getLanguageLevel().isPy3K() && atToken(PyTokenTypes.COLON)) {
-        PsiBuilder.Marker annotationMarker = myBuilder.mark();
-        nextToken();
-        if (!getExpressionParser().parseSingleExpression(false)) {
-          myBuilder.error(message("PARSE.expected.expression"));
-        }
-        annotationMarker.done(PyElementTypes.ANNOTATION);
+      if (!isLambda) {
+        parseParameterAnnotation();
       }
       if (!isStarParameter && matchToken(PyTokenTypes.EQ)) {
         if (!getExpressionParser().parseSingleExpression(false)) {
@@ -220,6 +228,17 @@ public class FunctionParsing extends Parsing {
       return atToken(endToken) || atToken(PyTokenTypes.COMMA);
     }
     return true;
+  }
+
+  protected void parseParameterAnnotation() {
+    if (myContext.getLanguageLevel().isPy3K() && atToken(PyTokenTypes.COLON)) {
+      PsiBuilder.Marker annotationMarker = myBuilder.mark();
+      nextToken();
+      if (!getExpressionParser().parseSingleExpression(false)) {
+        myBuilder.error(message("PARSE.expected.expression"));
+      }
+      annotationMarker.done(PyElementTypes.ANNOTATION);
+    }
   }
 
   private void parseParameterSubList() {

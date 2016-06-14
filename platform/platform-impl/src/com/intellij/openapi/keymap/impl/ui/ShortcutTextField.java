@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,52 +22,79 @@
  */
 package com.intellij.openapi.keymap.impl.ui;
 
+import com.intellij.openapi.keymap.KeymapUtil;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.ui.KeyStrokeAdapter;
 
 import javax.swing.*;
+import javax.swing.text.DefaultCaret;
 import java.awt.*;
 import java.awt.event.KeyEvent;
 
-public class ShortcutTextField extends JTextField {
+public final class ShortcutTextField extends JTextField {
   private KeyStroke myKeyStroke;
 
-  public ShortcutTextField() {
+  ShortcutTextField() {
     enableEvents(AWTEvent.KEY_EVENT_MASK);
     setFocusTraversalKeysEnabled(false);
+    setCaret(new DefaultCaret() {
+      @Override
+      public boolean isVisible() {
+        return false;
+      }
+    });
+  }
+
+  private static boolean absolutelyUnknownKey (KeyEvent e) {
+    return e.getKeyCode() == 0
+           && e.getExtendedKeyCode() == 0
+           && e.getKeyChar() == KeyEvent.CHAR_UNDEFINED
+           && e.getKeyLocation() == KeyEvent.KEY_LOCATION_UNKNOWN
+           && e.getExtendedKeyCode() == 0;
   }
 
   protected void processKeyEvent(KeyEvent e) {
     if (e.getID() == KeyEvent.KEY_PRESSED) {
       int keyCode = e.getKeyCode();
-      if (
-        keyCode == KeyEvent.VK_SHIFT ||
-        keyCode == KeyEvent.VK_ALT ||
-        keyCode == KeyEvent.VK_CONTROL ||
-        keyCode == KeyEvent.VK_ALT_GRAPH ||
-        keyCode == KeyEvent.VK_META
-      ){
+
+      if (keyCode == KeyEvent.VK_SHIFT ||
+          keyCode == KeyEvent.VK_ALT ||
+          keyCode == KeyEvent.VK_CONTROL ||
+          keyCode == KeyEvent.VK_ALT_GRAPH ||
+          keyCode == KeyEvent.VK_META ||
+          absolutelyUnknownKey(e)) {
         return;
       }
       setKeyStroke(KeyStrokeAdapter.getDefaultKeyStroke(e));
     }
   }
 
-  public void setKeyStroke(KeyStroke keyStroke) {
-    myKeyStroke = keyStroke;
-    setText(KeyboardShortcutDialog.getTextByKeyStroke(keyStroke));
-    updateCurrentKeyStrokeInfo();
+  void setKeyStroke(KeyStroke keyStroke) {
+    KeyStroke old = myKeyStroke;
+    if (old != null || keyStroke != null) {
+      myKeyStroke = keyStroke;
+      super.setText(KeymapUtil.getKeystrokeText(keyStroke));
+      setCaretPosition(0);
+      firePropertyChange("keyStroke", old, keyStroke);
+    }
   }
 
-  protected void updateCurrentKeyStrokeInfo() {
-  }
-
-  public KeyStroke getKeyStroke() {
+  KeyStroke getKeyStroke() {
     return myKeyStroke;
   }
 
   @Override
   public void enableInputMethods(boolean enable) {
     super.enableInputMethods(enable && Registry.is("ide.settings.keymap.input.method.enabled"));
+  }
+
+  @Override
+  public void setText(String text) {
+    super.setText(text);
+    setCaretPosition(0);
+    if (text == null || text.isEmpty()) {
+      myKeyStroke = null;
+      firePropertyChange("keyStroke", null, null);
+    }
   }
 }

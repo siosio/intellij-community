@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package com.intellij.ide.util.treeView;
 import com.intellij.ide.IdeBundle;
 import com.intellij.ide.UiActivity;
 import com.intellij.ide.UiActivityMonitor;
+import com.intellij.ide.util.treeView.TreeRunnable.TreeConsumer;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
@@ -33,6 +34,7 @@ import com.intellij.ui.treeStructure.Tree;
 import com.intellij.util.Alarm;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.Consumer;
+import com.intellij.util.SmartList;
 import com.intellij.util.concurrency.WorkerThread;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.HashSet;
@@ -45,6 +47,8 @@ import gnu.trove.THashSet;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.concurrency.AsyncPromise;
+import org.jetbrains.concurrency.Promise;
 
 import javax.swing.*;
 import javax.swing.event.*;
@@ -358,36 +362,22 @@ public class AbstractTreeUi {
     }
   }
 
-  @NotNull
-  ActionCallback invokeLaterIfNeeded(boolean forceEdt, @NotNull final Runnable runnable) {
-    final ActionCallback result = new ActionCallback();
-
+  void invokeLaterIfNeeded(boolean forceEdt, @NotNull final Runnable runnable) {
     Runnable actual = new TreeRunnable("AbstractTreeUi.invokeLaterIfNeeded") {
       @Override
       public void perform() {
-        if (isReleased()) {
-          result.setRejected();
-        }
-        else {
+        if (!isReleased()) {
           runnable.run();
-          result.setDone();
         }
       }
     };
 
-    if (forceEdt) {
-      UIUtil.invokeLaterIfNeeded(actual);
+    if (!forceEdt && (isPassthroughMode() || !isEdt() && !isTreeShowing() && !myWasEverShown)) {
+      actual.run();
     }
     else {
-      if (isPassthroughMode() || !isEdt() && !isTreeShowing() && !myWasEverShown) {
-        actual.run();
-      }
-      else {
-        UIUtil.invokeLaterIfNeeded(actual);
-      }
+      UIUtil.invokeLaterIfNeeded(actual);
     }
-
-    return result;
   }
 
   public void activate(boolean byShowing) {
@@ -736,7 +726,7 @@ public class AbstractTreeUi {
         }
         ActionCallback callback;
         if (willUpdate) {
-          callback = new ActionCallback.Done();
+          callback = ActionCallback.DONE;
         }
         else {
           callback = updateNodeChildren(getRootNode(), pass, null, false, false, false, true, true);
@@ -753,18 +743,19 @@ public class AbstractTreeUi {
     };
 
     if (bgLoading) {
-      queueToBackground(build, update).doWhenProcessed(new TreeRunnable("AbstractTreeUi.initRootNodeNowIfNeeded: on processed queueToBackground") {
-        @Override
-        public void perform() {
-          invokeLaterIfNeeded(false, new TreeRunnable("AbstractTreeUi.initRootNodeNowIfNeeded: on processed queueToBackground later") {
-            @Override
-            public void perform() {
-              myRootNodeInitialized = true;
-              processNodeActionsIfReady(myRootNode);
-            }
-          });
-        }
-      });
+      queueToBackground(build, update)
+        .done(new TreeConsumer<Void>("AbstractTreeUi.initRootNodeNowIfNeeded: on processed queueToBackground") {
+          @Override
+          public void perform() {
+            invokeLaterIfNeeded(false, new TreeRunnable("AbstractTreeUi.initRootNodeNowIfNeeded: on processed queueToBackground later") {
+              @Override
+              public void perform() {
+                myRootNodeInitialized = true;
+                processNodeActionsIfReady(myRootNode);
+              }
+            });
+          }
+        });
     }
     else {
       build.run();
@@ -856,13 +847,15 @@ public class AbstractTreeUi {
   }
 
   @NotNull
-  private AsyncResult<Boolean> update(@NotNull final NodeDescriptor nodeDescriptor, boolean now) {
-    final AsyncResult<Boolean> result = new AsyncResult<Boolean>();
-
+  private Promise<Boolean> update(@NotNull final NodeDescriptor nodeDescriptor, boolean now) {
+    Promise<Boolean> promise;
     if (now || isPassthroughMode()) {
-      result.setDone(update(nodeDescriptor));
+      promise = Promise.resolve(update(nodeDescriptor));
     }
     else {
+      final AsyncPromise<Boolean> result = new AsyncPromise<Boolean>();
+      promise = result;
+
       Object element = getElementFromDescriptor(nodeDescriptor);
       boolean bgLoading = getTreeStructure().isToBuildChildrenInBackground(element);
 
@@ -878,18 +871,18 @@ public class AbstractTreeUi {
                             }, new TreeRunnable("AbstractTreeUi.update: post") {
                               @Override
                               public void perform() {
-                                result.setDone(changes.get());
+                                result.setResult(changes.get());
                               }
                             }
           );
         }
         else {
-          result.setDone(update(nodeDescriptor));
+          result.setResult(update(nodeDescriptor));
         }
       }
       else {
         if (edt || !myWasEverShown) {
-          result.setDone(update(nodeDescriptor));
+          result.setResult(update(nodeDescriptor));
         }
         else {
           invokeLaterIfNeeded(false, new TreeRunnable("AbstractTreeUi.update: later") {
@@ -898,7 +891,7 @@ public class AbstractTreeUi {
               execute(new TreeRunnable("AbstractTreeUi.update: later execute") {
                 @Override
                 public void perform() {
-                  result.setDone(update(nodeDescriptor));
+                  result.setResult(update(nodeDescriptor));
                 }
               });
             }
@@ -907,29 +900,26 @@ public class AbstractTreeUi {
       }
     }
 
-    result.doWhenDone(new Consumer<Boolean>() {
-      @Override
-      public void consume(final Boolean changes) {
-        if (changes) {
-          invokeLaterIfNeeded(false, new TreeRunnable("AbstractTreeUi.update: on done result") {
-            @Override
-            public void perform() {
-              Object element = nodeDescriptor.getElement();
-              DefaultMutableTreeNode node = getNodeForElement(element, false);
-              if (node != null) {
-                TreePath path = getPathFor(node);
-                if (myTree.isVisible(path)) {
-                  updateNodeImageAndPosition(node, false, changes);
-                }
-              }
-            }
-          });
-        }
+    promise.done(changes -> {
+      if (!changes) {
+        return;
       }
+
+      invokeLaterIfNeeded(false, new TreeRunnable("AbstractTreeUi.update: on done result") {
+        @Override
+        public void perform() {
+          Object element = nodeDescriptor.getElement();
+          DefaultMutableTreeNode node = getNodeForElement(element, false);
+          if (node != null) {
+            TreePath path = getPathFor(node);
+            if (myTree.isVisible(path)) {
+              updateNodeImageAndPosition(node, false, true);
+            }
+          }
+        }
+      });
     });
-
-
-    return result;
+    return promise;
   }
 
   private boolean update(@NotNull final NodeDescriptor nodeDescriptor) {
@@ -1006,7 +996,7 @@ public class AbstractTreeUi {
     try {
       AbstractTreeUpdater updater = getUpdater();
       if (updater == null) {
-        return new ActionCallback.Rejected();
+        return ActionCallback.REJECTED;
       }
 
       final ActionCallback result = new ActionCallback();
@@ -1034,7 +1024,7 @@ public class AbstractTreeUi {
       return result;
     }
     catch (ProcessCanceledException e) {
-      return new ActionCallback.Rejected();
+      return ActionCallback.REJECTED;
     }
   }
 
@@ -1095,18 +1085,17 @@ public class AbstractTreeUi {
           final NodeDescriptor descriptor = getDescriptorFrom(path.getLastPathComponent());
           if (descriptor != null) {
             DefaultMutableTreeNode node = (DefaultMutableTreeNode)path.getLastPathComponent();
-            maybeYeild(new ActiveRunnable() {
+            maybeYeild(new AsyncRunnable() {
               @NotNull
               @Override
-              public ActionCallback run() {
-                ActionCallback result = new ActionCallback();
-                update(descriptor, false).doWhenDone(new TreeRunnable("AbstractTreeUi.updateRow: inner") {
-                  @Override
-                  public void perform() {
-                    updateRow(row + 1, pass);
-                  }
-                }).notify(result);
-                return result;
+              public Promise<?> run() {
+                return update(descriptor, false)
+                  .done(new TreeConsumer<Boolean>("AbstractTreeUi.updateRow: inner") {
+                    @Override
+                    public void perform() {
+                      updateRow(row + 1, pass);
+                    }
+                  });
               }
             }, pass, node);
           }
@@ -1140,9 +1129,8 @@ public class AbstractTreeUi {
     final NodeDescriptor descriptor = (NodeDescriptor)userObject;
     final Object prevElement = getElementFromDescriptor(descriptor);
     if (prevElement == null) return;
-    update(descriptor, false).doWhenDone(new Consumer<Boolean>() {
-      @Override
-      public void consume(Boolean changes) {
+    update(descriptor, false)
+      .done(changes -> {
         if (!isValid(descriptor)) {
           if (isInStructure(prevElement)) {
             getUpdater().addSubtreeToUpdateByElement(getTreeStructure().getParentElement(prevElement));
@@ -1152,8 +1140,7 @@ public class AbstractTreeUi {
         if (changes) {
           updateNodeImageAndPosition(node, false, changes);
         }
-      }
-    });
+      });
   }
 
   public Object getElementFromDescriptor(NodeDescriptor descriptor) {
@@ -1275,13 +1262,14 @@ public class AbstractTreeUi {
       }
       else {
         if (!descriptorIsReady) {
-          update(descriptor, false).doWhenDone(new TreeRunnable("AbstractTreeUi.doUpdateChildren") {
-            @Override
-            public void perform() {
-              if (processAlwaysLeaf(node) || !updateChildren) return;
-              updateNodeChildrenNow(node, pass, preloaded.get(), toSmartExpand, wasExpanded, childForceUpdate);
-            }
-          });
+          update(descriptor, false)
+            .done(new TreeConsumer<Boolean>("AbstractTreeUi.doUpdateChildren") {
+              @Override
+              public void perform() {
+                if (processAlwaysLeaf(node) || !updateChildren) return;
+                updateNodeChildrenNow(node, pass, preloaded.get(), toSmartExpand, wasExpanded, childForceUpdate);
+              }
+            });
         }
         else {
           if (processAlwaysLeaf(node) || !updateChildren) return;
@@ -1376,8 +1364,9 @@ public class AbstractTreeUi {
 
     removeFromUnbuilt(node);
 
+    //noinspection unchecked
     processExistingNodes(node, elementToIndexMap, pass, canSmartExpand(node, toSmartExpand), forceUpdate, wasExpanded, preloadedChildren)
-      .doWhenDone(new TreeRunnable("AbstractTreeUi.updateNodeChildrenNow: on done processExistingNodes") {
+      .done(new TreeConsumer("AbstractTreeUi.updateNodeChildrenNow: on done processExistingNodes") {
         @Override
         public void perform() {
           if (isDisposed(node)) {
@@ -1439,7 +1428,8 @@ public class AbstractTreeUi {
             }
           });
         }
-      }).doWhenRejected(new TreeRunnable("AbstractTreeUi.updateNodeChildrenNow: on reject processExistingNodes") {
+      })
+      .rejected(new TreeConsumer<Throwable>("AbstractTreeUi.updateNodeChildrenNow: on reject processExistingNodes") {
       @Override
       public void perform() {
         removeFromUpdatingChildren(node);
@@ -1562,12 +1552,12 @@ public class AbstractTreeUi {
                     removeLoading(node, false);
                   }
                   else {
-                    maybeYeild(new ActiveRunnable() {
+                    maybeYeild(new AsyncRunnable() {
                       @NotNull
                       @Override
-                      public ActionCallback run() {
+                      public Promise<?> run() {
                         expand(element, null);
-                        return new ActionCallback.Done();
+                        return Promise.DONE;
                       }
                     }, pass, node);
                   }
@@ -1682,38 +1672,35 @@ public class AbstractTreeUi {
   }
 
   @NotNull
-  private ActionCallback processExistingNodes(@NotNull final DefaultMutableTreeNode node,
-                                              @NotNull final MutualMap<Object, Integer> elementToIndexMap,
-                                              @NotNull final TreeUpdatePass pass,
-                                              final boolean canSmartExpand,
-                                              final boolean forceUpdate,
-                                              final boolean wasExpaned,
-                                              @Nullable final LoadedChildren preloaded) {
-
+  private Promise<?> processExistingNodes(@NotNull final DefaultMutableTreeNode node,
+                                             @NotNull final MutualMap<Object, Integer> elementToIndexMap,
+                                             @NotNull final TreeUpdatePass pass,
+                                             final boolean canSmartExpand,
+                                             final boolean forceUpdate,
+                                             final boolean wasExpaned,
+                                             @Nullable final LoadedChildren preloaded) {
     final List<TreeNode> childNodes = TreeUtil.childrenToArray(node);
-    return maybeYeild(new ActiveRunnable() {
+    return maybeYeild(new AsyncRunnable() {
       @NotNull
       @Override
-      public ActionCallback run() {
-        if (pass.isExpired()) return new ActionCallback.Rejected();
-        if (childNodes.isEmpty()) return new ActionCallback.Done();
+      public Promise<?> run() {
+        if (pass.isExpired()) return Promise.REJECTED;
+        if (childNodes.isEmpty()) return Promise.DONE;
 
 
-        final ActionCallback result = new ActionCallback(childNodes.size());
-
+        List<Promise<?>> promises = new SmartList<Promise<?>>();
         for (TreeNode each : childNodes) {
           final DefaultMutableTreeNode eachChild = (DefaultMutableTreeNode)each;
           if (isLoadingNode(eachChild)) {
-            result.setDone();
             continue;
           }
 
           final boolean childForceUpdate = isChildNodeForceUpdate(eachChild, forceUpdate, wasExpaned);
 
-          maybeYeild(new ActiveRunnable() {
+          promises.add(maybeYeild(new AsyncRunnable() {
             @NotNull
             @Override
-            public ActionCallback run() {
+            public Promise<?> run() {
               NodeDescriptor descriptor = preloaded != null ? preloaded.getDescriptor(getElementFor(eachChild)) : null;
               NodeDescriptor descriptorFromNode = getDescriptorFrom(eachChild);
               if (descriptor != null) {
@@ -1721,21 +1708,23 @@ public class AbstractTreeUi {
                 if (descriptorFromNode != null) {
                   descriptor.setChildrenSortingStamp(descriptorFromNode.getChildrenSortingStamp());
                 }
-              } else {
+              }
+              else {
                 descriptor = descriptorFromNode;
               }
 
               return processExistingNode(eachChild, descriptor, node, elementToIndexMap, pass, canSmartExpand,
                                          childForceUpdate, preloaded);
             }
-          }, pass, node).notify(result);
+          }, pass, node));
 
-          if (result.isRejected()) {
-            break;
+          for (Promise<?> promise : promises) {
+            if (promise.getState() == Promise.State.REJECTED) {
+              return Promise.REJECTED;
+            }
           }
         }
-
-        return result;
+        return Promise.all(promises);
       }
     }, pass, node);
   }
@@ -1748,77 +1737,90 @@ public class AbstractTreeUi {
     return rerunBecauseTreeIsHidden || getUpdater().isRerunNeededFor(pass);
   }
 
-  @NotNull
-  private ActionCallback maybeYeild(@NotNull final ActiveRunnable processRunnable, @NotNull final TreeUpdatePass pass, final DefaultMutableTreeNode node) {
-    final ActionCallback result = new ActionCallback();
-
-    if (isRerunNeeded(pass)) {
-      getUpdater().requeue(pass);
-      result.setRejected();
-    }
-    else {
-      if (isToYieldUpdateFor(node)) {
-        pass.setCurrentNode(node);
-        boolean wasRun = yieldAndRun(new TreeRunnable("AbstractTreeUi.maybeYeild") {
-          @Override
-          public void perform() {
-            if (pass.isExpired()) {
-              result.setRejected();
-              return;
-            }
-
-            if (isRerunNeeded(pass)) {
-              runDone(new TreeRunnable("AbstractTreeUi.maybeYeild: rerun") {
-                @Override
-                public void perform() {
-                  if (!pass.isExpired()) {
-                    getUpdater().requeue(pass);
-                  }
-                }
-              });
-              result.setRejected();
-            }
-            else {
-              try {
-                execute(processRunnable).notify(result);
-              }
-              catch (ProcessCanceledException e) {
-                pass.expire();
-                result.setRejected();
-                cancelUpdate();
-              }
-            }
-          }
-        }, pass);
-        if (!wasRun) {
-          result.setRejected();
-        }
-      }
-      else {
-        try {
-          execute(processRunnable).notify(result);
-        }
-        catch (ProcessCanceledException e) {
-          pass.expire();
-          result.setRejected();
-          cancelUpdate();
-        }
-      }
-    }
-
-    return result;
+  private abstract static class AsyncRunnable {
+    @NotNull
+    public abstract Promise<?> run();
   }
 
   @NotNull
-  private ActionCallback execute(@NotNull final ActiveRunnable runnable) throws ProcessCanceledException {
-    final ActionCallback result = new ActionCallback();
-    execute(new TreeRunnable("AbstractTreeUi.execute") {
-      @Override
-      public void perform() {
-        runnable.run().notify(result);
+  private Promise<?> maybeYeild(@NotNull final AsyncRunnable processRunnable, @NotNull final TreeUpdatePass pass, final DefaultMutableTreeNode node) {
+    if (isRerunNeeded(pass)) {
+      getUpdater().requeue(pass);
+      return Promise.REJECTED;
+    }
+
+    if (isToYieldUpdateFor(node)) {
+      final AsyncPromise<?> result = new AsyncPromise<Void>();
+      pass.setCurrentNode(node);
+      boolean wasRun = yieldAndRun(new TreeRunnable("AbstractTreeUi.maybeYeild") {
+        @Override
+        public void perform() {
+          if (pass.isExpired()) {
+            result.setError("expired");
+            return;
+          }
+
+          if (isRerunNeeded(pass)) {
+            runDone(new TreeRunnable("AbstractTreeUi.maybeYeild: rerun") {
+              @Override
+              public void perform() {
+                if (!pass.isExpired()) {
+                  getUpdater().requeue(pass);
+                }
+              }
+            });
+            result.setError("requeue");
+          }
+          else {
+            try {
+              //noinspection unchecked
+              execute(processRunnable).notify((AsyncPromise)result);
+            }
+            catch (ProcessCanceledException e) {
+              pass.expire();
+              cancelUpdate();
+              result.setError("rejected");
+            }
+          }
+        }
+      }, pass);
+      if (!wasRun) {
+        result.setError("rejected");
       }
-    });
-    return result;
+      return result;
+    }
+    else {
+      try {
+        return execute(processRunnable);
+      }
+      catch (ProcessCanceledException e) {
+        pass.expire();
+        cancelUpdate();
+        return Promise.REJECTED;
+      }
+    }
+  }
+
+  @NotNull
+  private Promise<?> execute(@NotNull AsyncRunnable runnable) throws ProcessCanceledException {
+    try {
+      if (!canInitiateNewActivity()) {
+        throw new ProcessCanceledException();
+      }
+
+      Promise<?> promise = runnable.run();
+      if (!canInitiateNewActivity()) {
+        throw new ProcessCanceledException();
+      }
+      return promise;
+    }
+    catch (ProcessCanceledException e) {
+      if (!isReleased()) {
+        setCancelRequested(true);
+        resetToReady();
+      }
+      throw e;
+    }
   }
 
   private void execute(@NotNull Runnable runnable) throws ProcessCanceledException {
@@ -1846,18 +1848,14 @@ public class AbstractTreeUi {
     return !isCancelProcessed() && !myReleaseRequested && !isReleased();
   }
 
-  @NotNull
-  private ActionCallback resetToReady() {
-    final ActionCallback result = new ActionCallback();
-
+  private void resetToReady() {
     if (isReady()) {
-      result.setDone();
-      return result;
+      return;
     }
 
     if (myResettingToReadyNow.get()) {
-      _getReady().notify(result);
-      return result;
+      _getReady();
+      return;
     }
 
     myResettingToReadyNow.set(true);
@@ -1866,7 +1864,6 @@ public class AbstractTreeUi {
       @Override
       public void perform() {
         if (!myResettingToReadyNow.get()) {
-          result.setDone();
           return;
         }
 
@@ -1876,16 +1873,14 @@ public class AbstractTreeUi {
           myBatchCallbacks.remove(each).setRejected();
         }
 
-        resetToReadyNow().notify(result);
+        resetToReadyNow();
       }
     });
-
-    return result;
   }
 
   @NotNull
   private ActionCallback resetToReadyNow() {
-    if (isReleased()) return new ActionCallback.Rejected();
+    if (isReleased()) return ActionCallback.REJECTED;
 
     assertIsDispatchThread();
 
@@ -2008,12 +2003,7 @@ public class AbstractTreeUi {
   public boolean isReady(boolean attempt) {
     if (attempt && myStateLock.isLocked()) return false;
 
-    Boolean ready = checkValue(new Computable<Boolean>() {
-      @Override
-      public Boolean compute() {
-        return Boolean.valueOf(isIdle() && !hasPendingWork() && !isNodeActionsPending());
-      }
-    }, attempt);
+    Boolean ready = checkValue(() -> Boolean.valueOf(isIdle() && !hasPendingWork() && !isNodeActionsPending()), attempt);
 
     return ready != null && ready.booleanValue();
   }
@@ -2253,13 +2243,11 @@ public class AbstractTreeUi {
 
       final ActionCallback update = new ActionCallback();
       if (needToUpdate) {
-        update(childDescr, false).doWhenDone(new Consumer<Boolean>() {
-          @Override
-          public void consume(Boolean changes) {
+        update(childDescr, false)
+          .done(changes -> {
             loadedChildren.putDescriptor(child, childDescr, changes);
             update.setDone();
-          }
-        });
+          });
       }
       else {
         update.setDone();
@@ -2408,7 +2396,7 @@ public class AbstractTreeUi {
 
   @NotNull
   public ActionCallback cancelUpdate() {
-    if (isReleased()) return new ActionCallback.Rejected();
+    if (isReleased()) return ActionCallback.REJECTED;
 
     setCancelRequested(true);
 
@@ -2503,7 +2491,7 @@ public class AbstractTreeUi {
       return callback;
     }
     finally {
-      if (isReleased()) return new ActionCallback.Rejected();
+      if (isReleased()) return ActionCallback.REJECTED;
 
       _getReady().doWhenDone(new TreeRunnable("AbstractTreeUi.batch: finally") {
         @Override
@@ -2661,7 +2649,7 @@ public class AbstractTreeUi {
 
     final DefaultMutableTreeNode[] nodeToProcessActions = new DefaultMutableTreeNode[1];
 
-    final Runnable finalizeRunnable = new TreeRunnable("AbstractTreeUi.queueBackgroundUpdate: finalize") {
+    final TreeConsumer<Void> finalizeRunnable = new TreeConsumer<Void>("AbstractTreeUi.queueBackgroundUpdate: finalize") {
       @Override
       public void perform() {
         invokeLaterIfNeeded(false, new TreeRunnable("AbstractTreeUi.queueBackgroundUpdate: finalize later") {
@@ -2714,7 +2702,10 @@ public class AbstractTreeUi {
           execute(new TreeRunnable("AbstractTreeUi.queueBackgroundUpdate") {
             @Override
             public void perform() {
-              loaded.putDescriptor(each, eachChildDescriptor, update(eachChildDescriptor, true).getResult());
+              Promise<Boolean> promise = update(eachChildDescriptor, true);
+              LOG.assertTrue(promise instanceof Getter);
+              //noinspection unchecked
+              loaded.putDescriptor(each, eachChildDescriptor, ((Getter<Boolean>)promise).get());
             }
           });
         }
@@ -2781,12 +2772,14 @@ public class AbstractTreeUi {
         });
       }
     };
-    queueToBackground(buildRunnable, updateRunnable).doWhenProcessed(finalizeRunnable).doWhenRejected(new TreeRunnable("AbstractTreeUi.queueBackgroundUpdate: on rejected") {
-      @Override
-      public void perform() {
-        updateInfo.getPass().expire();
-      }
-    });
+    queueToBackground(buildRunnable, updateRunnable)
+      .done(finalizeRunnable)
+      .rejected(new TreeConsumer<Throwable>("AbstractTreeUi.queueBackgroundUpdate: on rejected") {
+        @Override
+        public void perform() {
+          updateInfo.getPass().expire();
+        }
+      });
 
     return true;
   }
@@ -2982,7 +2975,7 @@ public class AbstractTreeUi {
   }
 
   @NotNull
-  private ActionCallback processExistingNode(@NotNull final DefaultMutableTreeNode childNode,
+  private Promise<?> processExistingNode(@NotNull final DefaultMutableTreeNode childNode,
                                              final NodeDescriptor childDescriptor,
                                              @NotNull final DefaultMutableTreeNode parentNode,
                                              @NotNull final MutualMap<Object, Integer> elementToIndexMap,
@@ -2991,75 +2984,75 @@ public class AbstractTreeUi {
                                              final boolean forceUpdate,
                                              @Nullable LoadedChildren parentPreloadedChildren) {
     if (pass.isExpired()) {
-      return new ActionCallback.Rejected();
+      return Promise.REJECTED;
     }
 
     if (childDescriptor == null) {
       pass.expire();
-      return new ActionCallback.Rejected();
+      return Promise.REJECTED;
     }
     final Object oldElement = getElementFromDescriptor(childDescriptor);
     if (oldElement == null) {
       pass.expire();
-      return new ActionCallback.Rejected();
+      return Promise.REJECTED;
     }
 
-    AsyncResult<Boolean> update = new AsyncResult<Boolean>();
+    Promise<Boolean> update;
     if (parentPreloadedChildren != null && parentPreloadedChildren.getDescriptor(oldElement) != null) {
-      update.setDone(parentPreloadedChildren.isUpdated(oldElement));
+      update = Promise.resolve(parentPreloadedChildren.isUpdated(oldElement));
     }
     else {
       update = update(childDescriptor, false);
     }
 
-    final ActionCallback result = new ActionCallback();
+    final AsyncPromise<Void> result = new AsyncPromise<Void>();
     final Ref<NodeDescriptor> childDesc = new Ref<NodeDescriptor>(childDescriptor);
 
-    update.doWhenDone(new Consumer<Boolean>() {
-      @Override
-      public void consume(Boolean isChanged) {
-        final AtomicBoolean changes = new AtomicBoolean(isChanged);
-        final AtomicBoolean forceRemapping = new AtomicBoolean();
-        final Ref<Object> newElement = new Ref<Object>(getElementFromDescriptor(childDesc.get()));
+    update.done(isChanged -> {
+      final AtomicBoolean changes = new AtomicBoolean(isChanged);
+      final AtomicBoolean forceRemapping = new AtomicBoolean();
+      final Ref<Object> newElement = new Ref<Object>(getElementFromDescriptor(childDesc.get()));
 
-        final Integer index = newElement.get() == null ? null : elementToIndexMap.getValue(getBuilder().getTreeStructureElement(childDesc.get()));
-        final AsyncResult<Boolean> updateIndexDone = new AsyncResult<Boolean>();
-        if (index == null) {
-          updateIndexDone.setDone();
-        }
-        else {
-          final Object elementFromMap = elementToIndexMap.getKey(index);
-          if (elementFromMap != newElement.get() && elementFromMap.equals(newElement.get())) {
-            if (isInStructure(elementFromMap) && isInStructure(newElement.get())) {
-              if (parentNode.getUserObject() instanceof NodeDescriptor) {
-                final NodeDescriptor parentDescriptor = getDescriptorFrom(parentNode);
-                childDesc.set(getTreeStructure().createDescriptor(elementFromMap, parentDescriptor));
-                NodeDescriptor oldDesc = getDescriptorFrom(childNode);
-                if (oldDesc != null) {
-                  childDesc.get().applyFrom(oldDesc);
-                }
-
-                childNode.setUserObject(childDesc.get());
-                newElement.set(elementFromMap);
-                forceRemapping.set(true);
-                update(childDesc.get(), false).doWhenDone(new Consumer<Boolean>() {
-                  @Override
-                  public void consume(Boolean isChanged) {
-                    changes.set(isChanged);
-                    updateIndexDone.setDone(isChanged);
-                  }
-                });
+      final Integer index = newElement.get() == null ? null : elementToIndexMap.getValue(getBuilder().getTreeStructureElement(childDesc.get()));
+      Promise<Boolean> promise;
+      if (index == null) {
+        promise = Promise.resolve(false);
+      }
+      else {
+        final Object elementFromMap = elementToIndexMap.getKey(index);
+        if (elementFromMap != newElement.get() && elementFromMap.equals(newElement.get())) {
+          if (isInStructure(elementFromMap) && isInStructure(newElement.get())) {
+            final AsyncPromise<Boolean> updateIndexDone = new AsyncPromise<Boolean>();
+            promise = updateIndexDone;
+            if (parentNode.getUserObject() instanceof NodeDescriptor) {
+              final NodeDescriptor parentDescriptor = getDescriptorFrom(parentNode);
+              childDesc.set(getTreeStructure().createDescriptor(elementFromMap, parentDescriptor));
+              NodeDescriptor oldDesc = getDescriptorFrom(childNode);
+              if (oldDesc != null) {
+                childDesc.get().applyFrom(oldDesc);
               }
+
+              childNode.setUserObject(childDesc.get());
+              newElement.set(elementFromMap);
+              forceRemapping.set(true);
+              update(childDesc.get(), false)
+                .done(isChanged1 -> {
+                  changes.set(isChanged1);
+                  updateIndexDone.setResult(isChanged1);
+                });
             }
-            else {
-              updateIndexDone.setDone(changes.get());
-            }
+            // todo why we don't process promise here?
           }
           else {
-            updateIndexDone.setDone(changes.get());
+            promise = Promise.resolve(changes.get());
           }
+        }
+        else {
+          promise = Promise.resolve(changes.get());
+        }
 
-          updateIndexDone.doWhenDone(new TreeRunnable("AbstractTreeUi.processExistingNode: on done index updating after update") {
+        promise
+          .done(new TreeConsumer<Boolean>("AbstractTreeUi.processExistingNode: on done index updating after update") {
             @Override
             public void perform() {
               if (childDesc.get().getIndex() != index.intValue()) {
@@ -3068,9 +3061,10 @@ public class AbstractTreeUi {
               childDesc.get().setIndex(index.intValue());
             }
           });
-        }
+      }
 
-        updateIndexDone.doWhenDone(new TreeRunnable("AbstractTreeUi.processExistingNode: on done index updating") {
+      promise
+        .done(new TreeConsumer<Boolean>("AbstractTreeUi.processExistingNode: on done index updating") {
           @Override
           public void perform() {
             if (!oldElement.equals(newElement.get()) || forceRemapping.get()) {
@@ -3082,43 +3076,40 @@ public class AbstractTreeUi {
               NodeDescriptor parentDescriptor = getDescriptorFrom(parentNode);
               if (parentDescriptor != null) {
                 parentDescriptor.setChildrenSortingStamp(-1);
-              }
-            }
-
-            if (index == null) {
-              int selectedIndex = -1;
-              if (TreeBuilderUtil.isNodeOrChildSelected(myTree, childNode)) {
-                selectedIndex = parentNode.getIndex(childNode);
-              }
-
-              if (childNode.getParent() instanceof DefaultMutableTreeNode) {
-                final DefaultMutableTreeNode parent = (DefaultMutableTreeNode)childNode.getParent();
-                if (myTree.isExpanded(new TreePath(parent.getPath()))) {
-                  if (parent.getChildCount() == 1 && parent.getChildAt(0) == childNode) {
-                    insertLoadingNode(parent, false);
-                  }
-                }
-              }
-
-              Object disposedElement = getElementFor(childNode);
-
-              removeNodeFromParent(childNode, selectedIndex >= 0);
-              disposeNode(childNode);
-
-              adjustSelectionOnChildRemove(parentNode, selectedIndex, disposedElement);
-              result.setDone();
-            }
-            else {
-              elementToIndexMap.remove(getBuilder().getTreeStructureElement(childDesc.get()));
-              ActionCallback callback = updateNodeChildren(childNode, pass, null, false, canSmartExpand, forceUpdate, true, true);
-              callback.doWhenDone(result.createSetDoneRunnable());
             }
           }
-        });
-      }
+
+          if (index == null) {
+            int selectedIndex = -1;
+            if (TreeBuilderUtil.isNodeOrChildSelected(myTree, childNode)) {
+              selectedIndex = parentNode.getIndex(childNode);
+            }
+
+            if (childNode.getParent() instanceof DefaultMutableTreeNode) {
+              final DefaultMutableTreeNode parent = (DefaultMutableTreeNode)childNode.getParent();
+              if (myTree.isExpanded(new TreePath(parent.getPath()))) {
+                if (parent.getChildCount() == 1 && parent.getChildAt(0) == childNode) {
+                  insertLoadingNode(parent, false);
+                }
+              }
+            }
+
+            Object disposedElement = getElementFor(childNode);
+
+            removeNodeFromParent(childNode, selectedIndex >= 0);
+            disposeNode(childNode);
+
+            adjustSelectionOnChildRemove(parentNode, selectedIndex, disposedElement);
+            result.setResult(null);
+          }
+          else {
+            elementToIndexMap.remove(getBuilder().getTreeStructureElement(childDesc.get()));
+            updateNodeChildren(childNode, pass, null, false, canSmartExpand, forceUpdate, true, true)
+              .doWhenDone(() -> result.setResult(null));
+          }
+        }
+      });
     });
-
-
     return result;
   }
 
@@ -3176,12 +3167,7 @@ public class AbstractTreeUi {
 
   @NotNull
   public Condition getExpiredElementCondition(final Object element) {
-    return new Condition() {
-      @Override
-      public boolean value(final Object o) {
-        return isInStructure(element);
-      }
-    };
+    return o -> isInStructure(element);
   }
 
   private void addSelectionPath(@NotNull final TreePath path,
@@ -3346,18 +3332,19 @@ public class AbstractTreeUi {
 
 
   @NotNull
-  private ActionCallback queueToBackground(@NotNull final Runnable bgBuildAction, @Nullable final Runnable edtPostRunnable) {
-    if (!canInitiateNewActivity()) return new ActionCallback.Rejected();
-    final ActionCallback result = new ActionCallback();
-    final AtomicBoolean fail = new AtomicBoolean();
+  private Promise<Void> queueToBackground(@NotNull final Runnable bgBuildAction, @Nullable final Runnable edtPostRunnable) {
+    if (!canInitiateNewActivity()) return Promise.REJECTED;
+    final AsyncPromise<Void> result = new AsyncPromise<Void>();
+    final AtomicReference<ProcessCanceledException> fail = new AtomicReference<ProcessCanceledException>();
     final Runnable finalizer = new TreeRunnable("AbstractTreeUi.queueToBackground: finalizer") {
       @Override
       public void perform() {
-        if (fail.get()) {
-          result.setRejected();
+        ProcessCanceledException exception = fail.get();
+        if (exception == null) {
+          result.setResult(null);
         }
         else {
-          result.setDone();
+          result.setError(exception);
         }
       }
     };
@@ -3399,7 +3386,7 @@ public class AbstractTreeUi {
 
                       }
                       catch (ProcessCanceledException e) {
-                        fail.set(true);
+                        fail.set(e);
                         cancelUpdate();
                       }
                       finally {
@@ -3413,7 +3400,7 @@ public class AbstractTreeUi {
                 }
               }
               catch (ProcessCanceledException e) {
-                fail.set(true);
+                fail.set(e);
                 unregisterWorkerTask(bgBuildAction, finalizer);
                 cancelUpdate();
               }
@@ -3443,7 +3430,7 @@ public class AbstractTreeUi {
           }
         }
         catch (ProcessCanceledException e) {
-          fail.set(true);
+          fail.set(e);
           unregisterWorkerTask(bgBuildAction, finalizer);
           cancelUpdate();
         }
@@ -4011,19 +3998,18 @@ public class AbstractTreeUi {
     }
 
     myRevalidatedObjects.add(element);
-    AsyncResult<Object> revalidated = getBuilder().revalidateElement(element);
-
-    revalidated.doWhenDone(new Consumer<Object>() {
-      @Override
-      public void consume(final Object o) {
-        invokeLaterIfNeeded(false, new TreeRunnable("AbstractTreeUi.checkPathAndMaybeRevalidate: on done revalidateElement") {
-          @Override
-          public void perform() {
-            _expand(o, onDone, parentsOnly, checkIfInStructure, canSmartExpand);
-          }
-        });
-      }
-    }).doWhenRejected(new TreeRunnable("AbstractTreeUi.checkPathAndMaybeRevalidate: on rejected revalidateElement") {
+    getBuilder().revalidateElement(element)
+      .doWhenDone(new Consumer<Object>() {
+        @Override
+        public void consume(final Object o) {
+          invokeLaterIfNeeded(false, new TreeRunnable("AbstractTreeUi.checkPathAndMaybeRevalidate: on done revalidateElement") {
+            @Override
+            public void perform() {
+              _expand(o, onDone, parentsOnly, checkIfInStructure, canSmartExpand);
+            }
+          });
+        }
+      }).doWhenRejected(new TreeRunnable("AbstractTreeUi.checkPathAndMaybeRevalidate: on rejected revalidateElement") {
       @Override
       public void perform() {
         runDone(onDone);
@@ -4105,20 +4091,23 @@ public class AbstractTreeUi {
   }
 
   private int getRowIfUnderSelection(@NotNull Object element) {
-    int preselectedRow = -1;
-
     final Set<Object> selection = getSelectedElements();
 
     if (selection.contains(element)) {
       final TreePath[] paths = getTree().getSelectionPaths();
       for (TreePath each : paths) {
         if (element.equals(getElementFor(each.getLastPathComponent()))) {
-          preselectedRow = getTree().getRowForPath(each);
-          break;
+          return getTree().getRowForPath(each);
         }
       }
+      return -1;
     }
-    else if (myElementToNodeMap.get(TreeAnchorizer.getService().createAnchor(element)) instanceof List) {
+
+    Object anchor = TreeAnchorizer.getService().createAnchor(element);
+    Object o = myElementToNodeMap.get(anchor);
+    TreeAnchorizer.getService().freeAnchor(element);
+
+    if (o instanceof List) {
       final TreePath[] paths = getTree().getSelectionPaths();
       if (paths != null && paths.length > 0) {
         Set<DefaultMutableTreeNode> selectedNodes = new HashSet<DefaultMutableTreeNode>();
@@ -4129,25 +4118,19 @@ public class AbstractTreeUi {
         }
 
 
-        final List nodes = (List)myElementToNodeMap.get(TreeAnchorizer.getService().createAnchor(element));
-        for (Object each : nodes) {
-          DefaultMutableTreeNode eachNode = (DefaultMutableTreeNode)each;
+        //noinspection unchecked
+        for (DefaultMutableTreeNode eachNode : (List<DefaultMutableTreeNode>)o) {
           while (eachNode != null) {
             if (selectedNodes.contains(eachNode)) {
-              preselectedRow = getTree().getRowForPath(getPathFor(eachNode));
-              break;
+              return getTree().getRowForPath(getPathFor(eachNode));
             }
             eachNode = (DefaultMutableTreeNode)eachNode.getParent();
           }
-
-          if (preselectedRow >= 0) break;
         }
       }
-
     }
 
-
-    return preselectedRow;
+    return -1;
   }
 
   public void expandAllWithoutRecursion(@Nullable final Runnable onDone) {
@@ -4621,6 +4604,7 @@ public class AbstractTreeUi {
     }
 
     remapNodeActions(element, elementToPutNodeActionsFor);
+    TreeAnchorizer.getService().freeAnchor(element);
   }
 
   private void remapNodeActions(Object element, Object elementToPutNodeActionsFor) {
@@ -4657,23 +4641,25 @@ public class AbstractTreeUi {
 
   protected Object findNodeByElement(Object element) {
     element = TreeAnchorizer.getService().createAnchor(element);
-    if (myElementToNodeMap.containsKey(element)) {
-      return myElementToNodeMap.get(element);
-    }
-
     try {
+      if (myElementToNodeMap.containsKey(element)) {
+        return myElementToNodeMap.get(element);
+      }
+
       TREE_NODE_WRAPPER.setValue(element);
       return myElementToNodeMap.get(TREE_NODE_WRAPPER);
     }
     finally {
       TREE_NODE_WRAPPER.setValue(null);
+      TreeAnchorizer.getService().freeAnchor(element);
     }
   }
 
   @Nullable
   private DefaultMutableTreeNode findNodeForChildElement(@NotNull DefaultMutableTreeNode parentNode, Object element) {
-    element = TreeAnchorizer.getService().createAnchor(element);
-    final Object value = myElementToNodeMap.get(element);
+    Object anchor = TreeAnchorizer.getService().createAnchor(element);
+    final Object value = myElementToNodeMap.get(anchor);
+    TreeAnchorizer.getService().freeAnchor(anchor);
     if (value == null) {
       return null;
     }

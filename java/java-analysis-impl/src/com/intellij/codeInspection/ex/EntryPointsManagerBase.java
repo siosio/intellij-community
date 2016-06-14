@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,9 @@ import com.intellij.codeInsight.AnnotationUtil;
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer;
 import com.intellij.codeInspection.reference.*;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.components.*;
+import com.intellij.openapi.components.PersistentStateComponent;
+import com.intellij.openapi.components.ServiceManager;
+import com.intellij.openapi.components.State;
 import com.intellij.openapi.extensions.ExtensionPoint;
 import com.intellij.openapi.extensions.ExtensionPointListener;
 import com.intellij.openapi.extensions.Extensions;
@@ -28,8 +30,6 @@ import com.intellij.openapi.extensions.PluginDescriptor;
 import com.intellij.openapi.extensions.impl.ExtensionPointImpl;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Comparing;
-import com.intellij.openapi.util.Disposer;
-import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.JDOMExternalizableStringList;
 import com.intellij.profile.codeInspection.InspectionProfileManager;
 import com.intellij.psi.PsiDocCommentOwner;
@@ -45,10 +45,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 
-@State(
-    name = "EntryPointsManager",
-    storages = {@Storage(file = StoragePathMacros.PROJECT_FILE)}
-)
+@State(name = "EntryPointsManager")
 public abstract class EntryPointsManagerBase extends EntryPointsManager implements PersistentStateComponent<Element> {
   @NonNls private static final String[] STANDARD_ANNOS = {
     "javax.ws.rs.*",
@@ -80,7 +77,7 @@ public abstract class EntryPointsManagerBase extends EntryPointsManager implemen
   @NonNls private static final String VERSION_ATTR = "version";
   @NonNls private static final String ENTRY_POINT_ATTR = "entry_point";
   private boolean myAddNonJavaEntries = true;
-  private boolean myResolved = false;
+  private boolean myResolved;
   protected final Project myProject;
   private long myLastModificationCount = -1;
 
@@ -88,7 +85,6 @@ public abstract class EntryPointsManagerBase extends EntryPointsManager implemen
     myProject = project;
     myTemporaryEntryPoints = new HashSet<RefElement>();
     myPersistentEntryPoints = new LinkedHashMap<String, SmartRefElementPointer>(); // To keep the order between readExternal to writeExternal
-    Disposer.register(project, this);
     final ExtensionPoint<EntryPoint> point = Extensions.getRootArea().getExtensionPoint(ToolExtensionPoints.DEAD_CODE_TOOL);
     ((ExtensionPointImpl)point).addExtensionPointListener(new ExtensionPointListener<EntryPoint>() {
       @Override
@@ -100,12 +96,9 @@ public abstract class EntryPointsManagerBase extends EntryPointsManager implemen
       public void extensionRemoved(@NotNull EntryPoint extension, @Nullable PluginDescriptor pluginDescriptor) {
         if (ADDITIONAL_ANNOS != null) {
           ADDITIONAL_ANNOS = null;
-          UIUtil.invokeLaterIfNeeded(new Runnable() {
-            @Override
-            public void run() {
-              if (ApplicationManager.getApplication().isDisposed()) return;
-              InspectionProfileManager.getInstance().fireProfileChanged(null);
-            }
+          UIUtil.invokeLaterIfNeeded(() -> {
+            if (ApplicationManager.getApplication().isDisposed()) return;
+            InspectionProfileManager.getInstance().fireProfileChanged(null);
           });
         }
         DaemonCodeAnalyzer.getInstance(project).restart(); // annotations changed
@@ -140,7 +133,7 @@ public abstract class EntryPointsManagerBase extends EntryPointsManager implemen
     try {
       ADDITIONAL_ANNOTATIONS.readExternal(element);
     }
-    catch (InvalidDataException ignored) {
+    catch (Throwable ignored) {
     }
   }
 
@@ -176,15 +169,12 @@ public abstract class EntryPointsManagerBase extends EntryPointsManager implemen
       cleanup();
       validateEntryPoints();
 
-      ApplicationManager.getApplication().runReadAction(new Runnable() {
-        @Override
-        public void run() {
-          for (SmartRefElementPointer entryPoint : myPersistentEntryPoints.values()) {
-            if (entryPoint.resolve(manager)) {
-              RefEntity refElement = entryPoint.getRefElement();
-              ((RefElementImpl)refElement).setEntry(true);
-              ((RefElementImpl)refElement).setPermanentEntry(entryPoint.isPersistent());
-            }
+      ApplicationManager.getApplication().runReadAction(() -> {
+        for (SmartRefElementPointer entryPoint : myPersistentEntryPoints.values()) {
+          if (entryPoint.resolve(manager)) {
+            RefEntity refElement = entryPoint.getRefElement();
+            ((RefElementImpl)refElement).setEntry(true);
+            ((RefElementImpl)refElement).setPermanentEntry(entryPoint.isPersistent());
           }
         }
       });
@@ -244,15 +234,6 @@ public abstract class EntryPointsManagerBase extends EntryPointsManager implemen
 
   @Override
   public void removeEntryPoint(@NotNull RefElement anEntryPoint) {
-    if (anEntryPoint instanceof RefClass) {
-      RefClass refClass = (RefClass)anEntryPoint;
-      if (!refClass.isInterface()) {
-        anEntryPoint = refClass.getDefaultConstructor();
-      }
-    }
-
-    if (anEntryPoint == null) return;
-
     myTemporaryEntryPoints.remove(anEntryPoint);
 
     Set<Map.Entry<String, SmartRefElementPointer>> set = myPersistentEntryPoints.entrySet();

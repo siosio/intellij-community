@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ import com.intellij.codeInsight.javadoc.JavaDocUtil;
 import com.intellij.lang.CodeDocumentationAwareCommenter;
 import com.intellij.lang.LanguageCommenters;
 import com.intellij.lang.documentation.CodeDocumentationProvider;
-import com.intellij.lang.documentation.CompositeDocumentationProvider;
 import com.intellij.lang.documentation.ExternalDocumentationProvider;
 import com.intellij.lang.java.JavaDocumentationProvider;
 import com.intellij.openapi.project.Project;
@@ -61,6 +60,7 @@ import org.jetbrains.plugins.groovy.lang.psi.impl.PsiImplUtil;
 import org.jetbrains.plugins.groovy.lang.psi.impl.synthetic.GrImplicitVariable;
 import org.jetbrains.plugins.groovy.lang.psi.impl.synthetic.GrLightVariable;
 import org.jetbrains.plugins.groovy.lang.psi.util.PsiUtil;
+import org.jetbrains.plugins.groovy.lang.resolve.ResolveUtil;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -209,7 +209,7 @@ public class GroovyDocumentationProvider implements CodeDocumentationProvider, E
 
     if (inferredType != null) {
       buffer.append("[inferred type] ");
-      PsiImplUtil.appendTypeString(buffer, inferredType, originalElement);
+      appendTypeString(buffer, inferredType, originalElement);
     }
     else {
       buffer.append("[cannot infer type]");
@@ -263,11 +263,9 @@ public class GroovyDocumentationProvider implements CodeDocumentationProvider, E
   }
 
   private static void generateTraitType(@NotNull StringBuilder buffer, @NotNull GrTraitType type, PsiElement context) {
-    PsiClassType exprType = type.getExprType();
-    List<PsiClassType> traitTypes = type.getTraitTypes();
-    appendTypeString(buffer, exprType, context);
+    appendTypeString(buffer, type.getExprType(), context);
     buffer.append(" as ");
-    for (PsiClassType traitType : traitTypes) {
+    for (PsiType traitType : type.getTraitTypes()) {
       appendTypeString(buffer, traitType, context);
       buffer.append(", ");
     }
@@ -383,6 +381,14 @@ public class GroovyDocumentationProvider implements CodeDocumentationProvider, E
     if (element instanceof GrPropertyForCompletion) {
       element = ((GrPropertyForCompletion)element).getOriginalAccessor();
     }
+
+    if (element != null) {
+      PsiElement delegate = element.getUserData(ResolveUtil.DOCUMENTATION_DELEGATE);
+      if (delegate != null) {
+        return delegate;
+      }
+    }
+
     return element;
   }
 
@@ -393,7 +399,9 @@ public class GroovyDocumentationProvider implements CodeDocumentationProvider, E
 
   @Override
   public boolean hasDocumentationFor(PsiElement element, PsiElement originalElement) {
-    return CompositeDocumentationProvider.hasUrlsFor(this, element, originalElement);
+    PsiElement docElement = getDocumentationElement(element, originalElement);
+    if (docElement != null && docElement.getUserData(NonCodeMembersHolder.DOCUMENTATION_URL) != null) return true;
+    return JavaDocumentationProvider.hasUrlFor(element);
   }
 
   @Override
@@ -469,7 +477,7 @@ public class GroovyDocumentationProvider implements CodeDocumentationProvider, E
   public Pair<PsiElement, PsiComment> parseContext(@NotNull PsiElement startPoint) {
     for (PsiElement e = startPoint; e != null; e = e.getParent()) {
       if (e instanceof GrDocCommentOwner) {
-        return Pair.<PsiElement, PsiComment>create(e, ((GrDocCommentOwner)e).getDocComment());
+        return Pair.create(e, ((GrDocCommentOwner)e).getDocComment());
       }
     }
     return null;
@@ -496,8 +504,7 @@ public class GroovyDocumentationProvider implements CodeDocumentationProvider, E
         JavaDocumentationProvider.generateParametersTakingDocFromSuperMethods(project, builder, commenter, method);
 
         final PsiType returnType = method.getInferredReturnType();
-        if ((returnType != null || method.getModifierList().hasModifierProperty(GrModifier.DEF)) &&
-            returnType != PsiType.VOID) {
+        if ((returnType != null || method.getModifierList().hasModifierProperty(GrModifier.DEF)) && !PsiType.VOID.equals(returnType)) {
           builder.append(CodeDocumentationUtil.createDocCommentLine(RETURN_TAG, project, commenter));
           builder.append(LINE_SEPARATOR);
         }

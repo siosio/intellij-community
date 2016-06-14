@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,6 +42,7 @@ import com.intellij.psi.util.InheritanceUtil;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.StringBuilderSpinAllocator;
+import com.intellij.util.containers.ContainerUtil;
 import com.sun.jdi.*;
 import org.jdom.Element;
 import org.jetbrains.annotations.NonNls;
@@ -52,9 +53,9 @@ import java.util.*;
 
 public abstract class DebuggerUtils {
   private static final Logger LOG = Logger.getInstance("#com.intellij.debugger.engine.DebuggerUtils");
-  private static final Key<Method> TO_STRING_METHOD_KEY = new Key<Method>("CachedToStringMethod");
-  public static final Set<String> ourPrimitiveTypeNames = new HashSet<String>(Arrays.asList(
-      "byte", "short", "int", "long", "float", "double", "boolean", "char"
+  private static final Key<Method> TO_STRING_METHOD_KEY = new Key<>("CachedToStringMethod");
+  public static final Set<String> ourPrimitiveTypeNames = new HashSet<>(Arrays.asList(
+    "byte", "short", "int", "long", "float", "double", "boolean", "char"
   ));
 
   public static void cleanupAfterProcessFinish(DebugProcess debugProcess) {
@@ -106,7 +107,7 @@ public abstract class DebuggerUtils {
         Method toStringMethod = debugProcess.getUserData(TO_STRING_METHOD_KEY);
         if (toStringMethod == null) {
           try {
-            ReferenceType refType = objRef.virtualMachine().classesByName(CommonClassNames.JAVA_LANG_OBJECT).get(0);
+            ReferenceType refType = getObjectClassType(objRef.virtualMachine());
             toStringMethod = findMethod(refType, "toString", "()Ljava/lang/String;");
             debugProcess.putUserData(TO_STRING_METHOD_KEY, toStringMethod);
           }
@@ -149,12 +150,19 @@ public abstract class DebuggerUtils {
   }
 
   @Nullable
-  public static Method findMethod(ReferenceType refType, @NonNls String methodName, @NonNls String methodSignature) {
+  public static Method findMethod(@NotNull ReferenceType refType, @NonNls String methodName, @Nullable @NonNls String methodSignature) {
     if (refType instanceof ArrayType) {
       // for array types methodByName() in JDI always returns empty list
-      final Method method = findMethod(refType.virtualMachine().classesByName(CommonClassNames.JAVA_LANG_OBJECT).get(0), methodName, methodSignature);
+      Method method = findMethod(getObjectClassType(refType.virtualMachine()), methodName, methodSignature);
       if (method != null) {
         return method;
+      }
+      // for arrays, clone signature may return array of objects, there is no such method in Object class
+      if ("clone".equals(methodName) && "()[Ljava/lang/Object;".equals(methodSignature)) {
+        method = findMethod(getObjectClassType(refType.virtualMachine()), "clone", null);
+        if (method != null) {
+          return method;
+        }
       }
     }
 
@@ -164,20 +172,11 @@ public abstract class DebuggerUtils {
         method = ((ClassType)refType).concreteMethodByName(methodName, methodSignature);
       }
       if (method == null) {
-        final List<Method> methods = refType.methodsByName(methodName, methodSignature);
-        if (methods.size() > 0) {
-          method = methods.get(0);
-        }
+        method = ContainerUtil.getFirstItem(refType.methodsByName(methodName, methodSignature));
       }
     }
     else {
-      List<Method> methods = null;
-      if (refType instanceof ClassType) {
-        methods = refType.methodsByName(methodName);
-      }
-      if (methods != null && methods.size() > 0) {
-        method = methods.get(0);
-      }
+      method = ContainerUtil.getFirstItem(refType.methodsByName(methodName));
     }
     return method;
   }
@@ -266,35 +265,52 @@ public abstract class DebuggerUtils {
     return false;
   }
 
-  public static Type getSuperType(Type subType, String superType) {
-    if(CommonClassNames.JAVA_LANG_OBJECT.equals(superType)) {
-      List list = subType.virtualMachine().classesByName(CommonClassNames.JAVA_LANG_OBJECT);
-      if(list.size() > 0) {
-        return (ReferenceType)list.get(0);
-      }
+  public static boolean instanceOf(@Nullable Type subType, @NotNull String superType) {
+    if (subType == null || subType instanceof PrimitiveType || subType instanceof VoidType) {
+      return false;
+    }
+
+    if (CommonClassNames.JAVA_LANG_OBJECT.equals(superType)) {
+      return true;
+    }
+
+    return getSuperTypeInt(subType, superType) != null;
+  }
+
+  @Nullable
+  public static Type getSuperType(@Nullable Type subType, @NotNull String superType) {
+    if (subType == null || subType instanceof PrimitiveType || subType instanceof VoidType) {
       return null;
+    }
+
+    if (CommonClassNames.JAVA_LANG_OBJECT.equals(superType)) {
+      return getObjectClassType(subType.virtualMachine());
     }
 
     return getSuperTypeInt(subType, superType);
   }
 
-  private static boolean typeEquals(Type type, String typeName) {
+  private static ReferenceType getObjectClassType(VirtualMachine virtualMachine) {
+    return ContainerUtil.getFirstItem(virtualMachine.classesByName(CommonClassNames.JAVA_LANG_OBJECT));
+  }
+
+  private static boolean typeEquals(@NotNull Type type, @NotNull String typeName) {
+    int genericPos = typeName.indexOf('<');
+    if (genericPos > -1) {
+      typeName = typeName.substring(0, genericPos);
+    }
     return type.name().replace('$', '.').equals(typeName.replace('$', '.'));
   }
 
-  private static Type getSuperTypeInt(Type subType, String superType) {
-    Type result;
-    if (subType == null) {
-      return null;
-    }
-
+  private static Type getSuperTypeInt(@NotNull Type subType, @NotNull String superType) {
     if (typeEquals(subType, superType)) {
       return subType;
     }
 
+    Type result;
     if (subType instanceof ClassType) {
       try {
-        final ClassType clsType = (ClassType)subType;
+        ClassType clsType = (ClassType)subType;
         result = getSuperType(clsType.superclass(), superType);
         if (result != null) {
           return result;
@@ -337,25 +353,8 @@ public abstract class DebuggerUtils {
         }
       }
     }
-    else if (subType instanceof PrimitiveType) {
-      //noinspection HardCodedStringLiteral
-      if(superType.equals("java.lang.Primitive")) {
-        return subType;
-      }
-    }
 
-    //only for interfaces and arrays
-    if(CommonClassNames.JAVA_LANG_OBJECT.equals(superType)) {
-      List list = subType.virtualMachine().classesByName(CommonClassNames.JAVA_LANG_OBJECT);
-      if(list.size() > 0) {
-        return (ReferenceType)list.get(0);
-      }
-    }
     return null;
-  }
-
-  public static boolean instanceOf(Type subType, String superType) {
-    return getSuperType(subType, superType) != null;
   }
 
   @Nullable
@@ -426,7 +425,7 @@ public abstract class DebuggerUtils {
   }
   
   public static boolean hasSideEffectsOrReferencesMissingVars(PsiElement element, @Nullable final Set<String> visibleLocalVariables) {
-    final Ref<Boolean> rv = new Ref<Boolean>(Boolean.FALSE);
+    final Ref<Boolean> rv = new Ref<>(Boolean.FALSE);
     element.accept(new JavaRecursiveElementWalkingVisitor() {
       @Override 
       public void visitPostfixExpression(final PsiPostfixExpression expression) {

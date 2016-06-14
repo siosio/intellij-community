@@ -199,6 +199,135 @@ public class NewLambdaHighlightingTest extends LightDaemonAnalyzerTestCase {
     doTest();
   }
 
+  public void testControlFlowAnalysisFailedValueCompatibilityUnchanged() throws Exception {
+    doTest();
+  }
+
+  public void testNonAccessibleFunctionalInterfaceTypeArguments() throws Exception {
+    doTest();
+  }
+
+  //JDK-8043374
+  public void testIntersectionTypeOfDifferentParameterizationOfTheSameClassInNonWildcardParameterization() throws Exception {
+    doTest();
+  }
+
+  public void testPreserveCapturedWildcardsDuringNonWildcardParameterization() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA136401() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA133920() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA132253() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA144840() throws Exception {
+    doTest();
+  }
+
+  public void testRecursiveAtSiteSubstitutorsWithAdditionalConstraints() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA136325() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA127215() throws Exception {
+    doTest();
+  }
+
+  public void testGroundTargetTypeForExpectedReturnTypeOfLambdaExpression() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA149224() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA149670() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA149709() throws Exception {
+    doTest();
+  }
+
+  public void testResolveOrderShouldTakeIntoAccountDependenciesOfAlreadyResolvedVars() throws Exception {
+    doTest();
+  }
+
+  public void testCodeBlockLambdaWithIsValueCompatibleChecks() throws Exception {
+    doTest();
+  }
+
+  public void testCodeBlockLambdaWithoutParamsIsValueCompatibleChecks() throws Exception {
+    doTest();
+  }
+
+  public void testInferenceFromReturnLambdaStatementWhereContainingMethodNonGeneric() throws Exception {
+    doTest();
+  }
+
+  public void testCLikeArrayDeclarationInLambdaWithExplicitTypes() throws Exception {
+    doTest();
+  }
+
+  public void testAdditionalConstraintsOrderWhenOutputVariablesAlreadyHaveProperEqualBound() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA153284() throws Exception {
+    doTest();
+  }
+
+  public void testAvoidPartlyRawTypesAsTheyWontBeTreatedAsWildcardParameterizedAnyway() throws Exception {
+    doTest();
+  }
+
+  public void testDeepChainOfNestedLambdasOverCachedTopLevel() throws Exception {
+    doTest();
+  }
+
+  public void testIDEA153999() throws Exception {
+    doTest();
+  }
+
+  public void testFieldReferencedFromLambdaInitializations() throws Exception {
+    doTest();
+  }
+
+  public void testRawSiteSubstitutorWithExpectedGenericsParameterType() throws Exception {
+    doTest();
+  }
+
+  public void testPreserveCapturedWildcardAsLambdaParameterType() throws Exception {
+    doTest();
+  }
+
+  public void testDontWarnAboutNestedLambdaForAProblemInOuter() throws Exception {
+    doTest();
+  }
+
+  public void testUncheckedPartial() throws Exception {
+    doTest();
+  }
+
+  public void testVarargMethodWithThrownTypes() throws Exception {
+    doTest();
+  }
+
+  public void testExceptionInLambdaBodyCheck() throws Exception {
+    doTest();
+  }
+
   private void doTest() {
     doTest(false);
   }

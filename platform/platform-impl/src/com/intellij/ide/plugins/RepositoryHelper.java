@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,8 +15,6 @@
  */
 package com.intellij.ide.plugins;
 
-import com.google.common.hash.Hashing;
-import com.google.common.io.Files;
 import com.intellij.ide.IdeBundle;
 import com.intellij.idea.IdeaApplication;
 import com.intellij.openapi.application.PathManager;
@@ -27,6 +25,7 @@ import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.updateSettings.impl.UpdateSettings;
 import com.intellij.openapi.util.BuildNumber;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.io.HttpRequests;
@@ -46,6 +45,7 @@ import java.net.HttpURLConnection;
 import java.net.URISyntaxException;
 import java.net.URLConnection;
 import java.util.*;
+import java.util.zip.CRC32;
 
 /**
  * @author stathik
@@ -75,7 +75,7 @@ public class RepositoryHelper {
     List<IdeaPluginDescriptor> result = new ArrayList<IdeaPluginDescriptor>();
     Set<String> addedPluginIds = new HashSet<String>();
     for (String host : getPluginHosts()) {
-      List<IdeaPluginDescriptor> plugins = loadPlugins(host, null, indicator);
+      List<IdeaPluginDescriptor> plugins = loadPlugins(host, indicator);
       for (IdeaPluginDescriptor plugin : plugins) {
         if (addedPluginIds.add(plugin.getPluginId().getIdString())) {
           result.add(plugin);
@@ -90,16 +90,22 @@ public class RepositoryHelper {
    */
   @NotNull
   public static List<IdeaPluginDescriptor> loadPlugins(@Nullable ProgressIndicator indicator) throws IOException {
-    return loadPlugins(null, null, indicator);
+    return loadPlugins(null, indicator);
   }
 
+  @NotNull
+  public static List<IdeaPluginDescriptor> loadPlugins(@Nullable String repositoryUrl, @Nullable ProgressIndicator indicator) throws IOException {
+    boolean forceHttps = repositoryUrl == null && IdeaApplication.isLoaded() && UpdateSettings.getInstance().canUseSecureConnection();
+    return loadPlugins(repositoryUrl, null, forceHttps, indicator);
+  }
+  
   /**
    * Loads list of plugins, compatible with a given build, from a given plugin repository (main repository if null).
    */
   @NotNull
   public static List<IdeaPluginDescriptor> loadPlugins(@Nullable String repositoryUrl,
                                                        @Nullable BuildNumber buildnumber,
-                                                       @Nullable final ProgressIndicator indicator) throws IOException {
+                                                       @Nullable ProgressIndicator indicator) throws IOException {
     boolean forceHttps = repositoryUrl == null && IdeaApplication.isLoaded() && UpdateSettings.getInstance().canUseSecureConnection();
     return loadPlugins(repositoryUrl, buildnumber, forceHttps, indicator);
   }
@@ -108,34 +114,52 @@ public class RepositoryHelper {
   public static List<IdeaPluginDescriptor> loadPlugins(@Nullable String repositoryUrl,
                                                        @Nullable BuildNumber buildnumber,
                                                        boolean forceHttps,
+                                                       @Nullable ProgressIndicator indicator) throws IOException {
+    return loadPlugins(repositoryUrl, buildnumber, null, forceHttps, indicator);
+  }
+
+  @NotNull
+  public static List<IdeaPluginDescriptor> loadPlugins(@Nullable String repositoryUrl,
+                                                       @Nullable BuildNumber buildnumber,
+                                                       @Nullable String channel,
+                                                       boolean forceHttps,
                                                        @Nullable final ProgressIndicator indicator) throws IOException {
-    final URIBuilder uriBuilder;
+    String url;
     final File pluginListFile;
+    final String host;
+
     try {
+      URIBuilder uriBuilder;
       if (repositoryUrl == null) {
         uriBuilder = new URIBuilder(ApplicationInfoImpl.getShadowInstance().getPluginsListUrl());
-        pluginListFile = new File(PathManager.getPluginsPath(), PLUGIN_LIST_FILE);
+        pluginListFile = new File(PathManager.getPluginsPath(), channel == null ? PLUGIN_LIST_FILE : channel + "_" + PLUGIN_LIST_FILE);
         if (pluginListFile.length() > 0) {
-          uriBuilder.addParameter("crc32", Files.hash(pluginListFile, Hashing.crc32()).toString());
+          uriBuilder.addParameter("crc32", crc32(pluginListFile));
         }
       }
       else {
         uriBuilder = new URIBuilder(repositoryUrl);
         pluginListFile = null;
       }
+
+      if (!URLUtil.FILE_PROTOCOL.equals(uriBuilder.getScheme())) {
+        uriBuilder.addParameter("build",
+                                (buildnumber != null ? buildnumber.asString() : ApplicationInfoImpl.getShadowInstance().getApiVersion()));
+        if (channel != null) uriBuilder.addParameter("channel", channel);
+      }
+
+      host = uriBuilder.getHost();
+      url = uriBuilder.build().toString();
     }
     catch (URISyntaxException e) {
       throw new IOException(e);
     }
-    if (!URLUtil.FILE_PROTOCOL.equals(uriBuilder.getScheme())) {
-      uriBuilder.addParameter("build", (buildnumber != null ? buildnumber.asString() : ApplicationInfoImpl.getShadowInstance().getApiVersion()));
-    }
 
     if (indicator != null) {
-      indicator.setText2(IdeBundle.message("progress.connecting.to.plugin.manager", uriBuilder.getHost()));
+      indicator.setText2(IdeBundle.message("progress.connecting.to.plugin.manager", host));
     }
 
-    RequestBuilder request = HttpRequests.request(uriBuilder.toString()).forceHttps(forceHttps);
+    RequestBuilder request = HttpRequests.request(url).forceHttps(forceHttps);
     return process(repositoryUrl, request.connect(new HttpRequests.RequestProcessor<List<IdeaPluginDescriptor>>() {
       @Override
       public List<IdeaPluginDescriptor> process(@NotNull HttpRequests.Request request) throws IOException {
@@ -153,11 +177,11 @@ public class RepositoryHelper {
 
         if (indicator != null) {
           indicator.checkCanceled();
-          indicator.setText2(IdeBundle.message("progress.downloading.list.of.plugins", uriBuilder.getHost()));
+          indicator.setText2(IdeBundle.message("progress.downloading.list.of.plugins", host));
         }
 
         if (pluginListFile != null) {
-          synchronized (RepositoryHelper.class) {
+          synchronized (PLUGIN_LIST_FILE) {
             FileUtil.ensureExists(pluginListFile.getParentFile());
             request.saveToFile(pluginListFile, indicator);
             return loadPluginList(pluginListFile);
@@ -168,6 +192,15 @@ public class RepositoryHelper {
         }
       }
     }));
+  }
+
+  @SuppressWarnings("SpellCheckingInspection")
+  private static String crc32(File file) throws IOException {
+    CRC32 crc32 = new CRC32();
+    crc32.update(FileUtil.loadFileBytes(file));
+    int hash = (int)crc32.getValue();
+    byte[] bytes = {(byte)hash, (byte)(hash >> 8), (byte)(hash >> 16), (byte)(hash >> 24)};
+    return StringUtil.toHexString(bytes);
   }
 
   /**
@@ -190,10 +223,7 @@ public class RepositoryHelper {
       parser.parse(new InputSource(reader), handler);
       return handler.getPluginsList();
     }
-    catch (ParserConfigurationException e) {
-      throw new IOException(e);
-    }
-    catch (SAXException e) {
+    catch (ParserConfigurationException | SAXException | RuntimeException e) {
       throw new IOException(e);
     }
     finally {

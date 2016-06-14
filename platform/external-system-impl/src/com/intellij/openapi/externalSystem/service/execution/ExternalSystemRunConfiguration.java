@@ -9,6 +9,7 @@ import com.intellij.execution.configurations.LocatableConfigurationBase;
 import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.execution.configurations.RunProfileState;
 import com.intellij.execution.executors.DefaultDebugExecutor;
+import com.intellij.execution.process.AnsiEscapeDecoder;
 import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.process.ProcessOutputTypes;
 import com.intellij.execution.runners.ExecutionEnvironment;
@@ -19,21 +20,19 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.externalSystem.execution.ExternalSystemExecutionConsoleManager;
 import com.intellij.openapi.externalSystem.model.ProjectSystemId;
 import com.intellij.openapi.externalSystem.model.execution.ExternalSystemTaskExecutionSettings;
-import com.intellij.openapi.externalSystem.model.execution.ExternalTaskExecutionInfo;
 import com.intellij.openapi.externalSystem.model.execution.ExternalTaskPojo;
 import com.intellij.openapi.externalSystem.model.task.ExternalSystemTask;
 import com.intellij.openapi.externalSystem.model.task.ExternalSystemTaskId;
 import com.intellij.openapi.externalSystem.model.task.ExternalSystemTaskNotificationListenerAdapter;
 import com.intellij.openapi.externalSystem.service.internal.ExternalSystemExecuteTaskTask;
 import com.intellij.openapi.externalSystem.util.ExternalSystemBundle;
-import com.intellij.openapi.externalSystem.util.ExternalSystemUtil;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.options.SettingsEditor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.InvalidDataException;
+import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.WriteExternalException;
-import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.ExceptionUtil;
 import com.intellij.util.containers.ContainerUtilRt;
 import com.intellij.util.net.NetUtils;
@@ -43,7 +42,8 @@ import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.*;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.util.List;
 
 /**
@@ -70,7 +70,7 @@ public class ExternalSystemRunConfiguration extends LocatableConfigurationBase {
   }
 
   @Override
-  public RunConfiguration clone() {
+  public ExternalSystemRunConfiguration clone() {
     ExternalSystemRunConfiguration result = (ExternalSystemRunConfiguration)super.clone();
     result.mySettings = mySettings.clone();
     return result;
@@ -174,77 +174,81 @@ public class ExternalSystemRunConfiguration extends LocatableConfigurationBase {
                                                                                    debuggerSetup);
 
       final MyProcessHandler processHandler = new MyProcessHandler(task);
-      final ExternalSystemExecutionConsoleManager<ExternalSystemRunConfiguration> consoleManager = getConsoleManagerFor(task);
+      final ExternalSystemExecutionConsoleManager<ExternalSystemRunConfiguration, ExecutionConsole, ProcessHandler>
+        consoleManager = getConsoleManagerFor(task);
 
       final ExecutionConsole consoleView =
         consoleManager.attachExecutionConsole(task, myProject, myConfiguration, executor, myEnv, processHandler);
       Disposer.register(myProject, consoleView);
 
-      ApplicationManager.getApplication().executeOnPooledThread(new Runnable() {
-        @Override
-        public void run() {
-          final String startDateTime = DateFormatUtil.formatTimeWithSeconds(System.currentTimeMillis());
-          final String greeting;
-          if (mySettings.getTaskNames().size() > 1) {
-            greeting = ExternalSystemBundle
-              .message("run.text.starting.multiple.task", startDateTime, mySettings.toString());
-          }
-          else {
-            greeting =
-              ExternalSystemBundle.message("run.text.starting.single.task", startDateTime, mySettings.toString());
-          }
-          processHandler.notifyTextAvailable(greeting, ProcessOutputTypes.SYSTEM);
-          task.execute(new ExternalSystemTaskNotificationListenerAdapter() {
-
-            private boolean myResetGreeting = true;
-
-            @Override
-            public void onTaskOutput(@NotNull ExternalSystemTaskId id, @NotNull String text, boolean stdOut) {
-              if (myResetGreeting) {
-                processHandler.notifyTextAvailable("\r", ProcessOutputTypes.SYSTEM);
-                myResetGreeting = false;
-              }
-
-              consoleManager.onOutput(text, stdOut ? ProcessOutputTypes.STDOUT : ProcessOutputTypes.STDERR);
-            }
-
-            @Override
-            public void onFailure(@NotNull ExternalSystemTaskId id, @NotNull Exception e) {
-              String exceptionMessage = ExceptionUtil.getMessage(e);
-              String text = exceptionMessage == null ? e.toString() : exceptionMessage;
-              processHandler.notifyTextAvailable(text + '\n', ProcessOutputTypes.STDERR);
-              processHandler.notifyProcessTerminated(1);
-            }
-
-            @Override
-            public void onEnd(@NotNull ExternalSystemTaskId id) {
-              final String endDateTime = DateFormatUtil.formatTimeWithSeconds(System.currentTimeMillis());
-              final String farewell;
-              if (mySettings.getTaskNames().size() > 1) {
-                farewell = ExternalSystemBundle
-                  .message("run.text.ended.multiple.task", endDateTime, mySettings.toString());
-              }
-              else {
-                farewell =
-                  ExternalSystemBundle.message("run.text.ended.single.task", endDateTime, mySettings.toString());
-              }
-              processHandler.notifyTextAvailable(farewell, ProcessOutputTypes.SYSTEM);
-              processHandler.notifyProcessTerminated(0);
-            }
-          });
+      ApplicationManager.getApplication().executeOnPooledThread(() -> {
+        final String startDateTime = DateFormatUtil.formatTimeWithSeconds(System.currentTimeMillis());
+        final String greeting;
+        if (mySettings.getTaskNames().size() > 1) {
+          greeting = ExternalSystemBundle
+            .message("run.text.starting.multiple.task", startDateTime, mySettings.toString());
         }
+        else {
+          greeting =
+            ExternalSystemBundle.message("run.text.starting.single.task", startDateTime, mySettings.toString());
+        }
+        processHandler.notifyTextAvailable(greeting, ProcessOutputTypes.SYSTEM);
+        task.execute(new ExternalSystemTaskNotificationListenerAdapter() {
+
+          private boolean myResetGreeting = true;
+
+          @Override
+          public void onTaskOutput(@NotNull ExternalSystemTaskId id, @NotNull String text, boolean stdOut) {
+            if (myResetGreeting) {
+              processHandler.notifyTextAvailable("\r", ProcessOutputTypes.SYSTEM);
+              myResetGreeting = false;
+            }
+
+            consoleManager.onOutput(consoleView, processHandler, text, stdOut ? ProcessOutputTypes.STDOUT : ProcessOutputTypes.STDERR);
+          }
+
+          @Override
+          public void onFailure(@NotNull ExternalSystemTaskId id, @NotNull Exception e) {
+            String exceptionMessage = ExceptionUtil.getMessage(e);
+            String text = exceptionMessage == null ? e.toString() : exceptionMessage;
+            processHandler.notifyTextAvailable(text + '\n', ProcessOutputTypes.STDERR);
+            processHandler.notifyProcessTerminated(1);
+          }
+
+          @Override
+          public void onEnd(@NotNull ExternalSystemTaskId id) {
+            final String endDateTime = DateFormatUtil.formatTimeWithSeconds(System.currentTimeMillis());
+            final String farewell;
+            if (mySettings.getTaskNames().size() > 1) {
+              farewell = ExternalSystemBundle
+                .message("run.text.ended.multiple.task", endDateTime, mySettings.toString());
+            }
+            else {
+              farewell =
+                ExternalSystemBundle.message("run.text.ended.single.task", endDateTime, mySettings.toString());
+            }
+            processHandler.notifyTextAvailable(farewell, ProcessOutputTypes.SYSTEM);
+            processHandler.notifyProcessTerminated(0);
+          }
+        });
       });
       DefaultExecutionResult result = new DefaultExecutionResult(consoleView, processHandler);
-      result.setRestartActions(consoleManager.getRestartActions());
+      result.setRestartActions(consoleManager.getRestartActions(consoleView));
       return result;
     }
   }
 
-  private static class MyProcessHandler extends ProcessHandler {
+  private static class MyProcessHandler extends ProcessHandler implements AnsiEscapeDecoder.ColoredTextAcceptor {
     private final ExternalSystemExecuteTaskTask myTask;
+    private final AnsiEscapeDecoder myAnsiEscapeDecoder = new AnsiEscapeDecoder();
 
     public MyProcessHandler(ExternalSystemExecuteTaskTask task) {
       myTask = task;
+    }
+
+    @Override
+    public void notifyTextAvailable(final String text, final Key outputType) {
+      myAnsiEscapeDecoder.escapeText(text, outputType, this);
     }
 
     @Override
@@ -272,10 +276,16 @@ public class ExternalSystemRunConfiguration extends LocatableConfigurationBase {
     public void notifyProcessTerminated(int exitCode) {
       super.notifyProcessTerminated(exitCode);
     }
+
+    @Override
+    public void coloredTextAvailable(String text, Key attributes) {
+      super.notifyTextAvailable(text, attributes);
+    }
   }
 
   @NotNull
-  private static ExternalSystemExecutionConsoleManager<ExternalSystemRunConfiguration> getConsoleManagerFor(@NotNull ExternalSystemTask task) {
+  private static ExternalSystemExecutionConsoleManager<ExternalSystemRunConfiguration, ExecutionConsole, ProcessHandler>
+  getConsoleManagerFor(@NotNull ExternalSystemTask task) {
     for (ExternalSystemExecutionConsoleManager executionConsoleManager : ExternalSystemExecutionConsoleManager.EP_NAME.getExtensions()) {
       if (executionConsoleManager.isApplicableFor(task))
         //noinspection unchecked

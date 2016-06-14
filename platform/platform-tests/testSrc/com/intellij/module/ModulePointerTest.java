@@ -16,10 +16,12 @@
 package com.intellij.module;
 
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.Result;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.module.*;
 import com.intellij.testFramework.PlatformTestCase;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * @author nik
@@ -77,7 +79,8 @@ public class ModulePointerTest extends PlatformTestCase {
     assertSame(module, pointer.getModule());
     assertEquals("xxx", pointer.getModuleName());
 
-    modifiableModel.dispose();
+    ApplicationManager.getApplication().runWriteAction(() -> modifiableModel.dispose());
+
 
     assertNull(pointer.getModule());
     assertEquals("xxx", pointer.getModuleName());
@@ -105,7 +108,7 @@ public class ModulePointerTest extends PlatformTestCase {
   private static void commitModel(final ModifiableModuleModel model) {
     new WriteAction() {
       @Override
-      protected void run(final Result result) {
+      protected void run(@NotNull final Result result) {
         model.commit();
       }
     }.execute();

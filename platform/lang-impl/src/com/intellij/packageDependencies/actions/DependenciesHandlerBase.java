@@ -17,6 +17,7 @@ package com.intellij.packageDependencies.actions;
 
 import com.intellij.analysis.AnalysisScope;
 import com.intellij.analysis.PerformAnalysisInBackgroundOption;
+import com.intellij.diagnostic.PerformanceWatcher;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
@@ -99,12 +100,14 @@ public abstract class DependenciesHandlerBase {
 
   private void perform(List<DependenciesBuilder> builders) {
     try {
+      PerformanceWatcher.Snapshot snapshot = PerformanceWatcher.takeSnapshot();
       for (AnalysisScope scope : myScopes) {
         builders.add(createDependenciesBuilder(scope));
       }
       for (DependenciesBuilder builder : builders) {
         builder.analyze();
       }
+      snapshot.logResponsivenessSinceCreation("Dependency analysis");
     }
     catch (IndexNotReadyException e) {
       DumbService.getInstance(myProject).showDumbModeNotification("Analyze dependencies is not available until indices are ready");
@@ -114,18 +117,19 @@ public abstract class DependenciesHandlerBase {
 
   private void onSuccess(final List<DependenciesBuilder> builders) {
     //noinspection SSBasedInspection
-    SwingUtilities.invokeLater(new Runnable() {
-      @Override
-      public void run() {
-        if (shouldShowDependenciesPanel(builders)) {
-          final String displayName = getPanelDisplayName(builders.get(0).getScope());
-          DependenciesPanel panel = new DependenciesPanel(myProject, builders, myExcluded);
-          Content content = ContentFactory.SERVICE.getInstance().createContent(panel, displayName, false);
-          content.setDisposer(panel);
-          panel.setContent(content);
-          DependenciesToolWindow.getInstance(myProject).addContent(content);
-        }
+    SwingUtilities.invokeLater(() -> {
+      if (shouldShowDependenciesPanel(builders)) {
+        final String displayName = getPanelDisplayName(builders);
+        DependenciesPanel panel = new DependenciesPanel(myProject, builders, myExcluded);
+        Content content = ContentFactory.SERVICE.getInstance().createContent(panel, displayName, false);
+        content.setDisposer(panel);
+        panel.setContent(content);
+        DependenciesToolWindow.getInstance(myProject).addContent(content);
       }
     });
+  }
+
+  protected String getPanelDisplayName(List<DependenciesBuilder> builders) {
+    return getPanelDisplayName(builders.get(0).getScope());
   }
 }

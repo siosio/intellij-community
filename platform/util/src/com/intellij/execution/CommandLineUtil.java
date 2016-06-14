@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,8 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 
+import java.io.File;
+import java.util.Collections;
 import java.util.List;
 
 public class CommandLineUtil {
@@ -91,5 +93,29 @@ public class CommandLineUtil {
 
   private static boolean isQuoted(String s, char ch) {
     return s.length() >= 2 && s.charAt(0) == ch && s.charAt(s.length() - 1) == ch;
+  }
+
+  public static boolean VERBOSE_COMMAND_LINE_MODE;
+  @NotNull
+  public static String extractPresentableName(@NotNull String commandLine) {
+    String executable = commandLine.trim();
+
+    List<String> words = StringUtil.splitHonorQuotes(executable, ' ');
+    String execName;
+    List<String> args;
+    if (words.isEmpty()) {
+      execName = executable;
+      args = Collections.emptyList();
+    }
+    else {
+      execName = words.get(0);
+      args = words.subList(1, words.size());
+    }
+
+    if (VERBOSE_COMMAND_LINE_MODE) {
+      return StringUtil.firstLast(execName + " " + StringUtil.join(args, " "), 250);
+    }
+
+    return new File(StringUtil.unquoteString(execName)).getName();
   }
 }

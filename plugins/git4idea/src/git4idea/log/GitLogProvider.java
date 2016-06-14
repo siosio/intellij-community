@@ -15,16 +15,20 @@
  */
 package git4idea.log;
 
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.diagnostic.Attachment;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.ThrowableNotNullFunction;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vcs.VcsKey;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.*;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.OpenTHashSet;
+import com.intellij.util.messages.MessageBusConnection;
 import com.intellij.vcs.log.*;
 import com.intellij.vcs.log.data.VcsLogSorter;
 import com.intellij.vcs.log.graph.GraphColorManager;
@@ -33,8 +37,10 @@ import com.intellij.vcs.log.graph.impl.facade.PermanentGraphImpl;
 import com.intellij.vcs.log.impl.HashImpl;
 import com.intellij.vcs.log.impl.LogDataImpl;
 import com.intellij.vcs.log.util.StopWatch;
+import com.intellij.vcsUtil.VcsFileUtil;
 import git4idea.*;
 import git4idea.branch.GitBranchUtil;
+import git4idea.branch.GitBranchesCollection;
 import git4idea.config.GitVersionSpecialty;
 import git4idea.history.GitHistoryUtils;
 import git4idea.repo.GitRepository;
@@ -150,11 +156,11 @@ public class GitLogProvider implements VcsLogProvider {
     return new LogDataImpl(allRefs, sortedCommits);
   }
 
-  private static void validateDataAndReportError(final VirtualFile root,
-                                                 final Set<VcsRef> allRefs,
-                                                 final List<VcsCommitMetadata> sortedCommits,
-                                                 final DetailedLogData firstBlockSyncData,
-                                                 final Set<VcsRef> manuallyReadBranches,
+  private static void validateDataAndReportError(@NotNull final VirtualFile root,
+                                                 @NotNull final Set<VcsRef> allRefs,
+                                                 @NotNull final List<VcsCommitMetadata> sortedCommits,
+                                                 @NotNull final DetailedLogData firstBlockSyncData,
+                                                 @NotNull final Set<VcsRef> manuallyReadBranches,
                                                  @Nullable final Set<String> currentTagNames,
                                                  @Nullable final DetailedLogData commitsFromTags) {
     StopWatch sw = StopWatch.start("validating data in " + root.getName());
@@ -167,17 +173,17 @@ public class GitLogProvider implements VcsLogProvider {
 
     PermanentGraphImpl.newInstance(sortedCommits, new GraphColorManager<Hash>() {
       @Override
-      public int getColorOfBranch(Hash headCommit) {
+      public int getColorOfBranch(@NotNull Hash headCommit) {
         return 0;
       }
 
       @Override
-      public int getColorOfFragment(Hash headCommit, int magicIndex) {
+      public int getColorOfFragment(@NotNull Hash headCommit, int magicIndex) {
         return 0;
       }
 
       @Override
-      public int compareHeads(Hash head1, Hash head2) {
+      public int compareHeads(@NotNull Hash head1, @NotNull Hash head2) {
         if (!refs.contains(head1) || !refs.contains(head2)) {
           LOG.error("GitLogProvider returned inconsistent data", new Attachment("error-details.txt",
                                                                                 printErrorDetails(root, allRefs, sortedCommits,
@@ -191,13 +197,13 @@ public class GitLogProvider implements VcsLogProvider {
   }
 
   @SuppressWarnings("StringConcatenationInsideStringBufferAppend")
-  private static String printErrorDetails(VirtualFile root,
-                                          final Set<VcsRef> allRefs,
-                                          final List<VcsCommitMetadata> sortedCommits,
-                                          final DetailedLogData firstBlockSyncData,
-                                          final Set<VcsRef> manuallyReadBranches,
-                                          @Nullable final Set<String> currentTagNames,
-                                          @Nullable final DetailedLogData commitsFromTags) {
+  private static String printErrorDetails(@NotNull VirtualFile root,
+                                          @NotNull Set<VcsRef> allRefs,
+                                          @NotNull List<VcsCommitMetadata> sortedCommits,
+                                          @NotNull DetailedLogData firstBlockSyncData,
+                                          @NotNull Set<VcsRef> manuallyReadBranches,
+                                          @Nullable Set<String> currentTagNames,
+                                          @Nullable DetailedLogData commitsFromTags) {
 
     StringBuilder sb = new StringBuilder();
     sb.append("[" + root.getName() + "]\n");
@@ -227,16 +233,14 @@ public class GitLogProvider implements VcsLogProvider {
     return sb.toString();
   }
 
-  private static String printLogData(DetailedLogData firstBlockSyncData) {
-    StringBuilder sb = new StringBuilder();
-    sb.append("Last 100 commits:\n");
-    sb.append(printCommits(firstBlockSyncData.getCommits()));
-    sb.append("\nRefs:\n");
-    sb.append(printRefs(firstBlockSyncData.getRefs()));
-    return sb.toString();
+  @NotNull
+  private static String printLogData(@NotNull DetailedLogData firstBlockSyncData) {
+    return String
+      .format("Last 100 commits:\n%s\nRefs:\n%s", printCommits(firstBlockSyncData.getCommits()), printRefs(firstBlockSyncData.getRefs()));
   }
 
-  private static String printCommits(List<VcsCommitMetadata> commits) {
+  @NotNull
+  private static String printCommits(@NotNull List<VcsCommitMetadata> commits) {
     StringBuilder sb = new StringBuilder();
     for (int i = 0; i < Math.min(commits.size(), 100); i++) {
       GraphCommit<Hash> commit = commits.get(i);
@@ -251,7 +255,8 @@ public class GitLogProvider implements VcsLogProvider {
     return sb.toString();
   }
 
-  private static String printRefs(Set<VcsRef> refs) {
+  @NotNull
+  private static String printRefs(@NotNull Set<VcsRef> refs) {
     return StringUtil.join(refs, new Function<VcsRef, String>() {
       @Override
       public String fun(VcsRef ref) {
@@ -316,7 +321,7 @@ public class GitLogProvider implements VcsLogProvider {
     }
 
     List<String> parameters = new ArrayList<String>(GitHistoryUtils.LOG_ALL);
-    parameters.add("--sparse");
+    parameters.add("--date-order");
 
     final GitBekParentFixer parentFixer = GitBekParentFixer.prepare(root, this);
     Set<VcsUser> userRegistry = newHashSet();
@@ -333,19 +338,35 @@ public class GitLogProvider implements VcsLogProvider {
 
   @NotNull
   @Override
-  public List<? extends VcsShortCommitDetails> readShortDetails(@NotNull VirtualFile root, @NotNull List<String> hashes)
+  public List<? extends VcsShortCommitDetails> readShortDetails(@NotNull final VirtualFile root, @NotNull List<String> hashes)
     throws VcsException {
-    return GitHistoryUtils.readMiniDetails(myProject, root, hashes);
+    return VcsFileUtil
+      .foreachChunk(hashes, new ThrowableNotNullFunction<List<String>, List<? extends VcsShortCommitDetails>, VcsException>() {
+        @NotNull
+        @Override
+        public List<? extends VcsShortCommitDetails> fun(@NotNull List<String> hashes) throws VcsException {
+          return GitHistoryUtils.readMiniDetails(myProject, root, hashes);
+        }
+      });
   }
 
   @NotNull
   @Override
-  public List<? extends VcsFullCommitDetails> readFullDetails(@NotNull VirtualFile root, @NotNull List<String> hashes) throws VcsException {
-    String noWalk = GitVersionSpecialty.NO_WALK_UNSORTED.existsIn(myVcs.getVersion()) ? "--no-walk=unsorted" : "--no-walk";
-    List<String> params = new ArrayList<String>();
-    params.add(noWalk);
-    params.addAll(hashes);
-    return GitHistoryUtils.history(myProject, root, ArrayUtil.toStringArray(params));
+  public List<? extends VcsFullCommitDetails> readFullDetails(@NotNull final VirtualFile root, @NotNull List<String> hashes)
+    throws VcsException {
+    return VcsFileUtil
+      .foreachChunk(hashes, new ThrowableNotNullFunction<List<String>, List<? extends VcsFullCommitDetails>, VcsException>() {
+        @NotNull
+        @Override
+        public List<? extends VcsFullCommitDetails> fun(@NotNull List<String> hashes) throws VcsException {
+          String noWalk = GitVersionSpecialty.NO_WALK_UNSORTED.existsIn(myVcs.getVersion()) ? "--no-walk=unsorted" : "--no-walk";
+          List<String> params = new ArrayList<String>();
+          params.add(noWalk);
+          params.addAll(hashes);
+
+          return GitHistoryUtils.history(myProject, root, ArrayUtil.toStringArray(params));
+        }
+      });
   }
 
   @NotNull
@@ -353,15 +374,19 @@ public class GitLogProvider implements VcsLogProvider {
     StopWatch sw = StopWatch.start("readBranches in " + repository.getRoot().getName());
     VirtualFile root = repository.getRoot();
     repository.update();
-    Collection<GitLocalBranch> localBranches = repository.getBranches().getLocalBranches();
-    Collection<GitRemoteBranch> remoteBranches = repository.getBranches().getRemoteBranches();
+    GitBranchesCollection branches = repository.getBranches();
+    Collection<GitLocalBranch> localBranches = branches.getLocalBranches();
+    Collection<GitRemoteBranch> remoteBranches = branches.getRemoteBranches();
     Set<VcsRef> refs = new THashSet<VcsRef>(localBranches.size() + remoteBranches.size());
     for (GitLocalBranch localBranch : localBranches) {
-      refs.add(myVcsObjectsFactory.createRef(localBranch.getHash(), localBranch.getName(), GitRefManager.LOCAL_BRANCH, root));
+      Hash hash = branches.getHash(localBranch);
+      assert hash != null;
+      refs.add(myVcsObjectsFactory.createRef(hash, localBranch.getName(), GitRefManager.LOCAL_BRANCH, root));
     }
     for (GitRemoteBranch remoteBranch : remoteBranches) {
-      refs.add(
-        myVcsObjectsFactory.createRef(remoteBranch.getHash(), remoteBranch.getNameForLocalOperations(), GitRefManager.REMOTE_BRANCH, root));
+      Hash hash = branches.getHash(remoteBranch);
+      assert hash != null;
+      refs.add(myVcsObjectsFactory.createRef(hash, remoteBranch.getNameForLocalOperations(), GitRefManager.REMOTE_BRANCH, root));
     }
     String currentRevision = repository.getCurrentRevision();
     if (currentRevision != null) { // null => fresh repository
@@ -383,9 +408,11 @@ public class GitLogProvider implements VcsLogProvider {
     return myRefSorter;
   }
 
+  @NotNull
   @Override
-  public void subscribeToRootRefreshEvents(@NotNull final Collection<VirtualFile> roots, @NotNull final VcsLogRefresher refresher) {
-    myProject.getMessageBus().connect(myProject).subscribe(GitRepository.GIT_REPO_CHANGE, new GitRepositoryChangeListener() {
+  public Disposable subscribeToRootRefreshEvents(@NotNull final Collection<VirtualFile> roots, @NotNull final VcsLogRefresher refresher) {
+    MessageBusConnection connection = myProject.getMessageBus().connect(myProject);
+    connection.subscribe(GitRepository.GIT_REPO_CHANGE, new GitRepositoryChangeListener() {
       @Override
       public void repositoryChanged(@NotNull GitRepository repository) {
         VirtualFile root = repository.getRoot();
@@ -394,6 +421,7 @@ public class GitLogProvider implements VcsLogProvider {
         }
       }
     });
+    return connection;
   }
 
   @NotNull
@@ -407,17 +435,24 @@ public class GitLogProvider implements VcsLogProvider {
 
     List<String> filterParameters = ContainerUtil.newArrayList();
 
-    if (filterCollection.getBranchFilter() != null && !filterCollection.getBranchFilter().getBranchNames().isEmpty()) {
+    VcsLogBranchFilter branchFilter = filterCollection.getBranchFilter();
+    if (branchFilter != null) {
       GitRepository repository = getRepository(root);
       assert repository != null : "repository is null for root " + root + " but was previously reported as 'ready'";
 
+      Collection<GitBranch> branches = ContainerUtil
+        .newArrayList(ContainerUtil.concat(repository.getBranches().getLocalBranches(), repository.getBranches().getRemoteBranches()));
+      Collection<String> branchNames = GitBranchUtil.convertBranchesToNames(branches);
+      Collection<String> predefinedNames = ContainerUtil.list("HEAD");
+
       boolean atLeastOneBranchExists = false;
-      for (String branchName : filterCollection.getBranchFilter().getBranchNames()) {
-        if (branchName.equals("HEAD") || repository.getBranches().findBranchByName(branchName) != null) {
+      for (String branchName : ContainerUtil.concat(branchNames, predefinedNames)) {
+        if (branchFilter.matches(branchName)) {
           filterParameters.add(branchName);
           atLeastOneBranchExists = true;
         }
       }
+
       if (!atLeastOneBranchExists) { // no such branches in this repository => filter matches nothing
         return Collections.emptyList();
       }
@@ -428,9 +463,8 @@ public class GitLogProvider implements VcsLogProvider {
 
     if (filterCollection.getUserFilter() != null) {
       String authorFilter =
-        StringUtil.join(ContainerUtil.map(filterCollection.getUserFilter().getUserNames(root), UserNameRegex.INSTANCE), "|");
-      filterParameters.add(prepareParameter("author", StringUtil.escapeBackSlashes(authorFilter)));
-      filterParameters.add("--extended-regexp"); // extended regexp required for correctly filtering user names
+        StringUtil.join(ContainerUtil.map(filterCollection.getUserFilter().getUserNames(root), UserNameRegex.BASIC_INSTANCE), "\\|");
+      filterParameters.add(prepareParameter("author", authorFilter));
     }
 
     if (filterCollection.getDateFilter() != null) {
@@ -446,30 +480,30 @@ public class GitLogProvider implements VcsLogProvider {
 
     if (filterCollection.getTextFilter() != null) {
       String textFilter = filterCollection.getTextFilter().getText();
-      filterParameters.add(prepareParameter("grep", textFilter));
+      filterParameters.add(prepareParameter("grep", StringUtil.escapeChars(textFilter, '[', ']')));
     }
 
     filterParameters.add("--regexp-ignore-case"); // affects case sensitivity of any filter (except file filter)
     if (maxCount > 0) {
       filterParameters.add(prepareParameter("max-count", String.valueOf(maxCount)));
     }
-    filterParameters.add("--date-order");
 
     // note: structure filter must be the last parameter, because it uses "--" which separates parameters from paths
     if (filterCollection.getStructureFilter() != null) {
-      Collection<VirtualFile> files = filterCollection.getStructureFilter().getFiles();
+      Collection<FilePath> files = filterCollection.getStructureFilter().getFiles();
       if (!files.isEmpty()) {
+        filterParameters.add("--full-history");
         filterParameters.add("--simplify-merges");
         filterParameters.add("--");
-        for (VirtualFile file : files) {
+        for (FilePath file : files) {
           filterParameters.add(file.getPath());
         }
       }
     }
 
     List<TimedVcsCommit> commits = ContainerUtil.newArrayList();
-    GitHistoryUtils.readCommits(myProject, root, filterParameters, Consumer.EMPTY_CONSUMER, Consumer.EMPTY_CONSUMER,
-                                new CollectConsumer<TimedVcsCommit>(commits));
+    GitHistoryUtils.readCommits(myProject, root, filterParameters, EmptyConsumer.<VcsUser>getInstance(),
+                                EmptyConsumer.<VcsRef>getInstance(), new CollectConsumer<TimedVcsCommit>(commits));
     return commits;
   }
 
@@ -537,5 +571,4 @@ public class GitLogProvider implements VcsLogProvider {
   private static <T> Set<T> newHashSet(@NotNull Collection<T> initialCollection) {
     return new THashSet<T>(initialCollection);
   }
-
 }

@@ -15,6 +15,8 @@
  */
 package com.intellij.diff.contents;
 
+import com.intellij.diff.util.DiffUtil;
+import com.intellij.ide.GeneralSettings;
 import com.intellij.openapi.fileEditor.OpenFileDescriptor;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.project.Project;
@@ -22,12 +24,10 @@ import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.IOException;
-
 /**
  * Allows to compare files
  */
-public class FileContentImpl implements FileContent, BinaryFileContent {
+public class FileContentImpl extends DiffContentBase implements FileContent {
   @NotNull private final VirtualFile myFile;
   @Nullable private final Project myProject;
   @NotNull private final FileType myType;
@@ -42,7 +42,7 @@ public class FileContentImpl implements FileContent, BinaryFileContent {
   @Nullable
   @Override
   public OpenFileDescriptor getOpenFileDescriptor() {
-    if (myProject == null || myProject.isDefault()) return null;
+    if (myProject == null || myProject.isDefault() || !myFile.isValid()) return null;
     return new OpenFileDescriptor(myProject, myFile);
   }
 
@@ -59,17 +59,12 @@ public class FileContentImpl implements FileContent, BinaryFileContent {
   }
 
   @NotNull
-  @Override
-  public byte[] getBytes() throws IOException {
-    return myFile.contentsToByteArray();
-  }
-
-  @NotNull
   public String getFilePath() {
     return myFile.getPath();
   }
 
   @Override
   public void onAssigned(boolean isAssigned) {
+    if (isAssigned && GeneralSettings.getInstance().isSyncOnFrameActivation()) DiffUtil.markDirtyAndRefresh(true, false, false, myFile);
   }
 }

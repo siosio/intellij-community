@@ -16,8 +16,8 @@
 package com.intellij.diff.tools.simple;
 
 import com.intellij.diff.DiffContext;
+import com.intellij.diff.actions.AllLinesIterator;
 import com.intellij.diff.actions.BufferedLineIterator;
-import com.intellij.diff.actions.NavigationContextChecker;
 import com.intellij.diff.comparison.DiffTooBigException;
 import com.intellij.diff.fragments.LineFragment;
 import com.intellij.diff.requests.ContentDiffRequest;
@@ -28,15 +28,11 @@ import com.intellij.diff.tools.util.base.TextDiffViewerUtil;
 import com.intellij.diff.tools.util.side.TwosideTextDiffViewer;
 import com.intellij.diff.util.*;
 import com.intellij.diff.util.DiffUserDataKeysEx.ScrollToPolicy;
-import com.intellij.diff.util.DiffUtil.DocumentData;
-import com.intellij.icons.AllIcons;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.actionSystem.AnAction;
-import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.actionSystem.CommonDataKeys;
-import com.intellij.openapi.actionSystem.Separator;
-import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.diff.DiffBundle;
 import com.intellij.openapi.diff.DiffNavigationContext;
 import com.intellij.openapi.editor.Caret;
 import com.intellij.openapi.editor.Document;
@@ -46,11 +42,9 @@ import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.project.DumbAware;
-import com.intellij.openapi.util.Computable;
-import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.UserDataHolder;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.util.Function;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.*;
 
 import javax.swing.*;
@@ -60,7 +54,7 @@ import java.util.BitSet;
 import java.util.Iterator;
 import java.util.List;
 
-import static com.intellij.diff.util.DiffUtil.getLineCount;
+import static com.intellij.util.ObjectUtils.assertNotNull;
 
 public class SimpleDiffViewer extends TwosideTextDiffViewer {
   public static final Logger LOG = Logger.getInstance(SimpleDiffViewer.class);
@@ -69,8 +63,9 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
   @NotNull private final PrevNextDifferenceIterable myPrevNextDifferenceIterable;
   @NotNull private final StatusPanel myStatusPanel;
 
-  @NotNull private final List<SimpleDiffChange> myDiffChanges = new ArrayList<SimpleDiffChange>();
-  @NotNull private final List<SimpleDiffChange> myInvalidDiffChanges = new ArrayList<SimpleDiffChange>();
+  @NotNull private final List<SimpleDiffChange> myDiffChanges = new ArrayList<>();
+  @NotNull private final List<SimpleDiffChange> myInvalidDiffChanges = new ArrayList<>();
+  private boolean myIsContentsEqual;
 
   @NotNull private final MyFoldingModel myFoldingModel;
   @NotNull private final MyInitialScrollHelper myInitialScrollHelper = new MyInitialScrollHelper();
@@ -85,6 +80,11 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
     myFoldingModel = new MyFoldingModel(getEditors(), this);
 
     myModifierProvider = new ModifierProvider();
+
+    DiffUtil.registerAction(new ReplaceSelectedChangesAction(Side.LEFT, true), myPanel);
+    DiffUtil.registerAction(new AppendSelectedChangesAction(Side.LEFT, true), myPanel);
+    DiffUtil.registerAction(new ReplaceSelectedChangesAction(Side.RIGHT, true), myPanel);
+    DiffUtil.registerAction(new AppendSelectedChangesAction(Side.RIGHT, true), myPanel);
   }
 
   @Override
@@ -105,7 +105,7 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
   @NotNull
   @Override
   protected List<AnAction> createToolbarActions() {
-    List<AnAction> group = new ArrayList<AnAction>();
+    List<AnAction> group = new ArrayList<>();
 
     group.add(new MyIgnorePolicySettingAction());
     group.add(new MyHighlightPolicySettingAction());
@@ -114,13 +114,16 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
     group.add(new MyReadOnlyLockAction());
     group.add(myEditorSettingsAction);
 
+    group.add(Separator.getInstance());
+    group.addAll(super.createToolbarActions());
+
     return group;
   }
 
-  @Nullable
+  @NotNull
   @Override
   protected List<AnAction> createPopupActions() {
-    List<AnAction> group = new ArrayList<AnAction>();
+    List<AnAction> group = new ArrayList<>();
 
     group.add(Separator.getInstance());
     group.add(new MyIgnorePolicySettingAction().getPopupGroup());
@@ -130,19 +133,23 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
     group.add(new MyToggleAutoScrollAction());
     group.add(new MyToggleExpandByDefaultAction());
 
+    group.add(Separator.getInstance());
+    group.addAll(super.createPopupActions());
+
     return group;
   }
 
   @NotNull
   @Override
   protected List<AnAction> createEditorPopupActions() {
-    List<AnAction> group = new ArrayList<AnAction>();
+    List<AnAction> group = new ArrayList<>();
 
-    group.add(new ReplaceSelectedChangesAction());
-    group.add(new AppendSelectedChangesAction());
-    group.add(new RevertSelectedChangesAction());
+    group.add(new ReplaceSelectedChangesAction(Side.LEFT, false));
+    group.add(new AppendSelectedChangesAction(Side.LEFT, false));
+    group.add(new ReplaceSelectedChangesAction(Side.RIGHT, false));
+    group.add(new AppendSelectedChangesAction(Side.RIGHT, false));
+
     group.add(Separator.getInstance());
-
     group.addAll(super.createEditorPopupActions());
 
     return group;
@@ -188,70 +195,65 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
       final Document document1 = getContent1().getDocument();
       final Document document2 = getContent2().getDocument();
 
-      DocumentData data = ApplicationManager.getApplication().runReadAction(new Computable<DocumentData>() {
-        @Override
-        public DocumentData compute() {
-          return new DocumentData(document1.getImmutableCharSequence(), document2.getImmutableCharSequence(),
-                                  document1.getModificationStamp(), document2.getModificationStamp());
-        }
+      CharSequence[] texts = ReadAction.compute(() -> {
+        return new CharSequence[]{document1.getImmutableCharSequence(), document2.getImmutableCharSequence()};
       });
 
       List<LineFragment> lineFragments = null;
       if (getHighlightPolicy().isShouldCompare()) {
-        lineFragments = DiffUtil.compareWithCache(myRequest, data, getDiffConfig(), indicator);
+        lineFragments = DiffUtil.compare(myRequest, texts[0], texts[1], getDiffConfig(), indicator);
       }
 
-      boolean isEqualContents = (lineFragments == null || lineFragments.isEmpty()) &&
-                                StringUtil.equals(document1.getCharsSequence(), document2.getCharsSequence());
+      boolean isContentsEqual = (lineFragments == null || lineFragments.isEmpty()) &&
+                                StringUtil.equals(texts[0], texts[1]);
 
-      return apply(new CompareData(lineFragments, isEqualContents));
+      return apply(new CompareData(lineFragments, isContentsEqual));
     }
     catch (DiffTooBigException e) {
-      return applyNotification(DiffNotifications.DIFF_TOO_BIG);
+      return applyNotification(DiffNotifications.createDiffTooBig());
     }
     catch (ProcessCanceledException e) {
       throw e;
     }
     catch (Throwable e) {
       LOG.error(e);
-      return applyNotification(DiffNotifications.ERROR);
+      return applyNotification(DiffNotifications.createError());
     }
   }
 
   @NotNull
   private Runnable apply(@NotNull final CompareData data) {
-    return new Runnable() {
-      @Override
-      public void run() {
-        myFoldingModel.updateContext(myRequest, getFoldingModelSettings());
-        clearDiffPresentation();
+    return () -> {
+      myFoldingModel.updateContext(myRequest, getFoldingModelSettings());
+      clearDiffPresentation();
 
-        if (data.isEqualContent()) myPanel.addNotification(DiffNotifications.EQUAL_CONTENTS);
-
-        if (data.getFragments() != null) {
-          for (LineFragment fragment : data.getFragments()) {
-            myDiffChanges.add(new SimpleDiffChange(SimpleDiffViewer.this, fragment, getHighlightPolicy().isFineFragments()));
-          }
-        }
-
-        myFoldingModel.install(data.getFragments(), myRequest, getFoldingModelSettings());
-
-        myInitialScrollHelper.onRediff();
-
-        myContentPanel.repaintDivider();
-        myStatusPanel.update();
+      myIsContentsEqual = data.isContentsEqual();
+      if (data.isContentsEqual()) {
+        boolean equalCharsets = TextDiffViewerUtil.areEqualCharsets(getContents());
+        boolean equalSeparators = TextDiffViewerUtil.areEqualLineSeparators(getContents());
+        myPanel.addNotification(DiffNotifications.createEqualContents(equalCharsets, equalSeparators));
       }
+
+      if (data.getFragments() != null) {
+        for (LineFragment fragment : data.getFragments()) {
+          myDiffChanges.add(new SimpleDiffChange(this, fragment));
+        }
+      }
+
+      myFoldingModel.install(data.getFragments(), myRequest, getFoldingModelSettings());
+
+      myInitialScrollHelper.onRediff();
+
+      myContentPanel.repaintDivider();
+      myStatusPanel.update();
     };
   }
 
   @NotNull
   private Runnable applyNotification(@Nullable final JComponent notification) {
-    return new Runnable() {
-      @Override
-      public void run() {
-        clearDiffPresentation();
-        if (notification != null) myPanel.addNotification(notification);
-      }
+    return () -> {
+      clearDiffPresentation();
+      if (notification != null) myPanel.addNotification(notification);
     };
   }
 
@@ -276,6 +278,8 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
   //
 
   private void destroyChangedBlocks() {
+    myIsContentsEqual = false;
+
     for (SimpleDiffChange change : myDiffChanges) {
       change.destroyHighlighter();
     }
@@ -298,21 +302,19 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
     super.onBeforeDocumentChange(e);
     if (myDiffChanges.isEmpty()) return;
 
-    Side side = null;
-    if (e.getDocument() == getEditor(Side.LEFT).getDocument()) side = Side.LEFT;
-    if (e.getDocument() == getEditor(Side.RIGHT).getDocument()) side = Side.RIGHT;
+    List<Document> documents = ContainerUtil.map(getEditors(), Editor::getDocument);
+    Side side = Side.fromValue(documents, e.getDocument());
     if (side == null) {
       LOG.warn("Unknown document changed");
       return;
     }
 
-    int line1 = e.getDocument().getLineNumber(e.getOffset());
-    int line2 = e.getDocument().getLineNumber(e.getOffset() + e.getOldLength()) + 1;
+    LineRange lineRange = DiffUtil.getAffectedLineRange(e);
     int shift = DiffUtil.countLinesShift(e);
 
-    List<SimpleDiffChange> invalid = new ArrayList<SimpleDiffChange>();
+    List<SimpleDiffChange> invalid = new ArrayList<>();
     for (SimpleDiffChange change : myDiffChanges) {
-      if (change.processChange(line1, line2, shift, side)) {
+      if (change.processChange(lineRange.start, lineRange.end, shift, side)) {
         invalid.add(change);
       }
     }
@@ -321,12 +323,6 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
       myDiffChanges.removeAll(invalid);
       myInvalidDiffChanges.addAll(invalid);
     }
-  }
-
-  @Override
-  protected void onDocumentChange(@NotNull DocumentEvent e) {
-    super.onDocumentChange(e);
-    myFoldingModel.onDocumentChanged(e);
   }
 
   @CalledInAwt
@@ -351,15 +347,13 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
   }
 
   protected boolean doScrollToContext(@NotNull DiffNavigationContext context) {
-    ChangedLinesIterator changedLinesIterator = new ChangedLinesIterator(Side.RIGHT);
-    NavigationContextChecker checker = new NavigationContextChecker(changedLinesIterator, context);
-    int line = checker.contextMatchCheck();
+    ChangedLinesIterator changedLinesIterator = new ChangedLinesIterator();
+    int line = context.contextMatchCheck(changedLinesIterator);
     if (line == -1) {
       // this will work for the case, when spaces changes are ignored, and corresponding fragments are not reported as changed
       // just try to find target line  -> +-
-      AllLinesIterator allLinesIterator = new AllLinesIterator(Side.RIGHT);
-      NavigationContextChecker checker2 = new NavigationContextChecker(allLinesIterator, context);
-      line = checker2.contextMatchCheck();
+      AllLinesIterator allLinesIterator = new AllLinesIterator(getEditor(Side.RIGHT).getDocument());
+      line = context.contextMatchCheck(allLinesIterator);
     }
     if (line == -1) return false;
 
@@ -400,6 +394,10 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
     return super.getSyncScrollSupport();
   }
 
+  protected boolean isEditable(@NotNull Side side) {
+    return DiffUtil.isEditable(getEditor(side));
+  }
+
   //
   // Misc
   //
@@ -414,7 +412,7 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
   private List<SimpleDiffChange> getSelectedChanges(@NotNull Side side) {
     final BitSet lines = DiffUtil.getSelectedLines(getEditor(side));
 
-    List<SimpleDiffChange> affectedChanges = new ArrayList<SimpleDiffChange>();
+    List<SimpleDiffChange> affectedChanges = new ArrayList<>();
     for (int i = myDiffChanges.size() - 1; i >= 0; i--) {
       SimpleDiffChange change = myDiffChanges.get(i);
       int line1 = change.getStartLine(side);
@@ -493,50 +491,53 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
   //
 
   private abstract class ApplySelectedChangesActionBase extends AnAction implements DumbAware {
-    private final boolean myModifyOpposite;
+    @NotNull protected final Side myModifiedSide;
+    private final boolean myShortcut;
 
-    public ApplySelectedChangesActionBase(@Nullable String text,
-                                          @Nullable String description,
-                                          @Nullable Icon icon,
-                                          boolean modifyOpposite) {
-      super(text, description, icon);
-      myModifyOpposite = modifyOpposite;
+    public ApplySelectedChangesActionBase(@NotNull Side modifiedSide, boolean shortcut) {
+      myModifiedSide = modifiedSide;
+      myShortcut = shortcut;
     }
 
     @Override
     public void update(@NotNull AnActionEvent e) {
+      if (myShortcut) {
+        // consume shortcut even if there are nothing to do - avoid calling some other action
+        e.getPresentation().setEnabledAndVisible(true);
+        return;
+      }
+
       Editor editor = e.getData(CommonDataKeys.EDITOR);
-      if (editor != getEditor1() && editor != getEditor2()) {
+      Side side = Side.fromValue(getEditors(), editor);
+      if (side == null || !isVisible(side)) {
         e.getPresentation().setEnabledAndVisible(false);
         return;
       }
 
-      Side side = Side.fromLeft(editor == getEditor(Side.LEFT));
-      Editor modifiedEditor = getEditor(side.other(myModifyOpposite));
-
-      if (!DiffUtil.isEditable(modifiedEditor)) {
+      if (!isEditable(myModifiedSide)) {
         e.getPresentation().setEnabledAndVisible(false);
         return;
       }
 
+      e.getPresentation().setText(getText(side));
       e.getPresentation().setIcon(getIcon(side));
+
       e.getPresentation().setVisible(true);
       e.getPresentation().setEnabled(isSomeChangeSelected(side));
     }
 
     @Override
     public void actionPerformed(@NotNull final AnActionEvent e) {
-      Editor editor = e.getRequiredData(CommonDataKeys.EDITOR);
-      final Side side = Side.fromLeft(editor == getEditor(Side.LEFT));
+      Editor editor = e.getData(CommonDataKeys.EDITOR);
+      final Side side = assertNotNull(Side.fromValue(getEditors(), editor));
       final List<SimpleDiffChange> selectedChanges = getSelectedChanges(side);
+      if (selectedChanges.isEmpty()) return;
 
-      Editor modifiedEditor = getEditor(side.other(myModifyOpposite));
+      if (!isEditable(myModifiedSide)) return;
+
       String title = e.getPresentation().getText() + " selected changes";
-      DiffUtil.executeWriteCommand(modifiedEditor.getDocument(), e.getProject(), title, new Runnable() {
-        @Override
-        public void run() {
-          apply(side, selectedChanges);
-        }
+      DiffUtil.executeWriteCommand(getEditor(myModifiedSide).getDocument(), e.getProject(), title, () -> {
+        apply(selectedChanges);
       });
     }
 
@@ -556,66 +557,80 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
       return false;
     }
 
+    protected boolean isBothEditable() {
+      return isEditable(Side.LEFT) && isEditable(Side.RIGHT);
+    }
+
+    protected abstract boolean isVisible(@NotNull Side side);
+
     @NotNull
+    protected abstract String getText(@NotNull Side side);
+
+    @Nullable
     protected abstract Icon getIcon(@NotNull Side side);
 
     @CalledWithWriteLock
-    protected abstract void apply(@NotNull Side side, @NotNull List<SimpleDiffChange> changes);
+    protected abstract void apply(@NotNull List<SimpleDiffChange> changes);
   }
 
   private class ReplaceSelectedChangesAction extends ApplySelectedChangesActionBase {
-    public ReplaceSelectedChangesAction() {
-      super("Replace", null, AllIcons.Diff.Arrow, true);
+    public ReplaceSelectedChangesAction(@NotNull Side focusedSide, boolean shortcut) {
+      super(focusedSide.other(), shortcut);
+      setShortcutSet(ActionManager.getInstance().getAction(focusedSide.select("Diff.ApplyLeftSide", "Diff.ApplyRightSide")).getShortcutSet());
+    }
+
+    @Override
+    protected boolean isVisible(@NotNull Side side) {
+      return !isBothEditable() || side == myModifiedSide.other();
     }
 
     @NotNull
     @Override
+    protected String getText(@NotNull Side side) {
+      return "Accept";
+    }
+
+    @Nullable
+    @Override
     protected Icon getIcon(@NotNull Side side) {
-      return side.isLeft() ? AllIcons.Diff.ArrowRight : AllIcons.Diff.Arrow;
+      return DiffUtil.getArrowIcon(myModifiedSide.other());
     }
 
     @Override
-    protected void apply(@NotNull Side side, @NotNull List<SimpleDiffChange> changes) {
+    protected void apply(@NotNull List<SimpleDiffChange> changes) {
       for (SimpleDiffChange change : changes) {
-        replaceChange(change, side);
+        replaceChange(change, myModifiedSide.other());
       }
     }
   }
 
   private class AppendSelectedChangesAction extends ApplySelectedChangesActionBase {
-    public AppendSelectedChangesAction() {
-      super("Insert", null, AllIcons.Diff.ArrowLeftDown, true);
+    public AppendSelectedChangesAction(@NotNull Side focusedSide, boolean shortcut) {
+      super(focusedSide.other(), shortcut);
+      setShortcutSet(ActionManager.getInstance().getAction(focusedSide.select("Diff.AppendLeftSide", "Diff.AppendRightSide")).getShortcutSet());
+    }
+
+    @Override
+    protected boolean isVisible(@NotNull Side side) {
+      return !isBothEditable() || side == myModifiedSide.other();
     }
 
     @NotNull
     @Override
-    protected Icon getIcon(@NotNull Side side) {
-      return side.isLeft() ? AllIcons.Diff.ArrowRightDown : AllIcons.Diff.ArrowLeftDown;
+    protected String getText(@NotNull Side side) {
+      return isBothEditable() ? myModifiedSide.select("Append to the Left", "Append to the Right") : "Append";
     }
 
-    @Override
-    protected void apply(@NotNull Side side, @NotNull List<SimpleDiffChange> changes) {
-      for (SimpleDiffChange change : changes) {
-        appendChange(change, side);
-      }
-    }
-  }
-
-  private class RevertSelectedChangesAction extends ApplySelectedChangesActionBase {
-    public RevertSelectedChangesAction() {
-      super("Revert", null, AllIcons.Diff.Remove, false);
-    }
-
-    @NotNull
+    @Nullable
     @Override
     protected Icon getIcon(@NotNull Side side) {
-      return AllIcons.Diff.Remove;
+      return DiffUtil.getArrowDownIcon(myModifiedSide.other());
     }
 
     @Override
-    protected void apply(@NotNull Side side, @NotNull List<SimpleDiffChange> changes) {
+    protected void apply(@NotNull List<SimpleDiffChange> changes) {
       for (SimpleDiffChange change : changes) {
-        replaceChange(change, side.other());
+        appendChange(change, myModifiedSide.other());
       }
     }
   }
@@ -682,47 +697,10 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
   // Scroll from annotate
   //
 
-  private class AllLinesIterator implements Iterator<Pair<Integer, CharSequence>> {
-    @NotNull private final Side mySide;
-    @NotNull private final Document myDocument;
-    private int myLine = 0;
-
-    private AllLinesIterator(@NotNull Side side) {
-      mySide = side;
-
-      myDocument = getEditor(mySide).getDocument();
-    }
-
-    @Override
-    public boolean hasNext() {
-      return myLine < getLineCount(myDocument);
-    }
-
-    @Override
-    public Pair<Integer, CharSequence> next() {
-      int offset1 = myDocument.getLineStartOffset(myLine);
-      int offset2 = myDocument.getLineEndOffset(myLine);
-
-      CharSequence text = myDocument.getImmutableCharSequence().subSequence(offset1, offset2);
-
-      Pair<Integer, CharSequence> pair = new Pair<Integer, CharSequence>(myLine, text);
-      myLine++;
-
-      return pair;
-    }
-
-    @Override
-    public void remove() {
-      throw new UnsupportedOperationException();
-    }
-  }
-
   private class ChangedLinesIterator extends BufferedLineIterator {
-    @NotNull private final Side mySide;
     private int myIndex = 0;
 
-    private ChangedLinesIterator(@NotNull Side side) {
-      mySide = side;
+    private ChangedLinesIterator() {
       init();
     }
 
@@ -736,10 +714,10 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
       SimpleDiffChange change = myDiffChanges.get(myIndex);
       myIndex++;
 
-      int line1 = change.getStartLine(mySide);
-      int line2 = change.getEndLine(mySide);
+      int line1 = change.getStartLine(Side.RIGHT);
+      int line2 = change.getEndLine(Side.RIGHT);
 
-      Document document = getEditor(mySide).getDocument();
+      Document document = getEditor(Side.RIGHT).getDocument();
 
       for (int i = line1; i < line2; i++) {
         int offset1 = document.getLineStartOffset(i);
@@ -776,6 +754,7 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
       return getTextSettings().isEnableSyncScroll();
     }
 
+    @Override
     public int transfer(@NotNull Side baseSide, int line) {
       if (myDiffChanges.isEmpty()) {
         return line;
@@ -824,19 +803,25 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
   }
 
   private class MyStatusPanel extends StatusPanel {
+    @Nullable
     @Override
-    protected int getChangesCount() {
-      return myDiffChanges.size() + myInvalidDiffChanges.size();
+    protected String getMessage() {
+      if (getHighlightPolicy() == HighlightPolicy.DO_NOT_HIGHLIGHT) return DiffBundle.message("diff.highlighting.disabled.text");
+      int changesCount = myDiffChanges.size() + myInvalidDiffChanges.size();
+      if (changesCount == 0 && !myIsContentsEqual) {
+        return DiffBundle.message("diff.all.differences.ignored.text");
+      }
+      return DiffBundle.message("diff.count.differences.status.text", changesCount);
     }
   }
 
   private static class CompareData {
     @Nullable private final List<LineFragment> myFragments;
-    private final boolean myEqualContent;
+    private final boolean myIsContentsEqual;
 
-    public CompareData(@Nullable List<LineFragment> fragments, boolean equalContent) {
+    public CompareData(@Nullable List<LineFragment> fragments, boolean isContentsEqual) {
       myFragments = fragments;
-      myEqualContent = equalContent;
+      myIsContentsEqual = isContentsEqual;
     }
 
     @Nullable
@@ -844,8 +829,8 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
       return myFragments;
     }
 
-    public boolean isEqualContent() {
-      return myEqualContent;
+    public boolean isContentsEqual() {
+      return myIsContentsEqual;
     }
   }
 
@@ -872,15 +857,11 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
     public void install(@Nullable final List<LineFragment> fragments,
                         @NotNull UserDataHolder context,
                         @NotNull FoldingModelSupport.Settings settings) {
-      Iterator<int[]> it = map(fragments, new Function<LineFragment, int[]>() {
-        @Override
-        public int[] fun(LineFragment fragment) {
-          return new int[]{
-            fragment.getStartLine1(),
-            fragment.getEndLine1(),
-            fragment.getStartLine2(),
-            fragment.getEndLine2()};
-        }
+      Iterator<int[]> it = map(fragments, fragment -> new int[]{
+        fragment.getStartLine1(),
+        fragment.getEndLine1(),
+        fragment.getStartLine2(),
+        fragment.getEndLine2()
       });
       install(it, context, settings);
     }

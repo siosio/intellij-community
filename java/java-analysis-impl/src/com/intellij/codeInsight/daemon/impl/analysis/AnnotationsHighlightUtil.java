@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.intellij.codeInsight.daemon.impl.analysis;
 
+import com.intellij.codeInsight.AnnotationTargetUtil;
 import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInsight.daemon.JavaErrorMessages;
 import com.intellij.codeInsight.daemon.impl.HighlightInfo;
@@ -134,8 +135,7 @@ public class AnnotationsHighlightUtil {
         }
       }
 
-      String description = JavaErrorMessages.message("annotation.incompatible.types",
-                                                     formatReference(nameRef), JavaHighlightUtil.formatType(expectedType));
+      String description = JavaErrorMessages.message("incompatible.types", JavaHighlightUtil.formatType(expectedType), formatReference(nameRef) );
       return HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(value).descriptionAndTooltip(description).create();
     }
 
@@ -161,8 +161,7 @@ public class AnnotationsHighlightUtil {
         return null;
       }
 
-      String description = JavaErrorMessages.message("annotation.incompatible.types",
-                                                     JavaHighlightUtil.formatType(type), JavaHighlightUtil.formatType(expectedType));
+      String description = JavaErrorMessages.message("incompatible.types", JavaHighlightUtil.formatType(expectedType), JavaHighlightUtil.formatType(type));
       HighlightInfo info = HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(value).descriptionAndTooltip(description).create();
       QuickFixAction.registerQuickFixAction(info, QuickFixFactory.getInstance().createSurroundWithQuotesAnnotationParameterValueFix(value, expectedType));
       return info;
@@ -214,8 +213,8 @@ public class AnnotationsHighlightUtil {
 
       PsiClass container = getRepeatableContainer(metaAnno);
       if (container != null) {
-        PsiAnnotation.TargetType[] targets = PsiImplUtil.getTargetsForLocation(owner);
-        PsiAnnotation.TargetType applicable = PsiImplUtil.findApplicableTarget(container, targets);
+        PsiAnnotation.TargetType[] targets = AnnotationTargetUtil.getTargetsForLocation(owner);
+        PsiAnnotation.TargetType applicable = AnnotationTargetUtil.findAnnotationTarget(container, targets);
         if (applicable == null) {
           String target = JavaErrorMessages.message("annotation.target." + targets[0]);
           String message = JavaErrorMessages.message("annotation.container.not.applicable", container.getName(), target);
@@ -262,7 +261,7 @@ public class AnnotationsHighlightUtil {
     if (nameRef == null) return null;
     PsiClass aClass = (PsiClass)nameRef.resolve();
     if (aClass != null && aClass.isAnnotationType()) {
-      Set<String> names = new HashSet<String>();
+      Set<String> names = new HashSet<>();
       PsiNameValuePair[] attributes = annotation.getParameterList().getAttributes();
       for (PsiNameValuePair attribute : attributes) {
         final String name = attribute.getName();
@@ -275,7 +274,7 @@ public class AnnotationsHighlightUtil {
       }
 
       PsiMethod[] annotationMethods = aClass.getMethods();
-      List<String> missed = new ArrayList<String>();
+      List<String> missed = new ArrayList<>();
       for (PsiMethod method : annotationMethods) {
         if (PsiUtil.isAnnotationMethod(method)) {
           PsiAnnotationMethod annotationMethod = (PsiAnnotationMethod)method;
@@ -321,12 +320,11 @@ public class AnnotationsHighlightUtil {
   }
 
   @Nullable
-  static HighlightInfo checkValidAnnotationType(final PsiTypeElement typeElement) {
-    PsiType type = typeElement.getType();
-    if (type.accept(AnnotationReturnTypeVisitor.INSTANCE).booleanValue()) {
+  static HighlightInfo checkValidAnnotationType(PsiType type, final PsiTypeElement typeElement) {
+    if (type != null && type.accept(AnnotationReturnTypeVisitor.INSTANCE).booleanValue()) {
       return null;
     }
-    String description = JavaErrorMessages.message("annotation.invalid.annotation.member.type");
+    String description = JavaErrorMessages.message("annotation.invalid.annotation.member.type", type != null ? type.getPresentableText() : null);
     return HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(typeElement).descriptionAndTooltip(description).create();
   }
 
@@ -347,7 +345,7 @@ public class AnnotationsHighlightUtil {
     if (nameRef == null) return null;
 
     PsiAnnotationOwner owner = annotation.getOwner();
-    PsiAnnotation.TargetType[] targets = PsiImplUtil.getTargetsForLocation(owner);
+    PsiAnnotation.TargetType[] targets = AnnotationTargetUtil.getTargetsForLocation(owner);
     if (owner == null || targets.length == 0) {
       String message = JavaErrorMessages.message("annotation.not.allowed.here");
       return annotationError(annotation, message);
@@ -358,7 +356,7 @@ public class AnnotationsHighlightUtil {
       if (info != null) return info;
     }
 
-    PsiAnnotation.TargetType applicable = PsiImplUtil.findApplicableTarget(annotation, targets);
+    PsiAnnotation.TargetType applicable = AnnotationTargetUtil.findAnnotationTarget(annotation, targets);
     if (applicable == PsiAnnotation.TargetType.UNKNOWN) return null;
 
     if (applicable == null) {
@@ -507,7 +505,7 @@ public class AnnotationsHighlightUtil {
   static HighlightInfo checkCyclicMemberType(PsiTypeElement typeElement, PsiClass aClass) {
     LOG.assertTrue(aClass.isAnnotationType());
     PsiType type = typeElement.getType();
-    final Set<PsiClass> checked = new HashSet<PsiClass>();
+    final Set<PsiClass> checked = new HashSet<>();
     if (cyclicDependencies(aClass, type, checked, aClass.getManager())) {
       String description = JavaErrorMessages.message("annotation.cyclic.element.type");
       return HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(typeElement).descriptionAndTooltip(description).create();
@@ -598,7 +596,7 @@ public class AnnotationsHighlightUtil {
     PsiAnnotationMemberValue value = attributes[0].getValue();
     if (!(value instanceof PsiArrayInitializerMemberValue)) return null;
     PsiAnnotationMemberValue[] arrayInitializers = ((PsiArrayInitializerMemberValue) value).getInitializers();
-    Set<PsiElement> targets = new HashSet<PsiElement>();
+    Set<PsiElement> targets = new HashSet<>();
     for (PsiAnnotationMemberValue initializer : arrayInitializers) {
       if (initializer instanceof PsiReferenceExpression) {
         PsiElement target = ((PsiReferenceExpression) initializer).resolve();
@@ -676,9 +674,9 @@ public class AnnotationsHighlightUtil {
       }
     }
 
-    Set<PsiAnnotation.TargetType> repeatableTargets = PsiImplUtil.getAnnotationTargets((PsiClass)target);
+    Set<PsiAnnotation.TargetType> repeatableTargets = AnnotationTargetUtil.getAnnotationTargets((PsiClass)target);
     if (repeatableTargets != null) {
-      Set<PsiAnnotation.TargetType> containerTargets = PsiImplUtil.getAnnotationTargets(container);
+      Set<PsiAnnotation.TargetType> containerTargets = AnnotationTargetUtil.getAnnotationTargets(container);
       if (containerTargets != null && !repeatableTargets.containsAll(containerTargets)) {
         return JavaErrorMessages.message("annotation.container.wide.target", container.getQualifiedName());
       }
@@ -709,7 +707,7 @@ public class AnnotationsHighlightUtil {
     }
 
     PsiMethod method = (PsiMethod)owner;
-    if (isStatic(method) || (method).isConstructor() && isStatic(method.getContainingClass())) {
+    if (isStatic(method) || method.isConstructor() && isStatic(method.getContainingClass())) {
       String text = JavaErrorMessages.message("receiver.static.context");
       return HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(parameter.getIdentifier()).descriptionAndTooltip(text).create();
     }
@@ -769,6 +767,7 @@ public class AnnotationsHighlightUtil {
         if (field instanceof PsiEnumConstant) {
           String name = ((PsiEnumConstant)field).getName();
           try {
+            //noinspection ConstantConditions
             return Enum.valueOf(RetentionPolicy.class, name);
           }
           catch (Exception e) {

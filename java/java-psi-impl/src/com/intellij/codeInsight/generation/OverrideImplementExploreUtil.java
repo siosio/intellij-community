@@ -52,6 +52,14 @@ public class OverrideImplementExploreUtil {
       PsiUtilCore.ensureValid(method);
 
       if (method.hasModifierProperty(PsiModifier.STATIC) || !resolveHelper.isAccessible(method, aClass, aClass)) continue;
+      for (HierarchicalMethodSignature superMethodSignature : signature.getSuperSignatures()) {
+        final PsiMethod superMethod = superMethodSignature.getMethod();
+        if (PsiUtil.getAccessLevel(superMethod.getModifierList()) > PsiUtil.getAccessLevel(method.getModifierList())) {
+          method = superMethod;
+          break;
+        }
+      }
+
       PsiClass hisClass = method.getContainingClass();
       if (hisClass == null) continue;
       // filter non-immediate super constructors
@@ -184,7 +192,7 @@ public class OverrideImplementExploreUtil {
           if (c1.isInheritor(c2, true)) return -1;
           if (c2.isInheritor(c1, true)) return 1;
 
-          return StringUtil.notNullize(c1.getName()).compareTo(StringUtil.notNullize(c2.getName()));
+          return StringUtil.notNullize(c1.getQualifiedName()).compareTo(StringUtil.notNullize(c2.getQualifiedName()));
         }
         return m1.getTextOffset() - m2.getTextOffset();
       }

@@ -32,6 +32,7 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 import java.io.File;
 import java.util.*;
+import java.util.concurrent.ExecutionException;
 
 public class PluginGroups {
   static final String CORE = "Core";
@@ -49,18 +50,47 @@ public class PluginGroups {
   private IdeaPluginDescriptor[] myAllPlugins;
   private boolean myInitialized = false;
   private Set<String> myFeaturedIds = new HashSet<String>();
+  private Runnable myLoadingCallback = null;
 
   public PluginGroups() {
-    myAllPlugins = PluginManagerCore.loadDescriptors(null);
-    try {
-      myPluginsFromRepository.addAll(RepositoryHelper.loadPlugins(null));
-    }
-    catch (Exception e) {
-      //OK, it's offline
-    }
+    myAllPlugins = PluginManagerCore.loadDescriptors(null, ContainerUtil.<String>newArrayList());
+    SwingWorker worker = new SwingWorker<List<IdeaPluginDescriptor>, Object>() {
+      @Override
+      protected List<IdeaPluginDescriptor> doInBackground() throws Exception {
+        try {
+          return RepositoryHelper.loadPlugins(null);
+        }
+        catch (Exception e) {
+          //OK, it's offline
+          return Collections.emptyList();
+        }
+      }
+
+      @Override
+      protected void done() {
+        try {
+          myPluginsFromRepository.addAll(get());
+          if (myLoadingCallback != null) myLoadingCallback.run();
+        }
+        catch (InterruptedException e) {
+          if (myLoadingCallback != null) myLoadingCallback.run();
+        }
+        catch (ExecutionException e) {
+          if (myLoadingCallback != null) myLoadingCallback.run();
+        }
+      }
+    };
+    worker.execute();
     PluginManagerCore.loadDisabledPlugins(new File(PathManager.getConfigPath()).getPath(), myDisabledPluginIds);
 
     initGroups(myTree, myFeaturedPlugins);
+  }
+
+  public void setLoadingCallback(Runnable loadingCallback) {
+    myLoadingCallback = loadingCallback;
+    if (!myPluginsFromRepository.isEmpty()) {
+      myLoadingCallback.run();
+    }
   }
 
   protected void
@@ -91,21 +121,21 @@ public class PluginGroups {
       "com.intellij.spring," +
       "com.intellij.spring.webflow," +
       "com.intellij.spring.ws,com.intellij.aop",
-      "J2EE:com.intellij.javaee.batch," +
+      "Java EE:com.intellij.javaee.batch," +
       "com.intellij.beanValidation," +
       "com.intellij.cdi," +
       "com.intellij.javaee," +
       "com.intellij.jsf," +
       "com.intellij.javaee.extensions," +
       "com.jetbrains.restWebServices," +
-      "Java EE: Web Services (JAX-WS)," +
+      "Web Services (JAX-WS)," +
       "com.intellij.javaee.webSocket," +
       "com.intellij.jsp," +
       "com.intellij.persistence",
       "com.intellij.freemarker",
       "com.intellij.tapestry",
       "com.intellij.velocity",
-      "GuiceyIDEA",
+      "Guice",
       "com.intellij.aspectj",
       "Osmorc"
     )));
@@ -186,11 +216,12 @@ public class PluginGroups {
                         "Web Development:Provides live edit HTML/CSS/JavaScript:com.intellij.plugins.html.instantEditing");
     addVimPlugin(featuredPlugins);
     featuredPlugins.put("NodeJS", "JavaScript:Node.js integration:NodeJS");
+    featuredPlugins.put("Angular", "Web Development:Angular 1&2 support:AngularJS");
     featuredPlugins.put("Atlassian Connector",
-                        "Tools Integration:Integration for Atlassian JIRA, Bamboo, Cricible, FishEye:atlassian-idea-plugin");
+                        "Tools Integration:Integration for Atlassian JIRA, Bamboo, Crucible, FishEye:atlassian-idea-plugin");
   }
 
-  protected static void addVcsGroup(Map<String, Pair<Icon, List<String>>> tree) {
+  public static void addVcsGroup(Map<String, Pair<Icon, List<String>>> tree) {
     tree.put("Version Controls", Pair.create(PlatformImplIcons.VersionControls, Arrays.asList(
       "ClearcasePlugin",
       "CVS",
@@ -203,24 +234,28 @@ public class PluginGroups {
     )));
   }
 
-  protected static void addVimPlugin(Map<String, String> featuredPlugins) {
+  public static void addVimPlugin(Map<String, String> featuredPlugins) {
     featuredPlugins.put("IdeaVim", "Editor:Emulates Vim editor:" + IDEA_VIM_PLUGIN_ID);
   }
 
-  protected static void addLuaPlugin(Map<String, String> featuredPlugins) {
-    featuredPlugins.put("Lua", "Custom Languages:Lua language integration:Lua");
+  public static void addLuaPlugin(Map<String, String> featuredPlugins) {
+    featuredPlugins.put("Lua", "Custom Languages:Lua language support:Lua");
   }
 
-  protected static void addMarkdownPlugin(Map<String, String> featuredPlugins) {
-    featuredPlugins.put("Markdown", "Custom Languages:Markdown language integration:net.nicoulaj.idea.markdown");
+  public static void addGoPlugin(Map<String, String> featuredPlugins) {
+    featuredPlugins.put("Go", "Custom Languages:Go language support:ro.redeul.google.go");
   }
 
-  protected static void addConfigurationServerPlugin(Map<String, String> featuredPlugins) {
+  public static void addMarkdownPlugin(Map<String, String> featuredPlugins) {
+    featuredPlugins.put("Markdown", "Custom Languages:Markdown language support:org.intellij.plugins.markdown");
+  }
+
+  public static void addConfigurationServerPlugin(Map<String, String> featuredPlugins) {
     featuredPlugins.put("Configuration Server",
                         "Team Work:Supports sharing settings between installations of IntelliJ Platform based products used by the same developer on different computers:IdeaServerPlugin");
   }
 
-  protected static void addTeamCityPlugin(Map<String, String> featuredPlugins) {
+  public static void addTeamCityPlugin(Map<String, String> featuredPlugins) {
     featuredPlugins.put("TeamCity Integration",
                         "Tools Integration:Integration with JetBrains TeamCity - innovative solution for continuous integration and build management:Jetbrains TeamCity Plugin");
   }
@@ -366,12 +401,7 @@ public class PluginGroups {
       }
     }
     else {
-      Condition<PluginId> condition = new Condition<PluginId>() {
-        @Override
-        public boolean value(PluginId id) {
-          return pluginId.equals(id.getIdString());
-        }
-      };
+      Condition<PluginId> condition = id -> pluginId.equals(id.getIdString());
       for (final IdeaPluginDescriptor plugin : myAllPlugins) {
         if (null != ContainerUtil.find(plugin.getDependentPluginIds(), condition) &&
             null == ContainerUtil.find(plugin.getOptionalDependentPluginIds(), condition)) {

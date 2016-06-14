@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,9 +14,6 @@
  * limitations under the License.
  */
 
-/**
- * @author cdr
- */
 package com.intellij.ide.projectView.impl;
 
 import com.intellij.icons.AllIcons;
@@ -36,6 +33,7 @@ import com.intellij.openapi.actionSystem.DefaultActionGroup;
 import com.intellij.openapi.actionSystem.Presentation;
 import com.intellij.openapi.actionSystem.ToggleAction;
 import com.intellij.openapi.project.DumbAware;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.JDOMExternalizerUtil;
@@ -156,8 +154,11 @@ public class ProjectViewPane extends AbstractProjectViewPSIPane {
         final PsiDirectory dir = (PsiDirectory)element;
         final ProjectTreeStructure treeStructure = (ProjectTreeStructure)myTreeStructure;
         PsiDirectory dirToUpdateFrom = dir;
-        if (!treeStructure.isFlattenPackages() && treeStructure.isHideEmptyMiddlePackages()) {
-          // optimization: this check makes sense only if flattenPackages == false && HideEmptyMiddle == true
+
+        // optimization
+        // isEmptyMiddleDirectory can be slow when project VFS is not fully loaded (initial dumb mode).
+        // It's easiest to disable the optimization in any dumb mode
+        if (!treeStructure.isFlattenPackages() && treeStructure.isHideEmptyMiddlePackages() && !DumbService.isDumb(myProject)) {
           while (dirToUpdateFrom != null && ProjectViewDirectoryHelper.getInstance(myProject).isEmptyMiddleDirectory(dirToUpdateFrom, true)) {
             dirToUpdateFrom = dirToUpdateFrom.getParentDirectory();
           }

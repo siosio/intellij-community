@@ -64,7 +64,6 @@ class ImportCandidateHolder implements Comparable<ImportCandidateHolder> {
    *                      For modules and packages it should be <em>qualified name of their parental package</em>
    *                      (empty for modules and packages located at source roots).
    *
-   * @see PythonReferenceImporter#proposeImportFix
    */
   public ImportCandidateHolder(@NotNull PsiElement importable, @NotNull PsiFileSystemItem file,
                                @Nullable PyImportElement importElement, @Nullable QualifiedName path, @Nullable String asName) {
@@ -141,12 +140,8 @@ class ImportCandidateHolder implements Comparable<ImportCandidateHolder> {
       sb.append(((PyFunction)myImportable).getParameterList().getPresentableText(false));
     }
     else if (myImportable instanceof PyClass) {
-      final List<String> supers = ContainerUtil.mapNotNull(((PyClass)myImportable).getSuperClasses(), new Function<PyClass, String>() {
-          @Override
-          public String fun(PyClass cls) {
-            return PyUtil.isObjectClass(cls) ? null : cls.getName();
-          }
-        });
+      final List<String> supers = ContainerUtil.mapNotNull(((PyClass)myImportable).getSuperClasses(null),
+                                                           cls -> PyUtil.isObjectClass(cls) ? null : cls.getName());
       if (!supers.isEmpty()) {
         sb.append("(");
         StringUtil.join(supers, ", ", sb);

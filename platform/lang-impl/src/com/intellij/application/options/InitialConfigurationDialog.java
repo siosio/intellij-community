@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,8 @@ import com.intellij.icons.AllIcons;
 import com.intellij.ide.DataManager;
 import com.intellij.ide.actions.CreateDesktopEntryAction;
 import com.intellij.ide.actions.CreateLauncherScriptAction;
+import com.intellij.ide.customize.CustomizeDesktopEntryStep;
+import com.intellij.ide.customize.CustomizeLauncherScriptStep;
 import com.intellij.ide.todo.TodoConfiguration;
 import com.intellij.ide.ui.LafComboBoxRenderer;
 import com.intellij.ide.ui.LafManager;
@@ -32,7 +34,6 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ApplicationNamesInfo;
-import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.application.impl.ApplicationImpl;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
@@ -164,22 +165,26 @@ public class InitialConfigurationDialog extends DialogWrapper {
     init();
 
     final boolean canCreateLauncherScript = canCreateLauncherScript();
-    myCreateScriptCheckbox.setVisible(canCreateLauncherScript);
-    myCreateScriptCheckbox.setSelected(canCreateLauncherScript);
     myCreateScriptPanel.setVisible(canCreateLauncherScript);
+    myCreateScriptCheckbox.setVisible(canCreateLauncherScript);
+    myCreateScriptCheckbox.setSelected(false);
     if (canCreateLauncherScript) {
-      myScriptPathTextField.setText("/usr/local/bin/" + CreateLauncherScriptAction.defaultScriptName());
+      myScriptPathTextField.setText(CreateLauncherScriptAction.defaultScriptPath());
+      myScriptPathTextField.setEnabled(false);
+      myCreateScriptCheckbox.addChangeListener(e -> myScriptPathTextField.setEnabled(myCreateScriptCheckbox.isSelected()));
     }
 
     final boolean canCreateDesktopEntry = canCreateDesktopEntry();
+    myCreateEntryPanel.setVisible(canCreateDesktopEntry);
     myCreateEntryCheckBox.setVisible(canCreateDesktopEntry);
     myCreateEntryCheckBox.setSelected(canCreateDesktopEntry);
-    myCreateEntryPanel.setVisible(canCreateDesktopEntry);
+    myGlobalEntryCheckBox.setSelected(false);
     if (canCreateDesktopEntry) {
-      myGlobalEntryCheckBox.setSelected(!PathManager.getHomePath().startsWith("/home"));
+      myGlobalEntryCheckBox.setEnabled(true);
+      myCreateEntryCheckBox.addChangeListener(e -> myGlobalEntryCheckBox.setEnabled(myCreateEntryCheckBox.isSelected()));
     }
 
-    myPreferencesLabel.setText("You can use "+ CommonBundle.settingsActionPath() + " to configure any of these settings later.");
+    myPreferencesLabel.setText("You can use " + CommonBundle.settingsActionPath() + " to configure any of these settings later.");
 
     Disposer.register(myDisposable, new Disposable() {
       @Override
@@ -209,11 +214,11 @@ public class InitialConfigurationDialog extends DialogWrapper {
   }
 
   protected boolean canCreateDesktopEntry() {
-    return CreateDesktopEntryAction.isAvailable();
+    return CustomizeDesktopEntryStep.isAvailable();
   }
 
   protected boolean canCreateLauncherScript() {
-    return CreateLauncherScriptAction.isAvailable();
+    return CustomizeLauncherScriptStep.isAvailable();
   }
 
   public JComboBox getKeymapComboBox() {
@@ -387,7 +392,7 @@ public class InitialConfigurationDialog extends DialogWrapper {
     else if (KeymapManager.MAC_OS_X_KEYMAP.equals(name) || KeymapManager.MAC_OS_X_10_5_PLUS_KEYMAP.equals(name)) {
       return SystemInfo.isMac;
     }
-    else if (KeymapManager.X_WINDOW_KEYMAP.equals(name) || "Default for GNOME".equals(name) || "Default for KDE".equals(name)) {
+    else if (KeymapManager.X_WINDOW_KEYMAP.equals(name) || "Default for GNOME".equals(name) || KeymapManager.KDE_KEYMAP.equals(name)) {
       return SystemInfo.isXWindow;
     }
     return true;
@@ -400,7 +405,7 @@ public class InitialConfigurationDialog extends DialogWrapper {
 
   @Override
   protected void doOKAction() {
-    final Project project = CommonDataKeys.PROJECT.getData(DataManager.getInstance().getDataContext(myMainPanel));
+    Project project = CommonDataKeys.PROJECT.getData(DataManager.getInstance().getDataContext(myMainPanel));
 
     super.doOKAction();
 
@@ -420,24 +425,40 @@ public class InitialConfigurationDialog extends DialogWrapper {
         @Override
         public void run(@NotNull final ProgressIndicator indicator) {
           indicator.setFraction(0.0);
+
           if (createScript) {
             indicator.setText("Creating launcher script...");
-            CreateLauncherScriptAction.createLauncherScript(project, pathName);
-            indicator.setFraction(0.5);
+            try {
+              CreateLauncherScriptAction.createLauncherScript(pathName);
+            }
+            catch (Exception e) {
+              CreateLauncherScriptAction.reportFailure(e, getProject());
+            }
           }
+
+          indicator.setFraction(0.5);
+
           if (createEntry) {
-            CreateDesktopEntryAction.createDesktopEntry(project, indicator, globalEntry);
+            indicator.setText("Creating desktop entry...");
+            try {
+              CreateDesktopEntryAction.createDesktopEntry(globalEntry);
+            }
+            catch (Exception e) {
+              CreateDesktopEntryAction.reportFailure(e, getProject());
+            }
           }
+
           indicator.setFraction(1.0);
         }
       });
     }
+
     UIManager.LookAndFeelInfo info = (UIManager.LookAndFeelInfo) myAppearanceComboBox.getSelectedItem();
     LafManagerImpl lafManager = (LafManagerImpl)LafManager.getInstance();
     if (info.getName().contains("Darcula") != (LafManager.getInstance().getCurrentLookAndFeel() instanceof DarculaLookAndFeelInfo)) {
       lafManager.setLookAndFeelAfterRestart(info);
-      int rc = Messages.showYesNoDialog(project, "IDE appearance settings will be applied after restart. Would you like to restart now?",
-                                        "IDE Appearance", Messages.getQuestionIcon());
+      String message = "IDE appearance settings will be applied after restart. Would you like to restart now?";
+      int rc = Messages.showYesNoDialog(project, message, "IDE Appearance", Messages.getQuestionIcon());
       if (rc == Messages.YES) {
         ((ApplicationImpl) ApplicationManager.getApplication()).restart(true);
       }

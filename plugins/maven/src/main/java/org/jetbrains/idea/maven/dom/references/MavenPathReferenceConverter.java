@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import com.intellij.openapi.util.Conditions;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.source.resolve.reference.impl.providers.FileReference;
@@ -139,29 +140,21 @@ public class MavenPathReferenceConverter extends PathReferenceConverter {
     };
 
     if (isAbsolutePath) {
-      set.addCustomization(FileReferenceSet.DEFAULT_PATH_EVALUATOR_OPTION, new Function<PsiFile, Collection<PsiFileSystemItem>>() {
-        @Override
-        public Collection<PsiFileSystemItem> fun(PsiFile file) {
-          VirtualFile virtualFile = file.getVirtualFile();
+      set.addCustomization(FileReferenceSet.DEFAULT_PATH_EVALUATOR_OPTION, file -> {
+        VirtualFile virtualFile = file.getVirtualFile();
 
-          if (virtualFile == null) {
-            return FileReferenceSet.ABSOLUTE_TOP_LEVEL.fun(file);
-          }
-
-          while (true) {
-            VirtualFile parent = virtualFile.getParent();
-            if (parent == null) break;
-            virtualFile = parent;
-          }
-
-          PsiDirectory root = file.getManager().findDirectory(virtualFile);
-
-          if (root == null) {
-            return FileReferenceSet.ABSOLUTE_TOP_LEVEL.fun(file);
-          }
-
-          return Collections.<PsiFileSystemItem>singletonList(root);
+        if (virtualFile == null) {
+          return FileReferenceSet.ABSOLUTE_TOP_LEVEL.fun(file);
         }
+
+        virtualFile = VfsUtil.getRootFile(virtualFile);
+        PsiDirectory root = file.getManager().findDirectory(virtualFile);
+
+        if (root == null) {
+          return FileReferenceSet.ABSOLUTE_TOP_LEVEL.fun(file);
+        }
+
+        return Collections.<PsiFileSystemItem>singletonList(root);
       });
     }
 

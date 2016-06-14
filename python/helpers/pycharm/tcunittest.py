@@ -1,3 +1,4 @@
+import os
 import traceback, sys
 from unittest import TestResult
 import datetime
@@ -37,13 +38,18 @@ def smart_str(s):
 
 
 class TeamcityTestResult(TestResult):
+  """
+  Set ``_jb_do_not_call_enter_matrix`` to prevent it from runnig "enter matrix"
+  """
+
   def __init__(self, stream=sys.stdout, *args, **kwargs):
     TestResult.__init__(self)
     for arg, value in kwargs.items():
       setattr(self, arg, value)
     self.output = stream
     self.messages = TeamcityServiceMessages(self.output, prepend_linebreak=True)
-    self.messages.testMatrixEntered()
+    if not "_jb_do_not_call_enter_matrix" in os.environ:
+      self.messages.testMatrixEntered()
     self.current_failed = False
     self.current_suite = None
     self.subtest_suite = None
@@ -151,8 +157,8 @@ class TeamcityTestResult(TestResult):
     self.current_failed = True
     self.messages.testIgnored(self.getTestName(test), message=reason)
 
-  def __getSuite(self, test):
-    if hasattr(test, "suite"):
+  def _getSuite(self, test):
+    try:
       suite = strclass(test.suite)
       suite_location = test.suite.location
       location = test.suite.abs_location
@@ -160,7 +166,7 @@ class TeamcityTestResult(TestResult):
         location = location + ":" + str(test.lineno)
       else:
         location = location + ":" + str(test.test.lineno)
-    else:
+    except AttributeError:
       import inspect
 
       try:
@@ -184,7 +190,7 @@ class TeamcityTestResult(TestResult):
     setattr(test, "startTime", datetime.datetime.now())
 
   def init_suite(self, test):
-    suite, location, suite_location = self.__getSuite(test)
+    suite, location, suite_location = self._getSuite(test)
     if suite != self.current_suite:
       if self.current_suite:
         self.messages.testSuiteFinished(self.current_suite)

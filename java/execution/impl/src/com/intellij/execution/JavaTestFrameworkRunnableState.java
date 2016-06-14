@@ -17,6 +17,7 @@ package com.intellij.execution;
 
 import com.intellij.ExtensionPoints;
 import com.intellij.debugger.impl.GenericDebuggerRunnerSettings;
+import com.intellij.diagnostic.logging.OutputFileUtil;
 import com.intellij.execution.configurations.*;
 import com.intellij.execution.process.OSProcessHandler;
 import com.intellij.execution.process.ProcessAdapter;
@@ -43,18 +44,15 @@ import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Disposer;
-import com.intellij.openapi.util.Getter;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.util.text.StringUtilRt;
 import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.psi.JavaPsiFacade;
 import com.intellij.psi.PsiDirectory;
 import com.intellij.psi.PsiPackage;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.GlobalSearchScopesCore;
-import com.intellij.rt.execution.CommandLineWrapper;
 import com.intellij.util.PathUtil;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
@@ -64,15 +62,36 @@ import org.jetbrains.jps.model.serialization.PathMacroUtil;
 import java.io.*;
 import java.net.InetAddress;
 import java.net.ServerSocket;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-public abstract class JavaTestFrameworkRunnableState<T extends ModuleBasedConfiguration<JavaRunConfigurationModule> & CommonJavaRunConfigurationParameters & SMRunnerConsolePropertiesProvider> extends JavaCommandLineState {
+public abstract class JavaTestFrameworkRunnableState<T extends
+  ModuleBasedConfiguration<JavaRunConfigurationModule>
+  & CommonJavaRunConfigurationParameters
+  & SMRunnerConsolePropertiesProvider> extends JavaCommandLineState implements RemoteConnectionCreator {
   private static final Logger LOG = Logger.getInstance("#" + JavaTestFrameworkRunnableState.class.getName());
   protected ServerSocket myServerSocket;
   protected File myTempFile;
   protected File myWorkingDirsFile = null;
+
+  private RemoteConnectionCreator remoteConnectionCreator;
+
+  public void setRemoteConnectionCreator(RemoteConnectionCreator remoteConnectionCreator) {
+    this.remoteConnectionCreator = remoteConnectionCreator;
+  }
+
+  @Nullable
+  @Override
+  public RemoteConnection createRemoteConnection(ExecutionEnvironment environment) {
+    return remoteConnectionCreator == null ? null : remoteConnectionCreator.createRemoteConnection(environment);
+  }
+
+  @Override
+  public boolean isPollConnection() {
+    return remoteConnectionCreator != null && remoteConnectionCreator.isPollConnection();
+  }
 
   public JavaTestFrameworkRunnableState(ExecutionEnvironment environment) {
     super(environment);
@@ -116,23 +135,27 @@ public abstract class JavaTestFrameworkRunnableState<T extends ModuleBasedConfig
     Disposer.register(getConfiguration().getProject(), consoleView);
 
     final OSProcessHandler handler = createHandler(executor);
+    
     consoleView.attachToProcess(handler);
+    final AbstractTestProxy root = viewer.getRoot();
+    if (root instanceof TestProxyRoot) {
+      ((TestProxyRoot)root).setHandler(handler);
+    }
     handler.addProcessListener(new ProcessAdapter() {
       @Override
       public void startNotified(ProcessEvent event) {
         if (getConfiguration().isSaveOutputToFile()) {
-          viewer.getRoot().setOutputFilePath(getConfiguration().getOutputFilePath());
+          final File file = OutputFileUtil.getOutputFile(getConfiguration());
+          root.setOutputFilePath(file != null ? file.getAbsolutePath() : null);
         }
       }
 
       @Override
       public void processTerminated(ProcessEvent event) {
-        Runnable runnable = new Runnable() {
-          public void run() {
-            viewer.getRoot().flush();
-            deleteTempFiles();
-            clear();
-          }
+        Runnable runnable = () -> {
+          root.flush();
+          deleteTempFiles();
+          clear();
         };
         UIUtil.invokeLaterIfNeeded(runnable);
         handler.removeProcessListener(this);
@@ -141,12 +164,7 @@ public abstract class JavaTestFrameworkRunnableState<T extends ModuleBasedConfig
 
     AbstractRerunFailedTestsAction rerunFailedTestsAction = testConsoleProperties.createRerunFailedTestsAction(consoleView);
     LOG.assertTrue(rerunFailedTestsAction != null);
-    rerunFailedTestsAction.setModelProvider(new Getter<TestFrameworkRunningModel>() {
-      @Override
-      public TestFrameworkRunningModel get() {
-        return viewer;
-      }
-    });
+    rerunFailedTestsAction.setModelProvider(() -> viewer);
 
     final DefaultExecutionResult result = new DefaultExecutionResult(consoleView, handler);
     result.setRestartActions(rerunFailedTestsAction);
@@ -164,23 +182,13 @@ public abstract class JavaTestFrameworkRunnableState<T extends ModuleBasedConfig
   @Override
   protected JavaParameters createJavaParameters() throws ExecutionException {
     final JavaParameters javaParameters = new JavaParameters();
+    javaParameters.setUseClasspathJar(true);
     final Module module = getConfiguration().getConfigurationModule().getModule();
 
     Project project = getConfiguration().getProject();
     Sdk jdk = module == null ? ProjectRootManager.getInstance(project).getProjectSdk() : ModuleRootManager.getInstance(module).getSdk();
     javaParameters.setJdk(jdk);
-
-
-    final Object[] patchers = Extensions.getExtensions(ExtensionPoints.JUNIT_PATCHER);
-    for (Object patcher : patchers) {
-      ((JUnitPatcher)patcher).patchJavaParameters(module, javaParameters);
-    }
-
-    // Append coverage parameters if appropriate
-    for (RunConfigurationExtension ext : Extensions.getExtensions(RunConfigurationExtension.EP_NAME)) {
-      ext.updateJavaParameters(getConfiguration(), javaParameters, getRunnerSettings());
-    }
-
+    
     final String parameters = getConfiguration().getProgramParameters();
     getConfiguration().setProgramParameters(null);
     try {
@@ -192,11 +200,25 @@ public abstract class JavaTestFrameworkRunnableState<T extends ModuleBasedConfig
     javaParameters.getClassPath().addFirst(JavaSdkUtil.getIdeaRtJarPath());
     configureClasspath(javaParameters);
 
+    final Object[] patchers = Extensions.getExtensions(ExtensionPoints.JUNIT_PATCHER);
+    for (Object patcher : patchers) {
+      ((JUnitPatcher)patcher).patchJavaParameters(module, javaParameters);
+    }
+
+    // Append coverage parameters if appropriate
+    for (RunConfigurationExtension ext : Extensions.getExtensions(RunConfigurationExtension.EP_NAME)) {
+      ext.updateJavaParameters(getConfiguration(), javaParameters, getRunnerSettings());
+    }
+
     if (!StringUtil.isEmptyOrSpaces(parameters)) {
-      javaParameters.getProgramParametersList().add("@name" + parameters);
+      javaParameters.getProgramParametersList().addAll(getNamedParams(parameters));
     }
 
     return javaParameters;
+  }
+
+  protected List<String> getNamedParams(String parameters) {
+    return Collections.singletonList("@name" + parameters);
   }
 
   private ServerSocket myForkSocket = null;
@@ -248,12 +270,7 @@ public abstract class JavaTestFrameworkRunnableState<T extends ModuleBasedConfig
       final PrintWriter writer = new PrintWriter(tempFile, CharsetToolkit.UTF8);
       try {
         if (JdkUtil.useDynamicClasspath(getConfiguration().getProject())) {
-          String classpath = PathUtil.getJarPathForClass(CommandLineWrapper.class);
-          final String utilRtPath = PathUtil.getJarPathForClass(StringUtilRt.class);
-          if (!classpath.equals(utilRtPath)) {
-            classpath += File.pathSeparator + utilRtPath;
-          }
-          writer.println(classpath);
+          writer.println("use classpath jar");
         }
         else {
           writer.println("");
@@ -320,8 +337,7 @@ public abstract class JavaTestFrameworkRunnableState<T extends ModuleBasedConfig
     }
   }
 
-  private boolean spansMultipleModules() {
-    final String qualifiedName = getConfiguration().getPackage();
+  protected boolean spansMultipleModules(final String qualifiedName) {
     if (qualifiedName != null) {
       final Project project = getConfiguration().getProject();
       final PsiPackage aPackage = JavaPsiFacade.getInstance(project).findPackage(qualifiedName);
@@ -348,7 +364,7 @@ public abstract class JavaTestFrameworkRunnableState<T extends ModuleBasedConfig
     final String workingDirectory = getConfiguration().getWorkingDirectory();
     return getScope() != TestSearchScope.SINGLE_MODULE &&
            ("$" + PathMacroUtil.MODULE_DIR_MACRO_NAME + "$").equals(workingDirectory) &&
-           spansMultipleModules();
+           spansMultipleModules(getConfiguration().getPackage());
   }
 
   protected void createTempFiles(JavaParameters javaParameters) {
@@ -368,7 +384,7 @@ public abstract class JavaTestFrameworkRunnableState<T extends ModuleBasedConfig
 
   protected void writeClassesPerModule(String packageName, JavaParameters javaParameters, Map<Module, List<String>> perModule)
     throws FileNotFoundException, UnsupportedEncodingException, CantRunException {
-    if (perModule != null && perModule.size() > 1) {
+    if (perModule != null) {
       final String classpath = getScope() == TestSearchScope.WHOLE_PROJECT
                                ? null : javaParameters.getClassPath().getPathsString();
 

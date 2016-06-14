@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,9 @@ import org.jetbrains.annotations.NotNull
 import org.jetbrains.plugins.groovy.GroovyLightProjectDescriptor
 import org.jetbrains.plugins.groovy.codeInspection.assignment.GroovyAssignabilityCheckInspection
 import org.jetbrains.plugins.groovy.codeInspection.untypedUnresolvedAccess.GrUnresolvedAccessInspection
+import org.jetbrains.plugins.groovy.lang.psi.GroovyFile
+import org.jetbrains.plugins.groovy.lang.psi.api.auxiliary.modifiers.GrModifier
+import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.GrTypeDefinition
 
 /**
  * Created by Max Medvedev on 17/02/14
@@ -80,6 +83,57 @@ def foo() {
     exec<warning descr="'exec' in '_' cannot be applied to '(java.lang.String, groovy.lang.Closure, java.lang.Integer)'">('foo', { Integer s, Integer x -> print 9 }, 1)</warning>
 }
 ''')
+  }
+
+  void 'test default parameter in trait methods'() {
+    testHighlighting '''\
+trait T {
+  abstract foo(x = 3);
+  def bar(y = 6) {}
+}
+'''
+  }
+
+  void 'test concrete trait property'() {
+    testHighlighting '''\
+trait A {
+  def foo
+}
+class B implements A {}
+'''
+  }
+
+  void 'test abstract trait property'() {
+    testHighlighting '''\
+trait A {
+  abstract foo
+}
+<error descr="Method 'getFoo' is not implemented">class B implements A</error> {}
+'''
+    testHighlighting '''\
+trait A {
+  abstract foo
+}
+class B implements A {
+  def foo
+}
+'''
+  }
+
+  void 'test traits have only abstract and non-final methods'() {
+    def file = myFixture.addFileToProject('T.groovy', '''\
+trait T {
+  def foo
+  abstract bar
+  def baz() {}
+  abstract doo()
+}
+''') as GroovyFile
+    def definition = file.classes[0] as GrTypeDefinition
+    for (method in definition.methods) {
+      assert method.hasModifierProperty(GrModifier.ABSTRACT)
+      assert !method.hasModifierProperty(GrModifier.FINAL)
+    }
   }
 
   final InspectionProfileEntry[] customInspections = [new GroovyAssignabilityCheckInspection(), new GrUnresolvedAccessInspection()]

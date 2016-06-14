@@ -157,7 +157,7 @@ public final class PyClassRefactoringUtil {
 
     for (final PyFunction method : methods) {
 
-      final PyFunction existingMethod = destination.findMethodByName(method.getName(), false);
+      final PyFunction existingMethod = destination.findMethodByName(method.getName(), false, null);
       if ((existingMethod != null) && skipIfExist) {
         result.add(existingMethod);
         continue; //We skip adding if class already has this method.
@@ -252,7 +252,7 @@ public final class PyClassRefactoringUtil {
       if (target instanceof PyFunction) {
         final PyFunction f = (PyFunction)target;
         final PyClass c = f.getContainingClass();
-        if (c != null && c.findInitOrNew(false) == f) {
+        if (c != null && c.findInitOrNew(false, null) == f) {
           target = c;
         }
       }
@@ -352,7 +352,7 @@ public final class PyClassRefactoringUtil {
         if (PsiTreeUtil.getParentOfType(node, PyImportStatementBase.class) != null) {
           return;
         }
-        final NameDefiner importElement = getImportElement(node);
+        final PyImportedNameDefiner importElement = getImportElement(node);
         if (importElement != null && PsiTreeUtil.isAncestor(element, importElement, false)) {
           return;
         }
@@ -373,7 +373,7 @@ public final class PyClassRefactoringUtil {
     final List<PsiElement> allResolveResults = multiResolveExpression(node);
     PsiElement target = ContainerUtil.getFirstItem(allResolveResults);
     if (target instanceof PsiNamedElement && !PsiTreeUtil.isAncestor(element, target, false)) {
-      final NameDefiner importElement = getImportElement(node);
+      final PyImportedNameDefiner importElement = getImportElement(node);
       if (!PyUtil.inSameFile(element, target) && importElement == null && !(target instanceof PsiFileSystemItem)) {
         return;
       }
@@ -397,7 +397,7 @@ public final class PyClassRefactoringUtil {
   }
 
   @Nullable
-  private static NameDefiner getImportElement(PyReferenceExpression expr) {
+  private static PyImportedNameDefiner getImportElement(PyReferenceExpression expr) {
     for (ResolveResult result : expr.getReference().multiResolve(false)) {
       final PsiElement e = result.getElement();
       if (e instanceof PyImportElement) {
@@ -420,12 +420,7 @@ public final class PyClassRefactoringUtil {
 
   @NotNull
   private static List<PsiElement> multiResolveExpression(@NotNull PyReferenceExpression expr) {
-    return ContainerUtil.mapNotNull(expr.getReference().multiResolve(false), new Function<ResolveResult, PsiElement>() {
-      @Override
-      public PsiElement fun(ResolveResult result) {
-        return result.getElement();
-      }
-    });
+    return ContainerUtil.mapNotNull(expr.getReference().multiResolve(false), result -> result.getElement());
   }
 
   /**
@@ -589,7 +584,7 @@ public final class PyClassRefactoringUtil {
     @NotNull final PyClass aClass,
     @NotNull final String attributeName,
     @NotNull final String value) {
-    if (aClass.findClassAttribute(attributeName, false) != null) {
+    if (aClass.findClassAttribute(attributeName, false, null) != null) {
       return null; //Do not add any if exist already
     }
     final PyElementGenerator generator = PyElementGenerator.getInstance(aClass.getProject());

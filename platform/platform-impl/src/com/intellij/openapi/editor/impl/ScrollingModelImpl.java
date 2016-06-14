@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,18 +24,20 @@
  */
 package com.intellij.openapi.editor.impl;
 
-import com.intellij.ide.ui.UISettings;
+import com.intellij.ide.RemoteDesktopDetector;
 import com.intellij.openapi.application.ex.ApplicationManagerEx;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.LogicalPosition;
 import com.intellij.openapi.editor.ScrollType;
+import com.intellij.openapi.editor.VisualPosition;
 import com.intellij.openapi.editor.event.DocumentAdapter;
 import com.intellij.openapi.editor.event.DocumentEvent;
 import com.intellij.openapi.editor.event.VisibleAreaEvent;
 import com.intellij.openapi.editor.event.VisibleAreaListener;
 import com.intellij.openapi.editor.ex.ScrollingModelEx;
 import com.intellij.openapi.editor.ex.util.EditorUtil;
+import com.intellij.openapi.fileEditor.impl.text.AsyncEditorLoader;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.Animator;
@@ -46,7 +48,7 @@ import javax.swing.*;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
 import java.awt.*;
-import java.util.*;
+import java.util.ArrayList;
 import java.util.List;
 
 public class ScrollingModelImpl implements ScrollingModelEx {
@@ -57,41 +59,44 @@ public class ScrollingModelImpl implements ScrollingModelEx {
 
   private AnimatedScrollingRunnable myCurrentAnimationRequest = null;
   private boolean myAnimationDisabled = false;
-  private final DocumentAdapter myDocumentListener;
+
   private int myAccumulatedXOffset = -1;
   private int myAccumulatedYOffset = -1;
   private boolean myAccumulateViewportChanges;
   private boolean myViewportPositioned;
 
-  public ScrollingModelImpl(EditorImpl editor) {
-    myEditor = editor;
-
-    myEditor.getScrollPane().getViewport().addChangeListener(new ChangeListener() {
-      private Rectangle myLastViewRect;
-
-      @Override
-      public void stateChanged(ChangeEvent event) {
-        Rectangle viewRect = getVisibleArea();
-        VisibleAreaEvent visibleAreaEvent = new VisibleAreaEvent(myEditor, myLastViewRect, viewRect);
-        if (!myViewportPositioned && viewRect.height > 0) {
-          myViewportPositioned = true;
-          if (adjustVerticalOffsetIfNecessary()) {
-            return;
-          }
-        }
-        myLastViewRect = viewRect;
-        for (VisibleAreaListener listener : myVisibleAreaListeners) {
-          listener.visibleAreaChanged(visibleAreaEvent);
-        }
-      }
-    });
-
-    myDocumentListener = new DocumentAdapter() {
-      @Override
-      public void beforeDocumentChange(DocumentEvent e) {
+  private final DocumentAdapter myDocumentListener = new DocumentAdapter() {
+    @Override
+    public void beforeDocumentChange(DocumentEvent e) {
+      if (!myEditor.getDocument().isInBulkUpdate()) {
         cancelAnimatedScrolling(true);
       }
-    };
+    }
+  };
+
+  private final ChangeListener myViewportChangeListener = new ChangeListener() {
+    private Rectangle myLastViewRect;
+
+    @Override
+    public void stateChanged(ChangeEvent event) {
+      Rectangle viewRect = getVisibleArea();
+      VisibleAreaEvent visibleAreaEvent = new VisibleAreaEvent(myEditor, myLastViewRect, viewRect);
+      if (!myViewportPositioned && viewRect.height > 0) {
+        myViewportPositioned = true;
+        if (adjustVerticalOffsetIfNecessary()) {
+          return;
+        }
+      }
+      myLastViewRect = viewRect;
+      for (VisibleAreaListener listener : myVisibleAreaListeners) {
+        listener.visibleAreaChanged(visibleAreaEvent);
+      }
+    }
+  };
+
+  public ScrollingModelImpl(EditorImpl editor) {
+    myEditor = editor;
+    myEditor.getScrollPane().getViewport().addChangeListener(myViewportChangeListener);
     myEditor.getDocument().addDocumentListener(myDocumentListener);
   }
 
@@ -119,9 +124,6 @@ public class ScrollingModelImpl implements ScrollingModelEx {
   @Override
   public Rectangle getVisibleArea() {
     assertIsDispatchThread();
-    if (myEditor.getScrollPane() == null) {
-      return new Rectangle(0, 0, 0, 0);
-    }
     return myEditor.getScrollPane().getViewport().getViewRect();
   }
 
@@ -138,21 +140,33 @@ public class ScrollingModelImpl implements ScrollingModelEx {
   @Override
   public void scrollToCaret(@NotNull ScrollType scrollType) {
     assertIsDispatchThread();
-    LogicalPosition caretPosition = myEditor.getCaretModel().getLogicalPosition();
     myEditor.validateSize();
-    scrollTo(caretPosition, scrollType);
+    if (myEditor.myUseNewRendering) {
+      AsyncEditorLoader.performWhenLoaded(myEditor, () -> scrollTo(myEditor.getCaretModel().getVisualPosition(), scrollType));
+    }
+    else {
+      LogicalPosition caretPosition = myEditor.getCaretModel().getLogicalPosition();
+      scrollTo(caretPosition, scrollType);
+    }
+  }
+
+  private void scrollTo(@NotNull VisualPosition pos, @NotNull ScrollType scrollType) {
+    Point targetLocation = myEditor.visualPositionToXY(pos);
+    scrollTo(targetLocation, scrollType);
+  }
+
+  private void scrollTo(@NotNull Point targetLocation, @NotNull ScrollType scrollType) {
+    AnimatedScrollingRunnable canceledThread = cancelAnimatedScrolling(false);
+    Rectangle viewRect = canceledThread != null ? canceledThread.getTargetVisibleArea() : getVisibleArea();
+    Point p = calcOffsetsToScroll(targetLocation, scrollType, viewRect);
+    scrollToOffsets(p.x, p.y);
   }
 
   @Override
   public void scrollTo(@NotNull LogicalPosition pos, @NotNull ScrollType scrollType) {
     assertIsDispatchThread();
-    if (myEditor.getScrollPane() == null) return;
 
-    AnimatedScrollingRunnable canceledThread = cancelAnimatedScrolling(false);
-    Rectangle viewRect = canceledThread != null ? canceledThread.getTargetVisibleArea() : getVisibleArea();
-
-    Point p = calcOffsetsToScroll(pos, scrollType, viewRect);
-    scrollToOffsets(p.x, p.y);
+    AsyncEditorLoader.performWhenLoaded(myEditor, () -> scrollTo(myEditor.logicalPositionToXY(pos), scrollType));
   }
 
   private static void assertIsDispatchThread() {
@@ -181,9 +195,7 @@ public class ScrollingModelImpl implements ScrollingModelEx {
     myAnimationDisabled = false;
   }
 
-  private Point calcOffsetsToScroll(LogicalPosition pos, ScrollType scrollType, Rectangle viewRect) {
-    Point targetLocation = myEditor.logicalPositionToXY(pos);
-
+  private Point calcOffsetsToScroll(Point targetLocation, ScrollType scrollType, Rectangle viewRect) {
     if (myEditor.getSettings().isRefrainFromScrolling() && viewRect.contains(targetLocation)) {
       if (scrollType == ScrollType.CENTER ||
           scrollType == ScrollType.CENTER_DOWN ||
@@ -199,11 +211,18 @@ public class ScrollingModelImpl implements ScrollingModelEx {
                   scrollType == ScrollType.CENTER_DOWN ||
                   scrollType == ScrollType.CENTER_UP ? 0 : viewRect.x;
     if (targetLocation.x < hOffset) {
-      hOffset = targetLocation.x - 4 * spaceWidth;
-      hOffset = hOffset > 0 ? hOffset : 0;
+      int inset = 4 * spaceWidth;
+      if (scrollType == ScrollType.MAKE_VISIBLE && targetLocation.x < viewRect.width - inset) {
+        // if we need to scroll to the left to make target position visible, 
+        // let's scroll to the leftmost position (if that will make caret visible)
+        hOffset = 0;
+      }
+      else {
+        hOffset = Math.max(0, targetLocation.x - inset);
+      }
     }
     else if (targetLocation.x >= hOffset + viewRect.width) {
-      hOffset = targetLocation.x - viewRect.width + xInsets;
+      hOffset = targetLocation.x - Math.max(0, viewRect.width - xInsets);
     }
 
     // the following code tries to keeps 1 line above and 1 line below if available in viewRect
@@ -259,8 +278,6 @@ public class ScrollingModelImpl implements ScrollingModelEx {
   @Nullable
   public JScrollBar getHorizontalScrollBar() {
     assertIsDispatchThread();
-    if (myEditor.getScrollPane() == null) return null;
-
     return myEditor.getScrollPane().getHorizontalScrollBar();
   }
 
@@ -289,7 +306,6 @@ public class ScrollingModelImpl implements ScrollingModelEx {
 
   private void _scrollVertically(int scrollOffset) {
     assertIsDispatchThread();
-    if (myEditor.getScrollPane() == null) return;
 
     myEditor.validateSize();
     JScrollBar scrollbar = myEditor.getScrollPane().getVerticalScrollBar();
@@ -304,7 +320,6 @@ public class ScrollingModelImpl implements ScrollingModelEx {
 
   private void _scrollHorizontally(int scrollOffset) {
     assertIsDispatchThread();
-    if (myEditor.getScrollPane() == null) return;
 
     myEditor.validateSize();
     JScrollBar scrollbar = myEditor.getScrollPane().getHorizontalScrollBar();
@@ -323,7 +338,7 @@ public class ScrollingModelImpl implements ScrollingModelEx {
     VisibleEditorsTracker editorsTracker = VisibleEditorsTracker.getInstance();
     boolean useAnimation;
     //System.out.println("myCurrentCommandStart - myLastCommandFinish = " + (myCurrentCommandStart - myLastCommandFinish));
-    if (!myEditor.getSettings().isAnimatedScrolling() || myAnimationDisabled || UISettings.isRemoteDesktopConnected()) {
+    if (!myEditor.getSettings().isAnimatedScrolling() || myAnimationDisabled || RemoteDesktopDetector.isRemoteSession()) {
       useAnimation = false;
     }
     else if (CommandProcessor.getInstance().getCurrentCommand() == null) {
@@ -392,6 +407,7 @@ public class ScrollingModelImpl implements ScrollingModelEx {
 
   public void dispose() {
     myEditor.getDocument().removeDocumentListener(myDocumentListener);
+    myEditor.getScrollPane().getViewport().removeChangeListener(myViewportChangeListener);
   }
 
   public void beforeModalityStateChanged() {
@@ -415,6 +431,10 @@ public class ScrollingModelImpl implements ScrollingModelEx {
       myAccumulatedXOffset = myAccumulatedYOffset = -1;
       cancelAnimatedScrolling(true);
     }
+  }
+
+  void onBulkDocumentUpdateStarted() {
+    cancelAnimatedScrolling(true);
   }
 
   private class AnimatedScrollingRunnable {
@@ -482,7 +502,9 @@ public class ScrollingModelImpl implements ScrollingModelEx {
 
         @Override
         protected void paintCycleEnd() {
-          finish(true);
+          if (!isDisposed()) { // Animator will invoke paintCycleEnd() even if it was disposed
+            finish(true);
+          }
         }
       };
 

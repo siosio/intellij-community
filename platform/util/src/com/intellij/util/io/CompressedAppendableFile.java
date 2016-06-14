@@ -45,7 +45,7 @@ public class CompressedAppendableFile {
   private int myChunkTableLength;
   private static final int FACTOR = 32;
   private long [] myChunkOffsetTable; // one long offset per FACTOR compressed chunks
-  private static final boolean doDebug = SystemProperties.getBooleanProperty("idea.compressed.file.self.check", true);
+  private static final boolean doDebug = SystemProperties.getBooleanProperty("idea.compressed.file.self.check", false);
   private TLongArrayList myCompressedChunksFileOffsets = doDebug ? new TLongArrayList() : null;
   private static final int MAX_PAGE_LENGTH = 0xFFFF;
 
@@ -180,7 +180,7 @@ public class CompressedAppendableFile {
 
   private static final FileChunkReadCache ourDecompressedCache = new FileChunkReadCache();
 
-  private synchronized byte[] loadChunk(int chunkNumber) {
+  private synchronized byte[] loadChunk(int chunkNumber) throws IOException {
     try {
       if (myChunkLengthTable == null) initChunkLengthTable();
       assert chunkNumber < myChunkTableLength;
@@ -200,11 +200,13 @@ public class CompressedAppendableFile {
         } catch (IOException ignore) {}
       }
 
-      assert false;
+      assert false:"data corruption detected:"+chunkNumber + "," + myChunkTableLength;
       return ArrayUtil.EMPTY_BYTE_ARRAY;
     }
-    catch (IOException e) {
-      throw new RuntimeException(e);
+    catch (RuntimeException e) { // CorruptedException, ArrayIndexOutofBounds, etc
+      throw new IOException(e);
+    } catch(AssertionError ae) {
+      throw new IOException(ae);
     }
   }
 
@@ -469,7 +471,7 @@ public class CompressedAppendableFile {
     }
 
     @NotNull
-    public byte[] get(CompressedAppendableFile file, int page) {
+    public byte[] get(CompressedAppendableFile file, int page) throws IOException {
       byte[] bytes;
       synchronized (this) {
         myKey.setup(file, page);

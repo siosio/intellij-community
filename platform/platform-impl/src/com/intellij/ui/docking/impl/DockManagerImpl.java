@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,6 +45,7 @@ import com.intellij.ui.components.panels.NonOpaquePanel;
 import com.intellij.ui.components.panels.VerticalBox;
 import com.intellij.ui.docking.*;
 import com.intellij.ui.tabs.impl.JBTabsImpl;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.update.UiNotifyConnector;
 import org.jdom.Element;
@@ -62,10 +63,7 @@ import java.awt.image.BufferedImage;
 import java.util.*;
 import java.util.List;
 
-@State(
-  name = "DockManager",
-  storages = {@Storage(
-    file = StoragePathMacros.WORKSPACE_FILE)})
+@State(name = "DockManager", storages = @Storage(StoragePathMacros.WORKSPACE_FILE))
 
 public class DockManagerImpl extends DockManager implements PersistentStateComponent<Element> {
 
@@ -126,7 +124,7 @@ public class DockManagerImpl extends DockManager implements PersistentStateCompo
 
   @Override
   public Set<DockContainer> getContainers() {
-    return Collections.unmodifiableSet(new HashSet<DockContainer>(myContainers));
+    return Collections.unmodifiableSet(ContainerUtil.newHashSet(myContainers));
   }
 
   @Override
@@ -395,12 +393,7 @@ public class DockManagerImpl extends DockManager implements PersistentStateCompo
 
     container.add(content, new RelativePoint(target.getLocation()));
 
-    SwingUtilities.invokeLater(new Runnable() {
-      @Override
-      public void run() {
-        window.myUiContainer.setPreferredSize(null);
-      }
-    });
+    SwingUtilities.invokeLater(() -> window.myUiContainer.setPreferredSize(null));
   }
 
   @NotNull
@@ -415,12 +408,7 @@ public class DockManagerImpl extends DockManager implements PersistentStateCompo
     final Pair<FileEditor[], FileEditorProvider[]> result = fileEditorManager.openFileImpl2(editorWindow, file, true);
     container.add(EditorTabbedContainer.createDockableEditor(myProject, null, file, new Presentation(file.getName()), editorWindow), null);
 
-    SwingUtilities.invokeLater(new Runnable() {
-      @Override
-      public void run() {
-        window.myUiContainer.setPreferredSize(null);
-      }
-    });
+    SwingUtilities.invokeLater(() -> window.myUiContainer.setPreferredSize(null));
     return result;
   }
 
@@ -480,12 +468,9 @@ public class DockManagerImpl extends DockManager implements PersistentStateCompo
       myContainer.addListener(new DockContainer.Listener.Adapter() {
         @Override
         public void contentRemoved(Object key) {
-          getReady().doWhenDone(new Runnable() {
-            @Override
-            public void run() {
-              if (myContainer.isEmpty()) {
-                close();
-              }
+          getReady().doWhenDone(() -> {
+            if (myContainer.isEmpty()) {
+              close();
             }
           });
         }
@@ -652,12 +637,7 @@ public class DockManagerImpl extends DockManager implements PersistentStateCompo
       register(container);
 
       final DockWindow window = createWindowFor(eachId, container);
-      UIUtil.invokeLaterIfNeeded(new Runnable() {
-        @Override
-        public void run() {
-          window.show();
-        }
-      });
+      UIUtil.invokeLaterIfNeeded(() -> window.show());
     }
   }
 }

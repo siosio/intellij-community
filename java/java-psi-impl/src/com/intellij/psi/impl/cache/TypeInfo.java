@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,30 +50,17 @@ import static com.intellij.util.BitUtil.isSet;
 public class TypeInfo {
   private static final String[] ourIndexFrequentType;
   private static final TObjectIntHashMap<String> ourFrequentTypeIndex;
-
   static {
     ourIndexFrequentType = new String[]{
       "",
-      "boolean",
-      "byte",
-      "char",
-      "double",
-      "float",
-      "int",
-      "long",
-      "null",
-      "short",
-      "void",
-      CommonClassNames.JAVA_LANG_OBJECT_SHORT,
-      CommonClassNames.JAVA_LANG_OBJECT,
-      CommonClassNames.JAVA_LANG_STRING_SHORT,
-      CommonClassNames.JAVA_LANG_STRING
+      "boolean", "byte", "char", "double", "float", "int", "long", "null", "short", "void",
+      CommonClassNames.JAVA_LANG_OBJECT_SHORT, CommonClassNames.JAVA_LANG_OBJECT,
+      CommonClassNames.JAVA_LANG_STRING_SHORT, CommonClassNames.JAVA_LANG_STRING
     };
 
     ourFrequentTypeIndex = new TObjectIntHashMap<String>();
     for (int i = 0; i < ourIndexFrequentType.length; i++) {
-      String type = ourIndexFrequentType[i];
-      ourFrequentTypeIndex.put(type, i);
+      ourFrequentTypeIndex.put(ourIndexFrequentType[i], i);
     }
   }
 
@@ -81,22 +68,18 @@ public class TypeInfo {
   private static final int HAS_ARRAY_COUNT = 0x40;
   private static final int HAS_ELLIPSIS = 0x80;
 
-  private static final TypeInfo NULL = new TypeInfo((StringRef)null, (byte)0, false, PsiAnnotationStub.EMPTY_ARRAY);
+  private static final TypeInfo NULL = new TypeInfo(null, (byte)0, false, PsiAnnotationStub.EMPTY_ARRAY);
 
-  public final StringRef text;
+  public final String text;
   public final byte arrayCount;
   public final boolean isEllipsis;
 
   private final PsiAnnotationStub[] myAnnotationStubs;
 
   public TypeInfo(String text, byte arrayCount, boolean ellipsis, @NotNull PsiAnnotationStub[] annotationStubs) {
-    this(StringRef.fromString(text == null ? null : internFrequentType(text)), arrayCount, ellipsis, annotationStubs);
-  }
-
-  private TypeInfo(StringRef text, byte arrayCount, boolean isEllipsis, @NotNull PsiAnnotationStub[] annotationStubs) {
-    this.text = text;
+    this.text = text == null ? null : internFrequentType(text);
     this.arrayCount = arrayCount;
-    this.isEllipsis = isEllipsis;
+    this.isEllipsis = ellipsis;
     myAnnotationStubs = annotationStubs;
   }
 
@@ -123,7 +106,7 @@ public class TypeInfo {
   @NotNull
   public String getShortTypeText() {
     if (text == null) return "";
-    String name = PsiNameHelper.getShortClassName(text.getString());
+    String name = PsiNameHelper.getShortClassName(text);
     if (arrayCount > 0) {
       name += StringUtil.repeat("[]", arrayCount);
     }
@@ -218,16 +201,16 @@ public class TypeInfo {
 
   @NotNull
   public static TypeInfo readTYPE(@NotNull StubInputStream record) throws IOException {
-    int flags = 0xFF & record.readByte();
+    int flags = record.readByte() & 0xFF;
     if (flags == FREQUENT_INDEX_MASK) {
       return NULL;
     }
 
-    int frequentIndex = FREQUENT_INDEX_MASK & flags;
     byte arrayCount = isSet(flags, HAS_ARRAY_COUNT) ? record.readByte() : 0;
     boolean hasEllipsis = isSet(flags, HAS_ELLIPSIS);
 
-    StringRef text = frequentIndex == 0 ? record.readName() : StringRef.fromString(ourIndexFrequentType[frequentIndex]);
+    int frequentIndex = FREQUENT_INDEX_MASK & flags;
+    String text = frequentIndex == 0 ? StringRef.toString(record.readName()) : ourIndexFrequentType[frequentIndex];
 
     return new TypeInfo(text, arrayCount, hasEllipsis, PsiAnnotationStub.EMPTY_ARRAY);
   }
@@ -238,7 +221,7 @@ public class TypeInfo {
       return;
     }
 
-    String text = typeInfo.text.getString();
+    String text = typeInfo.text;
     byte arrayCount = typeInfo.arrayCount;
     int frequentIndex = ourFrequentTypeIndex.get(text);
     int flags = (typeInfo.isEllipsis ? HAS_ELLIPSIS : 0) | (arrayCount != 0 ? HAS_ARRAY_COUNT : 0) | frequentIndex;
@@ -259,7 +242,7 @@ public class TypeInfo {
       return null;
     }
     if (typeInfo.arrayCount == 0 && typeInfo.myAnnotationStubs.length == 0) {
-      return typeInfo.text.getString();
+      return typeInfo.text;
     }
 
     StringBuilder buf = new StringBuilder();
@@ -268,7 +251,7 @@ public class TypeInfo {
       buf.append(stub.getText()).append(' ');
     }
 
-    buf.append(typeInfo.text.getString());
+    buf.append(typeInfo.text);
 
     int arrayCount = typeInfo.isEllipsis ? typeInfo.arrayCount - 1 : typeInfo.arrayCount;
     for (int i = 0; i < arrayCount; i++) {

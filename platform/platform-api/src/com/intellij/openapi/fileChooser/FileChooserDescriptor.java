@@ -133,11 +133,11 @@ public class FileChooserDescriptor implements Cloneable {
     return myDescription;
   }
 
-  public void setDescription(String description) {
+  public void setDescription(@Nls(capitalization = Nls.Capitalization.Sentence) String description) {
     withDescription(description);
   }
 
-  public FileChooserDescriptor withDescription(String description) {
+  public FileChooserDescriptor withDescription(@Nls(capitalization = Nls.Capitalization.Sentence) String description) {
     myDescription = description;
     return this;
   }
@@ -275,10 +275,7 @@ public class FileChooserDescriptor implements Cloneable {
   }
 
   public Icon getIcon(final VirtualFile file) {
-    if (file.isDirectory()) {
-      return dressIcon(file, PlatformIcons.DIRECTORY_CLOSED_ICON);
-    }
-    return IconUtil.getIcon(file, Iconable.ICON_FLAG_READ_STATUS, null);
+    return dressIcon(file, IconUtil.getIcon(file, Iconable.ICON_FLAG_READ_STATUS, null));
   }
 
   protected static Icon dressIcon(final VirtualFile file, final Icon baseIcon) {

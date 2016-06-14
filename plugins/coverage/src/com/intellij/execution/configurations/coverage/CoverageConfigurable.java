@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,7 +39,9 @@ import com.intellij.psi.PsiPackage;
 import com.intellij.ui.IdeBorderFactory;
 import com.intellij.ui.ListCellRendererWrapper;
 import com.intellij.ui.classFilter.ClassFilterEditor;
+import com.intellij.ui.components.JBPanel;
 import com.intellij.util.IconUtil;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -210,8 +212,8 @@ public class CoverageConfigurable extends SettingsEditor<RunConfigurationBase> {
     });
     myRunnerPanel = new JPanel(new GridBagLayout());
     myRunnerPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
-    myRunnerPanel.add(new JLabel("Choose coverage runner:"), new GridBagConstraints(0, 0, 1, 1, 0, 1, GridBagConstraints.WEST, GridBagConstraints.NONE, new Insets(0,0,0,10), 0, 0));
-    myRunnerPanel.add(myCoverageRunnerCb, new GridBagConstraints(1, 0, 1, 1, 1, 1, GridBagConstraints.WEST, GridBagConstraints.NONE, new Insets(0,0,0,0), 0, 0));
+    myRunnerPanel.add(new JLabel("Choose coverage runner:"), new GridBagConstraints(0, 0, 1, 1, 0, 1, GridBagConstraints.WEST, GridBagConstraints.NONE, JBUI.insetsRight(10), 0, 0));
+    myRunnerPanel.add(myCoverageRunnerCb, new GridBagConstraints(1, 0, 1, 1, 1, 1, GridBagConstraints.WEST, GridBagConstraints.NONE, JBUI.emptyInsets(), 0, 0));
     final JPanel cPanel = new JPanel(new VerticalFlowLayout());
 
     mySamplingRb = new JRadioButton("Sampling");
@@ -234,16 +236,14 @@ public class CoverageConfigurable extends SettingsEditor<RunConfigurationBase> {
     myTracingRb.addActionListener(samplingListener);
 
     myTrackPerTestCoverageCb = new JCheckBox("Track per test coverage");
-    final JPanel tracingPanel = new JPanel(new BorderLayout());
-    tracingPanel.setBorder(BorderFactory.createEmptyBorder(0, 15, 0, 0));
-    tracingPanel.add(myTrackPerTestCoverageCb, BorderLayout.CENTER);
+    final JBPanel tracingPanel = JBUI.Panels.simplePanel(myTrackPerTestCoverageCb).withBorder(JBUI.Borders.emptyLeft(15));
     cPanel.add(tracingPanel);
-    myRunnerPanel.add(cPanel, new GridBagConstraints(0, 1, GridBagConstraints.REMAINDER, 1, 1, 1, GridBagConstraints.WEST, GridBagConstraints.NONE, new Insets(0,0,0,0), 0, 0));
+    myRunnerPanel.add(cPanel, new GridBagConstraints(0, 1, GridBagConstraints.REMAINDER, 1, 1, 1, GridBagConstraints.WEST, GridBagConstraints.NONE, JBUI.emptyInsets(), 0, 0));
 
     final GridBagConstraints gc = new GridBagConstraints(0, GridBagConstraints.RELATIVE,
                                                          1, 1, 1, 0,
-                                                         GridBagConstraints.NORTHWEST, GridBagConstraints.BOTH,
-                                                         new Insets(0, 0, 0, 0), 0, 0);
+                                                         GridBagConstraints.NORTHWEST, GridBagConstraints.HORIZONTAL,
+                                                         JBUI.emptyInsets(), 0, 0);
     result.add(myRunnerPanel, gc);
 
     JPanel panel = new JPanel(new GridBagLayout());
@@ -251,13 +251,15 @@ public class CoverageConfigurable extends SettingsEditor<RunConfigurationBase> {
     myClassFilterEditor = new MyClassFilterEditor(myProject);
     final GridBagConstraints bagConstraints =
       new GridBagConstraints(0, GridBagConstraints.RELATIVE, 1, 1, 1, 1, GridBagConstraints.NORTHWEST, GridBagConstraints.BOTH,
-                             new Insets(0, 0, 0, 0), 0, 0);
+                             JBUI.emptyInsets(), 0, 0);
     panel.add(myClassFilterEditor, bagConstraints);
 
     bagConstraints.weighty = 0;
     myTrackTestSourcesCb = new JCheckBox("Enable coverage in test folders");
     panel.add(myTrackTestSourcesCb, bagConstraints);
 
+    gc.weighty = 1;
+    gc.fill = GridBagConstraints.BOTH;
     result.add(panel, gc);
 
     myCoverageNotSupportedLabel = new JLabel(CodeInsightBundle.message("code.coverage.is.not.supported"));

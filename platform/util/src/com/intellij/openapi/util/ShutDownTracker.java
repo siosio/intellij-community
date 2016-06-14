@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,17 +24,16 @@ import javax.swing.*;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 public class ShutDownTracker implements Runnable {
-  private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.util.ShutDownTracker");
   private final List<Thread> myThreads = new ArrayList<Thread>();
-  private final LinkedList<Thread> myShutdownThreads = new LinkedList<Thread>();
   private final LinkedList<Runnable> myShutdownTasks = new LinkedList<Runnable>();
-  private volatile boolean myIsShutdownHookRunning = false;
+  private final Thread myThread;
 
   private ShutDownTracker() {
-    //noinspection HardCodedStringLiteral
-    Runtime.getRuntime().addShutdownHook(new Thread(this, "Shutdown tracker"));
+    myThread = new Thread(this, "Shutdown tracker");
+    Runtime.getRuntime().addShutdownHook(myThread);
   }
 
   private static class ShutDownTrackerHolder {
@@ -47,33 +46,35 @@ public class ShutDownTracker implements Runnable {
   }
 
   public static boolean isShutdownHookRunning() {
-    return getInstance().myIsShutdownHookRunning;
+    return getInstance().myThread.isAlive();
   }
 
   @Override
   public void run() {
-    myIsShutdownHookRunning = true;
-
     ensureStopperThreadsFinished();
 
-    for (Runnable task = removeLast(myShutdownTasks); task != null; task = removeLast(myShutdownTasks)) {
-      //  task can change myShutdownTasks
+    Runnable task;
+    while ((task = removeLast(myShutdownTasks)) != null) {
+      // task can change myShutdownTasks
       try {
         task.run();
       }
       catch (Throwable e) {
-        LOG.error(e);
+        Logger.getInstance(ShutDownTracker.class).error(e);
       }
     }
+  }
 
-    for (Thread thread = removeLast(myShutdownThreads); thread != null; thread = removeLast(myShutdownThreads)) {
-      thread.start();
+  // returns true if terminated
+  public boolean waitFor(long timeout, @NotNull TimeUnit unit) {
+    if (isShutdownHookRunning()) {
       try {
-        thread.join();
+        myThread.join(unit.toMillis(timeout));
       }
-      catch (InterruptedException ignored) {
-      }
+      catch (InterruptedException ignored) { }
+      return !myThread.isAlive();
     }
+    return false;
   }
 
   public final void ensureStopperThreadsFinished() {
@@ -83,7 +84,7 @@ public class ShutDownTracker implements Runnable {
       Thread thread = threads[0];
       if (!thread.isAlive()) {
         if (isRegistered(thread)) {
-          LOG.error("Thread '" + thread.getName() + "' did not unregister itself from ShutDownTracker.");
+          Logger.getInstance(ShutDownTracker.class).error("Thread '" + thread.getName() + "' did not unregister itself from ShutDownTracker");
           unregisterStopperThread(thread);
         }
       }
@@ -98,8 +99,7 @@ public class ShutDownTracker implements Runnable {
         try {
           thread.join(100);
         }
-        catch (InterruptedException ignored) {
-        }
+        catch (InterruptedException ignored) { }
       }
       threads = getStopperThreads();
     }
@@ -122,14 +122,6 @@ public class ShutDownTracker implements Runnable {
     myThreads.remove(thread);
   }
 
-  public synchronized void registerShutdownThread(@NotNull Thread thread) {
-    myShutdownThreads.addLast(thread);
-  }
-
-  public synchronized void registerShutdownThread(int index, @NotNull Thread thread) {
-    myShutdownThreads.add(index, thread);
-  }
-
   public synchronized void registerShutdownTask(@NotNull Runnable task) {
     myShutdownTasks.addLast(task);
   }
@@ -137,11 +129,13 @@ public class ShutDownTracker implements Runnable {
   public synchronized void unregisterShutdownTask(@NotNull Runnable task) {
     myShutdownTasks.remove(task);
   }
-  
+
   private synchronized <T> T removeLast(@NotNull LinkedList<T> list) {
-    return list.isEmpty()? null : list.removeLast();
+    return list.isEmpty() ? null : list.removeLast();
   }
 
+  /** @deprecated to be removed in IDEA 2018 */
+  @SuppressWarnings("unused")
   public static void invokeAndWait(boolean returnOnTimeout, boolean runInEdt, @NotNull final Runnable runnable) {
     if (!runInEdt) {
       if (returnOnTimeout) {
@@ -153,7 +147,7 @@ public class ShutDownTracker implements Runnable {
             runnable.run();
             semaphore.up();
           }
-        },"shutdown tracker invoker").start();
+        }, "shutdown tracker invoker").start();
         semaphore.waitFor(1000);
       }
       else {
@@ -165,6 +159,7 @@ public class ShutDownTracker implements Runnable {
     if (returnOnTimeout) {
       final Semaphore semaphore = new Semaphore();
       semaphore.down();
+      //noinspection SSBasedInspection
       SwingUtilities.invokeLater(new Runnable() {
         @Override
         public void run() {
@@ -180,7 +175,7 @@ public class ShutDownTracker implements Runnable {
       UIUtil.invokeAndWaitIfNeeded(runnable);
     }
     catch (Exception e) {
-      LOG.error(e);
+      Logger.getInstance(ShutDownTracker.class).error(e);
     }
   }
 }

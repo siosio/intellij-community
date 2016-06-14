@@ -25,15 +25,14 @@ import com.intellij.diff.requests.SimpleDiffRequest;
 import com.intellij.diff.tools.holders.EditorHolder;
 import com.intellij.diff.tools.holders.EditorHolderFactory;
 import com.intellij.diff.tools.util.DiffDataKeys;
-import com.intellij.diff.tools.util.FocusTrackerSupport.ThreesideFocusTrackerSupport;
+import com.intellij.diff.tools.util.FocusTrackerSupport;
 import com.intellij.diff.tools.util.SimpleDiffPanel;
 import com.intellij.diff.tools.util.base.ListenerDiffViewerBase;
 import com.intellij.diff.util.DiffUtil;
 import com.intellij.diff.util.ThreeSide;
-import com.intellij.icons.AllIcons;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
-import com.intellij.openapi.diff.DiffBundle;
+import com.intellij.openapi.actionSystem.ex.ActionUtil;
 import com.intellij.openapi.fileEditor.OpenFileDescriptor;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.util.Disposer;
@@ -52,7 +51,7 @@ public abstract class ThreesideDiffViewer<T extends EditorHolder> extends Listen
 
   @NotNull private final List<T> myHolders;
 
-  @NotNull private final ThreesideFocusTrackerSupport myFocusTrackerSupport;
+  @NotNull private final FocusTrackerSupport<ThreeSide> myFocusTrackerSupport;
 
   public ThreesideDiffViewer(@NotNull DiffContext context, @NotNull ContentDiffRequest request, @NotNull EditorHolderFactory<T> factory) {
     super(context, request);
@@ -60,10 +59,16 @@ public abstract class ThreesideDiffViewer<T extends EditorHolder> extends Listen
     myHolders = createEditorHolders(factory);
 
     List<JComponent> titlePanel = createTitles();
-    myFocusTrackerSupport = new ThreesideFocusTrackerSupport(myHolders);
+    myFocusTrackerSupport = new FocusTrackerSupport.Threeside(myHolders);
     myContentPanel = new ThreesideContentPanel(myHolders, titlePanel);
 
     myPanel = new SimpleDiffPanel(myContentPanel, this, context);
+  }
+
+  @Override
+  protected void onInit() {
+    super.onInit();
+    myPanel.setPersistentNotifications(DiffUtil.getCustomNotifications(myContext, myRequest));
   }
 
   @Override
@@ -91,7 +96,7 @@ public abstract class ThreesideDiffViewer<T extends EditorHolder> extends Listen
   protected List<T> createEditorHolders(@NotNull EditorHolderFactory<T> factory) {
     List<DiffContent> contents = myRequest.getContents();
 
-    List<T> holders = new ArrayList<T>(3);
+    List<T> holders = new ArrayList<>(3);
     for (int i = 0; i < 3; i++) {
       DiffContent content = contents.get(i);
       holders.add(factory.create(content, myContext));
@@ -107,7 +112,7 @@ public abstract class ThreesideDiffViewer<T extends EditorHolder> extends Listen
 
   @NotNull
   protected List<JComponent> createTitles() {
-    return DiffUtil.createSimpleTitles(myRequest);
+    return DiffUtil.createSyncHeightComponents(DiffUtil.createSimpleTitles(myRequest));
   }
 
   //
@@ -189,47 +194,48 @@ public abstract class ThreesideDiffViewer<T extends EditorHolder> extends Listen
   // Actions
   //
 
-  protected class ShowLeftBasePartialDiffAction extends ShowPartialDiffAction {
-    public ShowLeftBasePartialDiffAction() {
-      super(ThreeSide.LEFT, ThreeSide.BASE, DiffBundle.message("merge.partial.diff.action.name.0.1"), null, AllIcons.Diff.LeftDiff);
-    }
-  }
-
-  protected class ShowBaseRightPartialDiffAction extends ShowPartialDiffAction {
-    public ShowBaseRightPartialDiffAction() {
-      super(ThreeSide.BASE, ThreeSide.RIGHT, DiffBundle.message("merge.partial.diff.action.name.1.2"), null, AllIcons.Diff.RightDiff);
-    }
-  }
-
-  protected class ShowLeftRightPartialDiffAction extends ShowPartialDiffAction {
-    public ShowLeftRightPartialDiffAction() {
-      super(ThreeSide.LEFT, ThreeSide.RIGHT, DiffBundle.message("merge.partial.diff.action.name"), null, AllIcons.Diff.BranchDiff);
-    }
-  }
-
+  protected enum PartialDiffMode {LEFT_BASE, BASE_RIGHT, LEFT_RIGHT}
   protected class ShowPartialDiffAction extends DumbAwareAction {
-    @NotNull private final ThreeSide mySide1;
-    @NotNull private final ThreeSide mySide2;
+    @NotNull protected final ThreeSide mySide1;
+    @NotNull protected final ThreeSide mySide2;
 
-    public ShowPartialDiffAction(@NotNull ThreeSide side1,
-                                 @NotNull ThreeSide side2,
-                                 @NotNull String text,
-                                 @Nullable String description,
-                                 @NotNull Icon icon) {
-      super(text, description, icon);
-      mySide1 = side1;
-      mySide2 = side2;
+    public ShowPartialDiffAction(@NotNull PartialDiffMode mode) {
+      String id;
+      switch (mode) {
+        case LEFT_BASE:
+          mySide1 = ThreeSide.LEFT;
+          mySide2 = ThreeSide.BASE;
+          id = "Diff.ComparePartial.Base.Left";
+          break;
+        case BASE_RIGHT:
+          mySide1 = ThreeSide.BASE;
+          mySide2 = ThreeSide.RIGHT;
+          id = "Diff.ComparePartial.Base.Right";
+          break;
+        case LEFT_RIGHT:
+          mySide1 = ThreeSide.LEFT;
+          mySide2 = ThreeSide.RIGHT;
+          id = "Diff.ComparePartial.Left.Right";
+          break;
+        default:
+          throw new IllegalArgumentException();
+      }
+      ActionUtil.copyFrom(this, id);
     }
 
     @Override
     public void actionPerformed(AnActionEvent e) {
+      DiffRequest request = createRequest();
+      DiffManager.getInstance().showDiff(myProject, request, new DiffDialogHints(null, myPanel));
+    }
+
+    @NotNull
+    protected SimpleDiffRequest createRequest() {
       List<DiffContent> contents = myRequest.getContents();
       List<String> titles = myRequest.getContentTitles();
-
-      DiffRequest request = new SimpleDiffRequest(myRequest.getTitle(),
-                                                  mySide1.select(contents), mySide2.select(contents),
-                                                  mySide1.select(titles), mySide2.select(titles));
-      DiffManager.getInstance().showDiff(myProject, request, new DiffDialogHints(null, myPanel));
+      return new SimpleDiffRequest(myRequest.getTitle(),
+                                   mySide1.select(contents), mySide2.select(contents),
+                                   mySide1.select(titles), mySide2.select(titles));
     }
   }
 }

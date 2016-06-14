@@ -15,6 +15,7 @@
  */
 package com.intellij.ui.components.editors;
 
+import com.intellij.ide.ui.AntialiasingType;
 import com.intellij.openapi.ui.popup.JBPopup;
 import com.intellij.openapi.ui.popup.JBPopupAdapter;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
@@ -31,7 +32,9 @@ import com.intellij.util.Function;
 import com.intellij.util.PlatformIcons;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.EmptyIcon;
+import sun.swing.SwingUtilities2;
 
+import javax.accessibility.*;
 import javax.swing.*;
 import javax.swing.event.TableModelEvent;
 import java.awt.*;
@@ -68,16 +71,19 @@ public class JBComboBoxTableCellEditorComponent extends JBLabel {
 
   @SuppressWarnings({"GtkPreferredJComboBoxRenderer"})
   private ListCellRenderer myRenderer = new DefaultListCellRenderer() {
+    private boolean myChecked;
     public Icon myEmptyIcon;
 
     @Override
     public Component getListCellRendererComponent(JList list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
       final JLabel label = (JLabel)super.getListCellRendererComponent(list, myToString.fun(value), index, isSelected, cellHasFocus);
-      if (value == myValue) {
+      myChecked = (value == myValue);
+      if (myChecked) {
         label.setIcon(getIcon(isSelected));
       } else {
         label.setIcon(getEmptyIcon());
       }
+      label.putClientProperty(SwingUtilities2.AA_TEXT_PROPERTY_KEY, AntialiasingType.getAAHintForSwingComponent());
       return label;
     }
 
@@ -93,6 +99,30 @@ public class JBComboBoxTableCellEditorComponent extends JBLabel {
       return small
              ? selected ? PlatformIcons.CHECK_ICON_SMALL_SELECTED : PlatformIcons.CHECK_ICON_SMALL
              : selected ? PlatformIcons.CHECK_ICON_SELECTED : PlatformIcons.CHECK_ICON;
+    }
+
+    @Override
+    public AccessibleContext getAccessibleContext() {
+      if (accessibleContext == null) {
+        accessibleContext = new AccessibleRenderer();
+      }
+      return accessibleContext;
+    }
+
+    class AccessibleRenderer extends AccessibleJLabel {
+      @Override
+      public AccessibleRole getAccessibleRole() {
+        return AccessibleRole.CHECK_BOX;
+      }
+
+      @Override
+      public AccessibleStateSet getAccessibleStateSet() {
+        AccessibleStateSet set = super.getAccessibleStateSet();
+        if (myChecked) {
+          set.add(AccessibleState.CHECKED);
+        }
+        return set;
+      }
     }
   };
 
@@ -146,26 +176,20 @@ public class JBComboBoxTableCellEditorComponent extends JBLabel {
     final boolean surrendersFocusOnKeystrokeOldValue = myTable instanceof JBTable ? ((JBTable)myTable).surrendersFocusOnKeyStroke() : myTable.getSurrendersFocusOnKeystroke();
     final JBPopup popup = JBPopupFactory.getInstance()
       .createListPopupBuilder(myList)
-      .setItemChoosenCallback(new Runnable() {
-        @Override
-        public void run() {
-          myValue = myList.getSelectedValue();
-          final ActionEvent event = new ActionEvent(myList, ActionEvent.ACTION_PERFORMED, "elementChosen");
-          for (ActionListener listener : myListeners) {
-            listener.actionPerformed(event);
-          }
-          TableUtil.stopEditing(myTable);
+      .setItemChoosenCallback(() -> {
+        myValue = myList.getSelectedValue();
+        final ActionEvent event = new ActionEvent(myList, ActionEvent.ACTION_PERFORMED, "elementChosen");
+        for (ActionListener listener : myListeners) {
+          listener.actionPerformed(event);
+        }
+        TableUtil.stopEditing(myTable);
 
-          myTable.setValueAt(myValue, myRow, myColumn); // on Mac getCellEditorValue() called before myValue is set.
-          myTable.tableChanged(new TableModelEvent(myTable.getModel(), myRow));  // force repaint
-        }
+        myTable.setValueAt(myValue, myRow, myColumn); // on Mac getCellEditorValue() called before myValue is set.
+        myTable.tableChanged(new TableModelEvent(myTable.getModel(), myRow));  // force repaint
       })
-      .setCancelCallback(new Computable<Boolean>() {
-        @Override
-        public Boolean compute() {
-          TableUtil.stopEditing(myTable);
-          return true;
-        }
+      .setCancelCallback(() -> {
+        TableUtil.stopEditing(myTable);
+        return true;
       })
       .addListener(new JBPopupAdapter() {
         @Override

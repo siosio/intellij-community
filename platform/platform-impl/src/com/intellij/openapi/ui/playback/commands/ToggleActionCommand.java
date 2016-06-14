@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,7 +50,7 @@ public class ToggleActionCommand extends AbstractCommand {
     String syntaxText = "Syntax error, expected: " + PREFIX + " " + ON + "|" + OFF + " actionName";
     if (args.length != 2) {
       context.error(syntaxText, getLine());
-      return new ActionCallback.Rejected();
+      return ActionCallback.REJECTED;
     }
     
     final boolean on;
@@ -60,19 +60,19 @@ public class ToggleActionCommand extends AbstractCommand {
       on = false;
     } else {
       context.error(syntaxText, getLine());
-      return new ActionCallback.Rejected();
+      return ActionCallback.REJECTED;
     }
     
     String actionId = args[1];
     final AnAction action = ActionManager.getInstance().getAction(actionId);
     if (action == null) {
       context.error("Unknown action id=" + actionId, getLine());
-      return new ActionCallback.Rejected();
+      return ActionCallback.REJECTED;
     }
 
     if (!(action instanceof ToggleAction)) {
       context.error("Action is not a toggle action id=" + actionId, getLine());
-      return new ActionCallback.Rejected();
+      return ActionCallback.REJECTED;
     }
 
     final InputEvent inputEvent = ActionCommand.getInputEvent(actionId);
@@ -81,24 +81,21 @@ public class ToggleActionCommand extends AbstractCommand {
     context.getRobot().delay(Registry.intValue("actionSystem.playback.delay"));
 
     IdeFocusManager fm = IdeFocusManager.getGlobalInstance();
-    fm.doWhenFocusSettlesDown(new Runnable() {
-      @Override
-      public void run() {
-        final Presentation presentation = (Presentation)action.getTemplatePresentation().clone();
-        AnActionEvent event =
-            new AnActionEvent(inputEvent, DataManager.getInstance()
-                .getDataContext(KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner()), ActionPlaces.UNKNOWN,
-                              presentation, ActionManager.getInstance(), 0);
+    fm.doWhenFocusSettlesDown(() -> {
+      final Presentation presentation = (Presentation)action.getTemplatePresentation().clone();
+      AnActionEvent event =
+          new AnActionEvent(inputEvent, DataManager.getInstance()
+              .getDataContext(KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner()), ActionPlaces.UNKNOWN,
+                            presentation, ActionManager.getInstance(), 0);
 
-        ActionUtil.performDumbAwareUpdate(action, event, false);
+      ActionUtil.performDumbAwareUpdate(action, event, false);
 
-        Boolean state = (Boolean)event.getPresentation().getClientProperty(ToggleAction.SELECTED_PROPERTY);
-        if (state.booleanValue() != on) {
-          ActionManager.getInstance().tryToExecute(action, inputEvent, null, ActionPlaces.UNKNOWN, true).doWhenProcessed(result.createSetDoneRunnable());
-        }
-        else {
-          result.setDone();
-        }
+      Boolean state = (Boolean)event.getPresentation().getClientProperty(ToggleAction.SELECTED_PROPERTY);
+      if (state.booleanValue() != on) {
+        ActionManager.getInstance().tryToExecute(action, inputEvent, null, ActionPlaces.UNKNOWN, true).doWhenProcessed(result.createSetDoneRunnable());
+      }
+      else {
+        result.setDone();
       }
     });
 

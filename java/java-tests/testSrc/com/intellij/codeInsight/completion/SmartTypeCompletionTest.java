@@ -428,6 +428,8 @@ public class SmartTypeCompletionTest extends LightFixtureCompletionTestCase {
 
   public void testJavadocThrows() throws Throwable { doTest(); }
 
+  public void testMethodThrows() throws Throwable { doTest(); }
+
   public void testDoNotExcludeAssignedVariable() throws Throwable { doTest(); }
 
   public void testArrayIndexTailType() throws Throwable { doTest(); }
@@ -450,6 +452,8 @@ public class SmartTypeCompletionTest extends LightFixtureCompletionTestCase {
   public void testNoSecondMethodTypeArguments() throws Throwable { doTest(Lookup.REPLACE_SELECT_CHAR); }
 
   public void testNoFieldsInSuperConstructorCall() throws Throwable { doTest(); }
+
+  public void testChainMethodsInSuperConstructorCall() throws Throwable { doTest(); }
 
   public void testNoUninitializedFieldsInConstructor() throws Throwable {
     configureByTestName();
@@ -696,6 +700,7 @@ public class SmartTypeCompletionTest extends LightFixtureCompletionTestCase {
   }
 
   public void testUseIntConstantsFromTargetClass() throws Throwable { doTest(); }
+  public void testUseObjectConstantsFromTargetClass() { doTest(); }
   public void testUseIntConstantsFromTargetClassReturnValue() throws Throwable { doTest(); }
   public void testUseIntConstantsFromConstructedClass() throws Throwable { doTest(); }
   public void testUseIntConstantsInPlus() throws Throwable { doTest(); }
@@ -722,6 +727,7 @@ public class SmartTypeCompletionTest extends LightFixtureCompletionTestCase {
 
   public void testMethodColon() throws Exception { doFirstItemTest(':'); }
   public void testVariableColon() throws Exception { doFirstItemTest(':'); }
+  public void testConditionalColonOnNextLine() { doFirstItemTest(':'); }
 
   private void doFirstItemTest(char c) {
     configureByTestName();
@@ -833,7 +839,7 @@ public class SmartTypeCompletionTest extends LightFixtureCompletionTestCase {
   }
 
   public void testIDEADEV2626() throws Exception {
-    doActionTest();
+    doItemTest();
   }
 
   public void testDontSuggestWildcardGenerics() { doItemTest(); }
@@ -909,6 +915,7 @@ public class SmartTypeCompletionTest extends LightFixtureCompletionTestCase {
   public void testTypeArgs2() throws Exception {
     doTest();
   }
+  public void testTypeArgsOverwrite() { doTest(); }
 
   public void testIfConditionExpectedType() throws Exception { doTest(); }
 
@@ -1124,12 +1131,7 @@ public class SmartTypeCompletionTest extends LightFixtureCompletionTestCase {
   public void testInnerEnum() throws Exception {
     configureByTestName();
 
-    getLookup().setCurrentItem(ContainerUtil.find(myItems, new Condition<LookupElement>() {
-      @Override
-      public boolean value(final LookupElement lookupItem) {
-        return "Bar.Fubar.Bar".equals(lookupItem.getLookupString());
-      }
-    }));
+    getLookup().setCurrentItem(ContainerUtil.find(myItems, lookupItem -> "Bar.Fubar.Bar".equals(lookupItem.getLookupString())));
     select('\n');
     checkResultByTestName();
   }
@@ -1148,9 +1150,20 @@ public class SmartTypeCompletionTest extends LightFixtureCompletionTestCase {
     doFirstItemTest('\t');
   }
 
+  public void testSuggestMethodReturnType() { 
+    configureByTestName();
+    myFixture.assertPreferredCompletionItems(0, "Serializable", "CharSequence", "Object");
+  }
+
+  public void testSuggestCastReturnTypeByCalledMethod() { doTest(); }
+
+  public void testOnlyInterfacesInImplements() { doTest(); }
+
   public void testNonStaticField() throws Exception { doAntiTest(); }
 
-  private void doActionTest() throws Exception {
+  public void testLocalClassInExpectedTypeArguments() { doTest(); }
+
+  private void doActionTest() {
     configureByTestName();
     checkResultByTestName();
   }
@@ -1216,4 +1229,11 @@ public class SmartTypeCompletionTest extends LightFixtureCompletionTestCase {
   private CommonCodeStyleSettings getCodeStyleSettings() {
     return CodeStyleSettingsManager.getSettings(getProject()).getCommonSettings(JavaLanguage.INSTANCE);
   }
+
+  public void testOnlyCompatibleTypes() {
+    configureByTestName();
+    assertOrderedEquals(myFixture.getLookupElementStrings(), "get2");
+  }
+
+  public void testQualifyOuterClassCall() { doActionTest(); }
 }

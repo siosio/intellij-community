@@ -53,7 +53,7 @@ public class ChangeListWorker implements ChangeListsWriteOperations {
 
   private ChangeListsIndexes myIdx;
   private final ChangesDelta myDelta;
-  private final List<String> myListsToDisappear;
+  private final Set<String> myListsToDisappear;
 
   public ChangeListWorker(final Project project, final PlusMinusModify<BaseRevision> deltaListener) {
     myProject = project;
@@ -63,7 +63,7 @@ public class ChangeListWorker implements ChangeListsWriteOperations {
     mySwitchedHolder = new SwitchedFileHolder(project, FileHolder.HolderType.SWITCHED);
 
     myDelta = new ChangesDelta(deltaListener);
-    myListsToDisappear = new LinkedList<String>();
+    myListsToDisappear = ContainerUtil.newLinkedHashSet();
   }
 
   private ChangeListWorker(final ChangeListWorker worker) {
@@ -73,7 +73,7 @@ public class ChangeListWorker implements ChangeListsWriteOperations {
     myLocallyDeleted = worker.myLocallyDeleted.copy();
     mySwitchedHolder = worker.mySwitchedHolder.copy();
     myDelta = worker.myDelta;
-    myListsToDisappear = new LinkedList<String>(worker.myListsToDisappear);
+    myListsToDisappear = ContainerUtil.newLinkedHashSet(worker.myListsToDisappear);
     
     LocalChangeList defaultList = null;
     for (LocalChangeList changeList : worker.myMap.values()) {
@@ -234,7 +234,7 @@ public class ChangeListWorker implements ChangeListsWriteOperations {
     return changeList != null;
   }
 
-  public void addChangeToCorrespondingList(final Change change, final VcsKey vcsKey) {
+  public void addChangeToCorrespondingList(@NotNull Change change, final VcsKey vcsKey) {
     final String path = ChangesUtil.getFilePath(change).getPath();
     LOG.debug("[addChangeToCorrespondingList] for change " + path  + " type: " + change.getType() + " have before revision: " + (change.getBeforeRevision() != null));
     assert myDefault != null;
@@ -459,15 +459,13 @@ public class ChangeListWorker implements ChangeListsWriteOperations {
     return new ArrayList<VirtualFile>(result);
   }
 
+  @Nullable
   public LocalChangeList getListCopy(@NotNull final VirtualFile file) {
+    FilePath filePath = VcsUtil.getFilePath(file);
     for (LocalChangeList list : myMap.values()) {
       for (Change change : list.getChanges()) {
-        if (change.getAfterRevision() != null &&
-            Comparing.equal(change.getAfterRevision().getFile().getVirtualFile(), file)) {
-          return list.copy();
-        }
-        if (change.getBeforeRevision() != null &&
-            Comparing.equal(change.getBeforeRevision().getFile().getVirtualFile(), file)) {
+        if (change.getAfterRevision() != null && Comparing.equal(change.getAfterRevision().getFile(), filePath) ||
+            change.getBeforeRevision() != null && Comparing.equal(change.getBeforeRevision().getFile(), filePath)) {
           return list.copy();
         }
       }
@@ -564,9 +562,9 @@ public class ChangeListWorker implements ChangeListsWriteOperations {
 
     private Couple<String> keyForChange(final Change change) {
       final FilePath beforePath = ChangesUtil.getBeforePath(change);
-      final String beforeKey = beforePath == null ? null : beforePath.getIOFile().getAbsolutePath();
+      final String beforeKey = beforePath == null ? null : beforePath.getPath();
       final FilePath afterPath = ChangesUtil.getAfterPath(change);
-      final String afterKey = afterPath == null ? null : afterPath.getIOFile().getAbsolutePath();
+      final String afterKey = afterPath == null ? null : afterPath.getPath();
       return Couple.of(beforeKey, afterKey);
     }
 
@@ -699,7 +697,7 @@ public class ChangeListWorker implements ChangeListsWriteOperations {
     if (changeCandidate == null) {
       return ThreeState.NO;
     }
-    return FileUtil.isAncestorThreeState(changeCandidate.getPath(), dir.getPath(), false);
+    return FileUtil.isAncestorThreeState(dir.getPath(), changeCandidate.getPath(), false);
   }
 
   @NotNull
@@ -726,6 +724,7 @@ public class ChangeListWorker implements ChangeListsWriteOperations {
     myListsToDisappear.addAll(names);
   }
 
+  @NotNull
   ChangeListManagerGate createSelfGate() {
     return new MyGate(this);
   }

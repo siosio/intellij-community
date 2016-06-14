@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -72,6 +72,7 @@ public interface IdeActions {
   @NonNls String ACTION_EDITOR_CLONE_CARET_ABOVE= "EditorCloneCaretAbove";
   @NonNls String ACTION_EDITOR_TOGGLE_STICKY_SELECTION= "EditorToggleStickySelection";
   @NonNls String ACTION_EDITOR_TOGGLE_OVERWRITE_MODE= "EditorToggleInsertState";
+  @NonNls String ACTION_EDITOR_TOGGLE_CASE= "EditorToggleCase";
 
   @NonNls String ACTION_EDITOR_NEXT_TEMPLATE_VARIABLE = "NextTemplateVariable";
   @NonNls String ACTION_EDITOR_PREVIOUS_TEMPLATE_VARIABLE = "PreviousTemplateVariable";
@@ -111,6 +112,7 @@ public interface IdeActions {
   @NonNls String GROUP_MAIN_MENU = "MainMenu";
   @NonNls String GROUP_MAIN_TOOLBAR = "MainToolBar";
   @NonNls String GROUP_EDITOR_POPUP = "EditorPopupMenu";
+  @NonNls String GROUP_BASIC_EDITOR_POPUP = "BasicEditorPopupMenu";
   @NonNls String GROUP_CONSOLE_EDITOR_POPUP = "ConsoleEditorPopupMenu";
   @NonNls String GROUP_CUT_COPY_PASTE = "CutCopyPasteGroup";
   @NonNls String GROUP_EDITOR_TAB_POPUP = "EditorTabPopupMenu";
@@ -141,6 +143,7 @@ public interface IdeActions {
   @NonNls String ACTION_SELECT_NEXT_OCCURENCE = "SelectNextOccurrence";
   @NonNls String ACTION_SELECT_ALL_OCCURRENCES = "SelectAllOccurrences";
   @NonNls String ACTION_UNSELECT_PREVIOUS_OCCURENCE = "UnselectPreviousOccurrence";
+  @NonNls String ACTION_REPLACE = "Replace";
   @NonNls String ACTION_COMPILE = "Compile";
   @NonNls String ACTION_COMPILE_PROJECT = "CompileProject";
   @NonNls String ACTION_MAKE_MODULE = "MakeModule";
@@ -166,11 +169,15 @@ public interface IdeActions {
   @NonNls String ACTION_PREVIOUS_DIFF = "PreviousDiff";
   @NonNls String ACTION_NEXT_DIFF = "NextDiff";
   @NonNls String GROUP_DIFF_EDITOR_POPUP = "Diff.EditorPopupMenu";
+  @NonNls String DIFF_VIEWER_POPUP = "Diff.ViewerPopupMenu";
+  @NonNls String DIFF_VIEWER_TOOLBAR = "Diff.ViewerToolbar";
+  @NonNls String GROUP_DIFF_EDITOR_GUTTER_POPUP = "Diff.EditorGutterPopupMenu";
 
   @NonNls String ACTION_EXPAND_ALL = "ExpandAll";
   @NonNls String ACTION_COLLAPSE_ALL = "CollapseAll";
   @NonNls String ACTION_EXPORT_TO_TEXT_FILE = "ExportToTextFile";
 
+  @NonNls String ACTION_COLLAPSE_REGION = "CollapseRegion";
   @NonNls String ACTION_EXPAND_ALL_REGIONS = "ExpandAllRegions";
   @NonNls String ACTION_COLLAPSE_ALL_REGIONS = "CollapseAllRegions";
   @NonNls String ACTION_EXPAND_REGION_RECURSIVELY = "ExpandRegionRecursively";
@@ -194,9 +201,7 @@ public interface IdeActions {
 
   @NonNls String GROUP_FAVORITES_VIEW_POPUP = "FavoritesViewPopupMenu";
   @NonNls String ADD_TO_FAVORITES = "AddToFavorites";
-  @NonNls String REMOVE_FROM_FAVORITES = "RemoveFromFavorites";
   @NonNls String ADD_NEW_FAVORITES_LIST = "AddNewFavoritesList";
-  @NonNls String RENAME_FAVORITES_LIST = "RenameFavoritesList";
   @NonNls String REMOVE_FAVORITES_LIST = "RemoveFavoritesList";
   @NonNls String REMOVE_ALL_FAVORITES_LISTS_BUT_THIS = "RemoveAllFavoritesListsButThis";
 
@@ -222,7 +227,8 @@ public interface IdeActions {
 
   @NonNls String GROUP_OTHER_MENU = "OtherMenu";
   @NonNls String GROUP_EDITOR = "EditorActions";
-  @NonNls String GROUP_DEBUGGER = "DebuggerActions";
+
+  @Deprecated @NonNls String GROUP_DEBUGGER = "DebuggerActions";
   
   @NonNls String ACTION_TOGGLE_LINE_BREAKPOINT = "ToggleLineBreakpoint";
 
@@ -284,6 +290,7 @@ public interface IdeActions {
   @NonNls String ACTION_ANALYZE_DEPENDENCIES = "ShowPackageDeps";
   @NonNls String ACTION_ANALYZE_BACK_DEPENDENCIES = "ShowBackwardPackageDeps";
   @NonNls String ACTION_ANALYZE_CYCLIC_DEPENDENCIES = "ShowPackageCycles";
+  @NonNls String ACTION_ANALYZE_MODULE_DEPENDENCIES = "ShowModulesDependencies";
   @NonNls String GROUP_MOVE_MODULE_TO_GROUP = "MoveModuleToGroup";
   @NonNls String ACTION_CLEAR_TEXT = "TextComponent.ClearAction";
   @NonNls String ACTION_HIGHLIGHT_USAGES_IN_FILE = "HighlightUsagesInFile";
@@ -293,11 +300,14 @@ public interface IdeActions {
   @NonNls String ACTION_SHOW_ERROR_DESCRIPTION = "ShowErrorDescription";
 
   @NonNls String ACTION_EDITOR_DUPLICATE = "EditorDuplicate";
+  @NonNls String ACTION_EDITOR_DUPLICATE_LINES = "EditorDuplicateLines";
 
   @NonNls String GROUP_EDITOR_GUTTER = "EditorGutterPopupMenu";
 
   String ACTION_MOVE_STATEMENT_UP_ACTION = "MoveStatementUp";
   String ACTION_MOVE_STATEMENT_DOWN_ACTION = "MoveStatementDown";
+  String MOVE_ELEMENT_LEFT = "MoveElementLeft";
+  String MOVE_ELEMENT_RIGHT = "MoveElementRight";
   
   String ACTION_MOVE_LINE_UP_ACTION = "MoveLineUp";
 
@@ -317,4 +327,6 @@ public interface IdeActions {
   
   String ACTION_MARK_ALL_NOTIFICATIONS_AS_READ = "MarkNotificationsAsRead";
   String ACTION_SWITCHER = "Switcher";
+
+  @NonNls String INSPECTION_TOOL_WINDOW_TREE_POPUP = "InspectionToolWindow.TreePopup";
 }

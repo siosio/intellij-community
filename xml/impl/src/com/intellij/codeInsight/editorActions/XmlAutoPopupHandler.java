@@ -29,12 +29,13 @@ import com.intellij.psi.PsiWhiteSpace;
 import com.intellij.psi.impl.source.tree.injected.InjectedLanguageUtil;
 import com.intellij.psi.templateLanguages.TemplateLanguageFileViewProvider;
 import com.intellij.psi.xml.XmlTag;
+import com.intellij.xml.util.HtmlUtil;
 import com.intellij.xml.util.XmlUtil;
 
 public class XmlAutoPopupHandler extends TypedHandlerDelegate {
   @Override
   public Result checkAutoPopup(final char charTyped, final Project project, final Editor editor, final PsiFile file) {
-    final boolean isXmlLikeFile = file.getLanguage() instanceof XMLLanguage || file.getViewProvider().getBaseLanguage() instanceof XMLLanguage;
+    final boolean isXmlLikeFile = XmlGtTypedHandler.fileContainsXmlLanguage(file);
     boolean spaceInTag = isXmlLikeFile && charTyped == ' ';
 
     if (spaceInTag) {
@@ -57,33 +58,30 @@ public class XmlAutoPopupHandler extends TypedHandlerDelegate {
   }
 
   public static void autoPopupXmlLookup(final Project project, final Editor editor){
-    AutoPopupController.getInstance(project).autoPopupMemberLookup(editor, new Condition<PsiFile>() {
-      @Override
-      public boolean value(PsiFile file) {
-        int offset = editor.getCaretModel().getOffset();
+    AutoPopupController.getInstance(project).autoPopupMemberLookup(editor, file -> {
+      int offset = editor.getCaretModel().getOffset();
 
-        PsiElement lastElement = InjectedLanguageUtil.findElementAtNoCommit(file, offset - 1);
-        if (lastElement instanceof PsiFile) { //the very end of an injected file
-          lastElement = file.findElementAt(offset - 1);
-        }
-        if (lastElement == null || !lastElement.isValid()) return false;
-
-        if (doCompleteIfNeeded(offset, file, lastElement)) {
-          return true;
-        }
-
-        FileViewProvider fileViewProvider = file.getViewProvider();
-        Language templateDataLanguage;
-
-        final PsiElement parent = lastElement.getParent();
-        if (fileViewProvider instanceof TemplateLanguageFileViewProvider &&
-            (templateDataLanguage = ((TemplateLanguageFileViewProvider)fileViewProvider).getTemplateDataLanguage()) != parent.getLanguage()) {
-          lastElement = fileViewProvider.findElementAt(offset - 1, templateDataLanguage);
-          if (lastElement == null || !lastElement.isValid()) return false;
-          return doCompleteIfNeeded(offset, file, lastElement);
-        }
-        return false;
+      PsiElement lastElement = InjectedLanguageUtil.findElementAtNoCommit(file, offset - 1);
+      if (lastElement instanceof PsiFile) { //the very end of an injected file
+        lastElement = file.findElementAt(offset - 1);
       }
+      if (lastElement == null || !lastElement.isValid()) return false;
+
+      if (doCompleteIfNeeded(offset, file, lastElement)) {
+        return true;
+      }
+
+      FileViewProvider fileViewProvider = file.getViewProvider();
+      Language templateDataLanguage;
+
+      final PsiElement parent = lastElement.getParent();
+      if (fileViewProvider instanceof TemplateLanguageFileViewProvider &&
+          (templateDataLanguage = ((TemplateLanguageFileViewProvider)fileViewProvider).getTemplateDataLanguage()) != parent.getLanguage()) {
+        lastElement = fileViewProvider.findElementAt(offset - 1, templateDataLanguage);
+        if (lastElement == null || !lastElement.isValid()) return false;
+        return doCompleteIfNeeded(offset, file, lastElement);
+      }
+      return false;
     });
   }
 
@@ -122,7 +120,7 @@ public class XmlAutoPopupHandler extends TypedHandlerDelegate {
       if (element instanceof PsiWhiteSpace && parent != null) {
         language = parent.getLanguage();
       }
-      result = language instanceof XMLLanguage || isAntFile.booleanValue();
+      result = language instanceof XMLLanguage || HtmlUtil.supportsXmlTypedHandlers(file) || isAntFile.booleanValue();
       isRelevantLanguage.set(result);
     }
     return result.booleanValue();

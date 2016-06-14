@@ -53,9 +53,10 @@ public class GitCommand {
   public static final GitCommand LS_REMOTE = read("ls-remote");
   public static final GitCommand MERGE = write("merge");
   public static final GitCommand MERGE_BASE = read("merge-base");
+  public static final GitCommand MV = write("mv");
   public static final GitCommand PULL = write("pull");
   public static final GitCommand PUSH = write("push");
-  public static final GitCommand REBASE = writeSuspendable("rebase");
+  public static final GitCommand REBASE = write("rebase");
   public static final GitCommand REMOTE = read("remote");
   public static final GitCommand RESET = write("reset");
   public static final GitCommand REV_LIST = read("rev-list");
@@ -74,8 +75,7 @@ public class GitCommand {
 
   enum LockingPolicy {
     READ,
-    WRITE,
-    WRITE_SUSPENDABLE,
+    WRITE
   }
 
   @NotNull @NonNls private final String myName; // command name passed to git
@@ -119,11 +119,6 @@ public class GitCommand {
   @NotNull
   private static GitCommand write(@NotNull String name) {
     return new GitCommand(name, LockingPolicy.WRITE);
-  }
-
-  @NotNull
-  private static GitCommand writeSuspendable(@NotNull String name) {
-    return new GitCommand(name, LockingPolicy.WRITE_SUSPENDABLE);
   }
 
   @NotNull

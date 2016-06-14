@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ import javax.swing.*;
 
 public class DuplicateThrowsInspection extends BaseJavaBatchLocalInspectionTool implements CleanupLocalInspectionTool {
   @SuppressWarnings("PublicField")
-  public boolean ignoreSubclassing = false;
+  public boolean ignoreSubclassing;
 
   @Override
   @NotNull
@@ -63,8 +63,8 @@ public class DuplicateThrowsInspection extends BaseJavaBatchLocalInspectionTool 
         PsiJavaCodeReferenceElement[] refs = throwsList.getReferenceElements();
         PsiClassType[] types = throwsList.getReferencedTypes();
         for (int i = 0; i < types.length; i++) {
-          PsiClassType type = types[i];
           for (int j = i+1; j < types.length; j++) {
+            PsiClassType type = types[i];
             PsiClassType otherType = types[j];
             String problem = null;
             PsiJavaCodeReferenceElement ref = refs[i];

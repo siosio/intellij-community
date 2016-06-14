@@ -32,6 +32,7 @@ import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.keymap.KeymapUtil;
+import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.ListPopupStep;
@@ -206,12 +207,7 @@ public class ChooseRunConfigurationPopup implements ExecutorProvider {
     final DataContext dataContext = DataManager.getInstance().getDataContext();
     final Project project = CommonDataKeys.PROJECT.getData(dataContext);
     if (project != null) {
-      SwingUtilities.invokeLater(new Runnable() {
-        @Override
-        public void run() {
-          itemWrapper.perform(project, executor, dataContext);
-        }
-      });
+      itemWrapper.perform(project, executor, dataContext);
     }
   }
 
@@ -236,24 +232,7 @@ public class ChooseRunConfigurationPopup implements ExecutorProvider {
   }
 
   private static Action createNumberAction(final int number, final ListPopupImpl listPopup, final Executor executor) {
-    return new AbstractAction() {
-      @Override
-      public void actionPerformed(ActionEvent e) {
-        if (listPopup.getSpeedSearch().isHoldingFilter())
-          return;
-        for (final Object item : listPopup.getListStep().getValues()) {
-          if (item instanceof ItemWrapper && ((ItemWrapper)item).getMnemonic() == number) {
-            listPopup.setFinalRunnable(new Runnable() {
-              @Override
-              public void run() {
-                execute((ItemWrapper)item, executor);
-              }
-            });
-            listPopup.closeOk(null);
-          }
-        }
-      }
-    };
+    return new MyAbstractAction(listPopup, number, executor);
   }
 
   private abstract static class Wrapper {
@@ -496,25 +475,17 @@ public class ChooseRunConfigurationPopup implements ExecutorProvider {
       if (myAction.myEditConfiguration) {
         final Object o = wrapper.getValue();
         if (o instanceof RunnerAndConfigurationSettingsImpl) {
-          return doFinalStep(new Runnable() {
-            @Override
-            public void run() {
-              myAction.editConfiguration(myProject, (RunnerAndConfigurationSettings)o);
-            }
-          });
+          return doFinalStep(() -> myAction.editConfiguration(myProject, (RunnerAndConfigurationSettings)o));
         }
       }
 
       if (finalChoice && wrapper.available(myAction.getExecutor())) {
-        return doFinalStep(new Runnable() {
-          @Override
-          public void run() {
-            if (myAction.getExecutor() == myAction.myAlternativeExecutor) {
-              PropertiesComponent.getInstance().setValue(myAction.myAddKey, Boolean.toString(true));
-            }
-
-            wrapper.perform(myProject, myAction.getExecutor(), DataManager.getInstance().getDataContext());
+        return doFinalStep(() -> {
+          if (myAction.getExecutor() == myAction.myAlternativeExecutor) {
+            PropertiesComponent.getInstance().setValue(myAction.myAddKey, Boolean.toString(true));
           }
+
+          wrapper.perform(myProject, myAction.getExecutor(), DataManager.getInstance().getDataContext());
         });
       }
       else {
@@ -641,12 +612,7 @@ public class ChooseRunConfigurationPopup implements ExecutorProvider {
 
     @Override
     public PopupStep onChosen(final ActionWrapper selectedValue, boolean finalChoice) {
-      return doFinalStep(new Runnable() {
-        @Override
-        public void run() {
-          selectedValue.perform();
-        }
-      });
+      return doFinalStep(() -> selectedValue.perform());
     }
 
     @Override
@@ -748,6 +714,30 @@ public class ChooseRunConfigurationPopup implements ExecutorProvider {
             }
           }
           myLabel.setText("");
+        }
+      }
+    }
+  }
+
+  private static class MyAbstractAction extends AbstractAction implements DumbAware {
+    private final ListPopupImpl myListPopup;
+    private final int myNumber;
+    private final Executor myExecutor;
+
+    public MyAbstractAction(ListPopupImpl listPopup, int number, Executor executor) {
+      myListPopup = listPopup;
+      myNumber = number;
+      myExecutor = executor;
+    }
+
+    @Override
+    public void actionPerformed(ActionEvent e) {
+      if (myListPopup.getSpeedSearch().isHoldingFilter())
+        return;
+      for (final Object item : myListPopup.getListStep().getValues()) {
+        if (item instanceof ItemWrapper && ((ItemWrapper)item).getMnemonic() == myNumber) {
+          myListPopup.setFinalRunnable(() -> execute((ItemWrapper)item, myExecutor));
+          myListPopup.closeOk(null);
         }
       }
     }
@@ -873,31 +863,35 @@ public class ChooseRunConfigurationPopup implements ExecutorProvider {
       for (RunnerAndConfigurationSettings settings : myConfigurations) {
         steps.add(new ConfigurationActionsStep(project, action, settings, false));
       }
-      return new FolderStep(myProject, myExecutorProvider, null, steps);
+      return new FolderStep(myProject, myExecutorProvider, null, steps, action);
     }
   }
 
   private static final class FolderStep extends BaseListPopupStep<ConfigurationActionsStep> {
     private final Project myProject;
+    private final ChooseRunConfigurationPopup myPopup;
     private final ExecutorProvider myExecutorProvider;
 
-    private FolderStep(Project project, ExecutorProvider executorProvider, String folderName, List<ConfigurationActionsStep> children
-    ) {
+    private FolderStep(Project project, ExecutorProvider executorProvider, String folderName, List<ConfigurationActionsStep> children,
+                       ChooseRunConfigurationPopup popup) {
       super(folderName, children, new ArrayList<Icon>());
       myProject = project;
       myExecutorProvider = executorProvider;
+      myPopup = popup;
     }
 
     @Override
     public PopupStep onChosen(final ConfigurationActionsStep selectedValue, boolean finalChoice) {
       if (finalChoice) {
-        return doFinalStep(new Runnable() {
-          @Override
-          public void run() {
-            RunnerAndConfigurationSettings settings = selectedValue.getSettings();
-            RunManagerEx.getInstanceEx(myProject).setSelectedConfiguration(settings);
-            ExecutionUtil.runConfiguration(settings, myExecutorProvider.getExecutor());
-          }
+        if (myPopup.myEditConfiguration) {
+          final RunnerAndConfigurationSettings settings = selectedValue.getSettings();
+          return doFinalStep(() -> myPopup.editConfiguration(myProject, settings));
+        }
+
+        return doFinalStep(() -> {
+          RunnerAndConfigurationSettings settings = selectedValue.getSettings();
+          RunManagerEx.getInstanceEx(myProject).setSelectedConfiguration(settings);
+          ExecutionUtil.runConfiguration(settings, myExecutorProvider.getExecutor());
         });
       } else {
         return selectedValue;
@@ -947,13 +941,10 @@ public class ChooseRunConfigurationPopup implements ExecutorProvider {
               super.init();
             }
           }.showAndGet()) {
-            ApplicationManager.getApplication().invokeLater(new Runnable() {
-              @Override
-              public void run() {
-                RunnerAndConfigurationSettings configuration = RunManager.getInstance(project).getSelectedConfiguration();
-                if (configuration != null) {
-                  ExecutionUtil.runConfiguration(configuration, executor);
-                }
+            ApplicationManager.getApplication().invokeLater(() -> {
+              RunnerAndConfigurationSettings configuration = RunManager.getInstance(project).getSelectedConfiguration();
+              if (configuration != null) {
+                ExecutionUtil.runConfiguration(configuration, executor);
               }
             }, project.getDisposed());
           }

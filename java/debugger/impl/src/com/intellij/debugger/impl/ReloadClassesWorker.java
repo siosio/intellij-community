@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -106,9 +106,6 @@ class ReloadClassesWorker {
 
     final DebugProcessImpl debugProcess = getDebugProcess();
     final VirtualMachineProxyImpl virtualMachineProxy = debugProcess.getVirtualMachineProxy();
-    if(virtualMachineProxy == null) {
-      return;
-    }
 
     final Project project = debugProcess.getProject();
     final BreakpointManager breakpointManager = (DebuggerManagerEx.getInstanceEx(project)).getBreakpointManager();
@@ -121,6 +118,10 @@ class ReloadClassesWorker {
 
       int processedEntriesCount = 0;
       for (final Map.Entry<String, HotSwapFile> entry : modifiedClasses.entrySet()) {
+        // stop if process is finished already
+        if (debugProcess.isDetached() || debugProcess.isDetaching()) {
+          break;
+        }
         if (redefineProcessor.getProcessedClassesCount() == 0 && myProgress.isCancelled()) {
           // once at least one class has been actually reloaded, do not interrupt the whole process
           break;
@@ -150,7 +151,8 @@ class ReloadClassesWorker {
       final int partiallyRedefinedClassesCount = redefineProcessor.getPartiallyRedefinedClassesCount();
       if (partiallyRedefinedClassesCount == 0) {
         myProgress.addMessage(
-          myDebuggerSession, MessageCategory.INFORMATION, DebuggerBundle.message("status.classes.reloaded", redefineProcessor.getProcessedClassesCount())
+          myDebuggerSession, MessageCategory.INFORMATION,
+          DebuggerBundle.message("status.classes.reloaded", redefineProcessor.getProcessedClassesCount())
         );
       }
       else {
@@ -160,9 +162,7 @@ class ReloadClassesWorker {
         myProgress.addMessage(myDebuggerSession, MessageCategory.WARNING, message);
       }
 
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("classes reloaded");
-      }
+      LOG.debug("classes reloaded");
     }
     catch (Throwable e) {
       processException(e);
@@ -172,7 +172,7 @@ class ReloadClassesWorker {
     SuspendContextImpl suspendContext = context.getSuspendContext();
     if (suspendContext != null) {
       XExecutionStack stack = suspendContext.getActiveExecutionStack();
-      if (stack instanceof JavaExecutionStack) {
+      if (stack != null) {
         ((JavaExecutionStack)stack).initTopFrame();
       }
     }
@@ -180,31 +180,29 @@ class ReloadClassesWorker {
     final Semaphore waitSemaphore = new Semaphore();
     waitSemaphore.down();
     //noinspection SSBasedInspection
-    SwingUtilities.invokeLater(new Runnable() {
-      public void run() {
-        try {
-          if (!project.isDisposed()) {
-            final BreakpointManager breakpointManager = (DebuggerManagerEx.getInstanceEx(project)).getBreakpointManager();
-            breakpointManager.reloadBreakpoints();
-            debugProcess.getRequestsManager().clearWarnings();
-            if (LOG.isDebugEnabled()) {
-              LOG.debug("requests updated");
-              LOG.debug("time stamp set");
-            }
-            myDebuggerSession.refresh(false);
+    SwingUtilities.invokeLater(() -> {
+      try {
+        if (!project.isDisposed()) {
+          final BreakpointManager breakpointManager1 = (DebuggerManagerEx.getInstanceEx(project)).getBreakpointManager();
+          breakpointManager1.reloadBreakpoints();
+          debugProcess.getRequestsManager().clearWarnings();
+          if (LOG.isDebugEnabled()) {
+            LOG.debug("requests updated");
+            LOG.debug("time stamp set");
+          }
+          myDebuggerSession.refresh(false);
 
-            XDebugSession session = myDebuggerSession.getXDebugSession();
-            if (session != null) {
-              session.rebuildViews();
-            }
+          XDebugSession session = myDebuggerSession.getXDebugSession();
+          if (session != null) {
+            session.rebuildViews();
           }
         }
-        catch (Throwable e) {
-          LOG.error(e);
-        }
-        finally {
-          waitSemaphore.up();
-        }
+      }
+      catch (Throwable e) {
+        LOG.error(e);
+      }
+      finally {
+        waitSemaphore.up();
       }
     });
 
@@ -245,7 +243,7 @@ class ReloadClassesWorker {
      */
     private static final int CLASSES_CHUNK_SIZE = 100;
     private final VirtualMachineProxyImpl myVirtualMachineProxy;
-    private final Map<ReferenceType, byte[]> myRedefineMap = new HashMap<ReferenceType, byte[]>();
+    private final Map<ReferenceType, byte[]> myRedefineMap = new HashMap<>();
     private int myProcessedClassesCount;
     private int myPartiallyRedefinedClassesCount;
 

@@ -24,7 +24,6 @@ import com.intellij.refactoring.changeSignature.JavaThrownExceptionInfo;
 import com.intellij.refactoring.changeSignature.ParameterInfoImpl;
 import com.intellij.refactoring.changeSignature.ThrownExceptionInfo;
 import com.intellij.refactoring.util.CanonicalTypes;
-import com.intellij.util.IncorrectOperationException;
 
 import java.util.HashSet;
 
@@ -153,6 +152,13 @@ public class ChangeSignatureTest extends ChangeSignatureBaseTest {
     }, false);
   }
 
+  public void testVarargMethodToNonVarag() throws Exception {
+    doTest(null, new ParameterInfoImpl[]{
+      new ParameterInfoImpl(0, "i", PsiType.INT),
+      new ParameterInfoImpl(-1, "b", PsiType.BOOLEAN)
+    }, false);
+  }
+
   public void testParamJavadoc() {
     doTest(null, new ParameterInfoImpl[]{
       new ParameterInfoImpl(1, "z", PsiType.INT),
@@ -241,6 +247,12 @@ public class ChangeSignatureTest extends ChangeSignatureBaseTest {
     }, false);
   }
 
+  public void testJavadocOfDeleted() {
+    doTest(null, new ParameterInfoImpl[]{
+      new ParameterInfoImpl(0, "role", PsiType.INT),
+    }, false);
+  }
+
   public void testCovariantReturnType() {
     doTest(CommonClassNames.JAVA_LANG_RUNNABLE, new ParameterInfoImpl[0], false);
   }
@@ -252,10 +264,8 @@ public class ChangeSignatureTest extends ChangeSignatureBaseTest {
 
   public void testAlreadyHandled() {
     doTest(null, null, null, new SimpleParameterGen(new ParameterInfoImpl[0]),
-           method -> {
-             return new ThrownExceptionInfo[]{
-               new JavaThrownExceptionInfo(-1, myFactory.createTypeByFQClassName("java.lang.Exception", method.getResolveScope()))
-             };
+           method -> new ThrownExceptionInfo[]{
+             new JavaThrownExceptionInfo(-1, myFactory.createTypeByFQClassName("java.lang.Exception", method.getResolveScope()))
            },
            false
     );
@@ -263,10 +273,8 @@ public class ChangeSignatureTest extends ChangeSignatureBaseTest {
 
   public void testConstructorException() {
     doTest(null, null, null, new SimpleParameterGen(new ParameterInfoImpl[0]),
-           method -> {
-             return new ThrownExceptionInfo[]{
-               new JavaThrownExceptionInfo(-1, myFactory.createTypeByFQClassName("java.io.IOException", method.getResolveScope()))
-             };
+           method -> new ThrownExceptionInfo[]{
+             new JavaThrownExceptionInfo(-1, myFactory.createTypeByFQClassName("java.io.IOException", method.getResolveScope()))
            },
            false
     );
@@ -274,10 +282,8 @@ public class ChangeSignatureTest extends ChangeSignatureBaseTest {
 
   public void testAddRuntimeException() {
     doTest(null, null, null, new SimpleParameterGen(new ParameterInfoImpl[0]),
-           method -> {
-             return new ThrownExceptionInfo[]{
-               new JavaThrownExceptionInfo(-1, myFactory.createTypeByFQClassName("java.lang.RuntimeException", method.getResolveScope()))
-             };
+           method -> new ThrownExceptionInfo[]{
+             new JavaThrownExceptionInfo(-1, myFactory.createTypeByFQClassName("java.lang.RuntimeException", method.getResolveScope()))
            },
            false
     );
@@ -285,10 +291,8 @@ public class ChangeSignatureTest extends ChangeSignatureBaseTest {
 
   public void testAddException() {
     doTest(null, null, null, new SimpleParameterGen(new ParameterInfoImpl[0]),
-           method -> {
-             return new ThrownExceptionInfo[]{
-               new JavaThrownExceptionInfo(-1, myFactory.createTypeByFQClassName("java.lang.Exception", method.getResolveScope()))
-             };
+           method -> new ThrownExceptionInfo[]{
+             new JavaThrownExceptionInfo(-1, myFactory.createTypeByFQClassName("java.lang.Exception", method.getResolveScope()))
            },
            false
     );
@@ -321,6 +325,31 @@ public class ChangeSignatureTest extends ChangeSignatureBaseTest {
     }, false);
   }
 
+  public void testReorderParamsOfFunctionalInterface() {
+    doTest(null, null, null, method -> new ParameterInfoImpl[]{
+      new ParameterInfoImpl(1, "b", PsiType.INT),
+      new ParameterInfoImpl(0, "a", PsiType.BOOLEAN)
+    }, false);
+  }
+
+  public void testReorderParamsOfFunctionalInterfaceExpandMethodReference() {
+    GenParams genParams = method -> new ParameterInfoImpl[]{
+      new ParameterInfoImpl(1, "b", PsiType.INT),
+      new ParameterInfoImpl(0, "a", PsiType.INT)
+    };
+    doTest(null, null, null, genParams, new SimpleExceptionsGen(), false, true);
+  }
+
+  public void testExpandMethodReferenceToDeleteParameter() {
+    GenParams genParams = method -> new ParameterInfoImpl[0];
+    doTest(null, null, null, genParams, new SimpleExceptionsGen(), false, true);
+  }
+
+  public void testRenameMethodUsedInMethodReference() {
+    GenParams genParams = method -> new ParameterInfoImpl[] {new ParameterInfoImpl(0, "a", PsiType.INT)};
+    doTest(PsiModifier.PRIVATE, "alwaysFalse", null, genParams, new SimpleExceptionsGen(), false, false);
+  }
+
   public void testMethodParametersAlignmentAfterMethodNameChange() {
     getJavaSettings().ALIGN_MULTILINE_PARAMETERS = true;
     getJavaSettings().ALIGN_MULTILINE_PARAMETERS_IN_CALLS = true;
@@ -337,6 +366,14 @@ public class ChangeSignatureTest extends ChangeSignatureBaseTest {
     getJavaSettings().ALIGN_MULTILINE_PARAMETERS = true;
     getJavaSettings().ALIGN_MULTILINE_PARAMETERS_IN_CALLS = true;
     doTest(null, null, "Exception", new SimpleParameterGen(), new SimpleExceptionsGen(), false);
+  }
+
+  public void testRemoveOverride() {
+    doTest(null, null, null, new ParameterInfoImpl[0], new ThrownExceptionInfo[0], false);
+  }
+
+  public void testPreserveOverride() {
+    doTest(null, null, null, new ParameterInfoImpl[0], new ThrownExceptionInfo[0], false);
   }
 
   public void testVisibilityOfOverriddenMethod() {
@@ -365,6 +402,28 @@ public class ChangeSignatureTest extends ChangeSignatureBaseTest {
                                  CanonicalTypes.createTypeWrapper(PsiType.VOID), new ParameterInfoImpl[]{
       new ParameterInfoImpl(0, parameters[0].getName(), parameters[0].getType()),
       new ParameterInfoImpl(-1, "b", PsiType.BOOLEAN)}, null, propagateParametersMethods, null
+    ).run();
+    checkResultByFile(basePath + "_after.java");
+  }
+  
+  public void testPropagateParameterWithOverrider() {
+    String basePath = getRelativePath() + getTestName(false);
+    configureByFile(basePath + ".java");
+    final PsiElement targetElement = TargetElementUtil.findTargetElement(getEditor(), TargetElementUtil.ELEMENT_NAME_ACCEPTED);
+    assertTrue("<caret> is not on method name", targetElement instanceof PsiMethod);
+    PsiMethod method = (PsiMethod)targetElement;
+    final PsiClass containingClass = method.getContainingClass();
+    assertTrue(containingClass != null);
+    final PsiMethod[] callers = containingClass.findMethodsByName("caller", false);
+    assertTrue(callers.length > 0);
+    final PsiMethod caller = callers[0];
+    final HashSet<PsiMethod> propagateParametersMethods = new HashSet<>();
+    propagateParametersMethods.add(caller);
+    final PsiParameter[] parameters = method.getParameterList().getParameters();
+    new ChangeSignatureProcessor(getProject(), method, false, null, method.getName(),
+                                 CanonicalTypes.createTypeWrapper(PsiType.VOID), new ParameterInfoImpl[]{
+      new ParameterInfoImpl(0, parameters[0].getName(), parameters[0].getType()),
+      new ParameterInfoImpl(-1, "b", PsiType.BOOLEAN, "true")}, null, propagateParametersMethods, null
     ).run();
     checkResultByFile(basePath + "_after.java");
   }

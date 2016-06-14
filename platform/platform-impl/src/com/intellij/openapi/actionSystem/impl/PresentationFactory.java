@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,19 +17,18 @@ package com.intellij.openapi.actionSystem.impl;
 
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.Presentation;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.util.containers.WeakHashMap;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.WeakHashMap;
+import java.util.Map;
 
 public class PresentationFactory {
-  private final WeakHashMap<AnAction,Presentation> myAction2Presentation;
-
-  public PresentationFactory() {
-    myAction2Presentation = new WeakHashMap<AnAction, Presentation>();
-  }
+  private final Map<AnAction,Presentation> myAction2Presentation = new WeakHashMap<>();
 
   @NotNull
   public final Presentation getPresentation(@NotNull AnAction action){
+    ApplicationManager.getApplication().assertIsDispatchThread();
     Presentation presentation = myAction2Presentation.get(action);
     if (presentation == null || !action.isDefaultIcon()){
       Presentation templatePresentation = action.getTemplatePresentation();
@@ -50,6 +49,7 @@ public class PresentationFactory {
   }
 
   public void reset() {
+    ApplicationManager.getApplication().assertIsDispatchThread();
     myAction2Presentation.clear();
   }
 }

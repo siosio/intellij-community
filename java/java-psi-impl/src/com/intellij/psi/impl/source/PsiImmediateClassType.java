@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -79,11 +79,11 @@ public class PsiImmediateClassType extends PsiClassType.Stub {
   };
 
   public PsiImmediateClassType(@NotNull PsiClass aClass, @NotNull PsiSubstitutor substitutor) {
-    this(aClass, substitutor, null, PsiAnnotation.EMPTY_ARRAY);
+    this(aClass, substitutor, null, TypeAnnotationProvider.EMPTY);
   }
 
   public PsiImmediateClassType(@NotNull PsiClass aClass, @NotNull PsiSubstitutor substitutor, @Nullable LanguageLevel level) {
-    this(aClass, substitutor, level, PsiAnnotation.EMPTY_ARRAY);
+    this(aClass, substitutor, level, TypeAnnotationProvider.EMPTY);
   }
 
   public PsiImmediateClassType(@NotNull PsiClass aClass,
@@ -91,6 +91,17 @@ public class PsiImmediateClassType extends PsiClassType.Stub {
                                @Nullable LanguageLevel level,
                                @NotNull PsiAnnotation... annotations) {
     super(level, annotations);
+    myClass = aClass;
+    myManager = aClass.getManager();
+    mySubstitutor = substitutor;
+    assert substitutor.isValid();
+  }
+
+  public PsiImmediateClassType(@NotNull PsiClass aClass,
+                               @NotNull PsiSubstitutor substitutor,
+                               @Nullable LanguageLevel level,
+                               @NotNull TypeAnnotationProvider provider) {
+    super(level, provider);
     myClass = aClass;
     myManager = aClass.getManager();
     mySubstitutor = substitutor;
@@ -106,6 +117,7 @@ public class PsiImmediateClassType extends PsiClassType.Stub {
   public String getClassName() {
     return myClass.getName();
   }
+
   @Override
   @NotNull
   public PsiType[] getParameters() {
@@ -117,9 +129,10 @@ public class PsiImmediateClassType extends PsiClassType.Stub {
     List<PsiType> lst = new ArrayList<PsiType>();
     for (PsiTypeParameter parameter : parameters) {
       PsiType substituted = mySubstitutor.substitute(parameter);
-      if (substituted != null) {
-        lst.add(substituted);
+      if (substituted == null) {
+        return PsiType.EMPTY_ARRAY;
       }
+      lst.add(substituted);
     }
     return lst.toArray(createArray(lst.size()));
   }
@@ -268,6 +281,10 @@ public class PsiImmediateClassType extends PsiClassType.Stub {
 
   @Override
   public boolean equalsToText(@NotNull String text) {
+    String name = myClass.getName();
+    if (name == null || !text.contains(name)) return false;
+    if (text.equals(getCanonicalText(false))) return true;
+
     PsiElementFactory factory = JavaPsiFacade.getInstance(myManager.getProject()).getElementFactory();
     final PsiType patternType;
     try {
@@ -294,6 +311,6 @@ public class PsiImmediateClassType extends PsiClassType.Stub {
   @NotNull
   @Override
   public PsiClassType setLanguageLevel(@NotNull LanguageLevel level) {
-    return level.equals(myLanguageLevel) ? this : new PsiImmediateClassType(myClass, mySubstitutor, level, getAnnotations());
+    return level.equals(myLanguageLevel) ? this : new PsiImmediateClassType(myClass, mySubstitutor, level, getAnnotationProvider());
   }
 }

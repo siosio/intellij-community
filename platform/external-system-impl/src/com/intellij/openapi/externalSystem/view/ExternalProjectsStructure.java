@@ -15,6 +15,7 @@
  */
 package com.intellij.openapi.externalSystem.view;
 
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.externalSystem.model.DataNode;
 import com.intellij.openapi.externalSystem.model.project.ProjectData;
 import com.intellij.openapi.project.Project;
@@ -38,7 +39,7 @@ import java.util.Map;
  * @author Vladislav.Soroka
  * @since 9/22/2014
  */
-public class ExternalProjectsStructure extends SimpleTreeStructure {
+public class ExternalProjectsStructure extends SimpleTreeStructure implements Disposable  {
   private final Project myProject;
   private ExternalProjectsView myExternalProjectsView;
   private final SimpleTreeBuilder myTreeBuilder;
@@ -104,12 +105,7 @@ public class ExternalProjectsStructure extends SimpleTreeStructure {
 
   public void updateProjects(Collection<DataNode<ProjectData>> toImport) {
     List<String> orphanProjects = ContainerUtil.mapNotNull(
-      myNodeMapping.entrySet(), new Function<Map.Entry<String, ExternalSystemNode>, String>() {
-        @Override
-        public String fun(Map.Entry<String, ExternalSystemNode> entry) {
-          return entry.getValue() instanceof ProjectNode ? entry.getKey() : null;
-        }
-      });
+      myNodeMapping.entrySet(), entry -> entry.getValue() instanceof ProjectNode ? entry.getKey() : null);
     for (DataNode<ProjectData> each : toImport) {
       final ProjectData projectData = each.getData();
       final String projectPath = projectData.getLinkedExternalProjectPath();
@@ -132,7 +128,7 @@ public class ExternalProjectsStructure extends SimpleTreeStructure {
         projectNode = new ProjectNode(myExternalProjectsView, each);
         myNodeMapping.put(projectPath, projectNode);
       }
-      if (toImport.size() == 0) {
+      if (toImport.size() == 1) {
         myTreeBuilder.expand(projectNode, null);
       }
       doUpdateProject((ProjectNode)projectNode);
@@ -154,10 +150,15 @@ public class ExternalProjectsStructure extends SimpleTreeStructure {
   private void doMergeChildrenChanges(ExternalSystemNode currentNode, DataNode<?> newDataNode, ExternalSystemNode newNode) {
     final ExternalSystemNode[] cached = currentNode.getCached();
     if (cached != null) {
-      Map<Object, ExternalSystemNode> oldDataMap = ContainerUtil.newLinkedHashMap();
+
+      final List<Object> duplicates = ContainerUtil.newArrayList();
+      final Map<Object, ExternalSystemNode> oldDataMap = ContainerUtil.newLinkedHashMap();
       for (ExternalSystemNode node : cached) {
         Object key = node.getData() != null ? node.getData() : node.getName();
-        oldDataMap.put(key, node);
+        final Object systemNode = oldDataMap.put(key, node);
+        if(systemNode != null) {
+          duplicates.add(key);
+        }
       }
 
       Map<Object, ExternalSystemNode> newDataMap = ContainerUtil.newLinkedHashMap();
@@ -170,6 +171,10 @@ public class ExternalProjectsStructure extends SimpleTreeStructure {
         else {
           unchangedNewDataMap.put(key, node);
         }
+      }
+
+      for (Object duplicate : duplicates) {
+        newDataMap.remove(duplicate);
       }
 
       currentNode.removeAll(oldDataMap.values());
@@ -191,8 +196,13 @@ public class ExternalProjectsStructure extends SimpleTreeStructure {
 
   private void doUpdateProject(ProjectNode node) {
     ExternalSystemNode newParentNode = myRoot;
-    node.updateProject();
-    reconnectNode(node, newParentNode);
+    if (!node.isVisible()) {
+      newParentNode.remove(node);
+    }
+    else {
+      node.updateProject();
+      reconnectNode(node, newParentNode);
+    }
   }
 
   private static void reconnectNode(ProjectNode node, ExternalSystemNode newParentNode) {
@@ -220,6 +230,13 @@ public class ExternalProjectsStructure extends SimpleTreeStructure {
     for (T node : getNodes(nodeClass)) {
       consumer.consume(node);
     }
+  }
+
+  @Override
+  public void dispose() {
+    this.myExternalProjectsView = null;
+    this.myNodeMapping.clear();
+    this.myRoot = null;
   }
 
   public class RootNode<T> extends ExternalSystemNode<T> {

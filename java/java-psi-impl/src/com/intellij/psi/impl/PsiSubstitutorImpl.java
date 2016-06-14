@@ -16,10 +16,14 @@
 package com.intellij.psi.impl;
 
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.util.Computable;
+import com.intellij.openapi.util.RecursionGuard;
+import com.intellij.openapi.util.RecursionManager;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.light.LightTypeParameter;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.psi.util.PsiUtilCore;
+import com.intellij.util.ArrayUtil;
 import com.intellij.util.containers.HashMap;
 import gnu.trove.THashMap;
 import gnu.trove.TObjectHashingStrategy;
@@ -106,7 +110,31 @@ public class PsiSubstitutorImpl implements PsiSubstitutor {
 
   @Override
   public PsiType substituteWithBoundsPromotion(@NotNull PsiTypeParameter typeParameter) {
-    return PsiUtil.captureTypeParameterBounds(typeParameter, substitute(typeParameter), null, this);
+    final PsiType substituted = substitute(typeParameter);
+    if (substituted instanceof PsiWildcardType && !((PsiWildcardType)substituted).isSuper()) {
+      final PsiWildcardType wildcardType = (PsiWildcardType)substituted;
+      final PsiType glb = PsiCapturedWildcardType.captureUpperBound(typeParameter, wildcardType, this);
+      if (glb instanceof PsiWildcardType) {
+        return glb;
+      }
+      if (glb != null ) {
+        return glb instanceof PsiCapturedWildcardType ? ((PsiCapturedWildcardType)glb).getWildcard()
+                                                      : PsiWildcardType.createExtends(typeParameter.getManager(), glb);
+      }
+
+      /*
+       if (glb instanceof PsiCapturedWildcardType) {
+       PsiWildcardType wildcard = ((PsiCapturedWildcardType)glb).getWildcard();
+       if (!wildcard.isSuper()) return wildcard;
+       }
+
+       if (glb != null ) {
+       return PsiWildcardType.createExtends(typeParameter.getManager(), glb);
+       }
+       */
+
+    }
+    return substituted;
   }
 
   public boolean equals(final Object o) {
@@ -124,11 +152,17 @@ public class PsiSubstitutorImpl implements PsiSubstitutor {
     return mySubstitutionMap != null ? mySubstitutionMap.hashCode() : 0;
   }
 
+  private static RecursionGuard ourGuard = RecursionManager.createGuard("substituteGuard");
   private PsiType rawTypeForTypeParameter(final PsiTypeParameter typeParameter) {
     final PsiClassType[] extendsTypes = typeParameter.getExtendsListTypes();
     if (extendsTypes.length > 0) {
       // First bound
-      return substitute(extendsTypes[0]);
+      return ourGuard.doPreventingRecursion(extendsTypes[0], true, new Computable<PsiType>() {
+        @Override
+        public PsiType compute() {
+          return substitute(extendsTypes[0]);
+        }
+      });
     }
     // Object
     return PsiType.getJavaLangObject(typeParameter.getManager(), typeParameter.getResolveScope());
@@ -137,7 +171,7 @@ public class PsiSubstitutorImpl implements PsiSubstitutor {
   private class SubstitutionVisitor extends PsiTypeMapper {
     @Override
     public PsiType visitCapturedWildcardType(PsiCapturedWildcardType type) {
-      return visitWildcardType(type.getWildcard());
+      return type;
     }
 
     @Override
@@ -162,12 +196,6 @@ public class PsiSubstitutorImpl implements PsiSubstitutor {
           return !((PsiWildcardType)newBound).isBounded() ? PsiWildcardType.createUnbounded(wildcardType.getManager())
                                                           : rebound(wildcardType, newBoundBound);
         }
-        if (newBound instanceof PsiCapturedWildcardType) {
-          final PsiWildcardType wildcard = ((PsiCapturedWildcardType)newBound).getWildcard();
-          if (wildcard.isBounded() && wildcardType.isExtends() == wildcard.isExtends()) {
-            return newBound;
-          }
-        }
 
         return newBound == PsiType.NULL ? newBound : rebound(wildcardType, newBound);
       }
@@ -191,7 +219,7 @@ public class PsiSubstitutorImpl implements PsiSubstitutor {
     }
 
     @Override
-    public PsiType visitClassType(PsiClassType classType) {
+    public PsiType visitClassType(final PsiClassType classType) {
       final PsiClassType.ClassResolveResult resolveResult = classType.resolveGenerics();
       final PsiClass aClass = resolveResult.getElement();
       if (aClass == null) return classType;
@@ -200,9 +228,18 @@ public class PsiSubstitutorImpl implements PsiSubstitutor {
       if (aClass instanceof PsiTypeParameter) {
         final PsiTypeParameter typeParameter = (PsiTypeParameter)aClass;
         if (containsInMap(typeParameter)) {
-          PsiType result = substituteTypeParameter(typeParameter);
+          final PsiType result = substituteTypeParameter(typeParameter);
           if (result != null) {
             PsiUtil.ensureValidType(result);
+            if (result instanceof PsiClassType || result instanceof PsiArrayType || result instanceof PsiWildcardType) {
+              return result.annotate(new TypeAnnotationProvider() {
+                @NotNull
+                @Override
+                public PsiAnnotation[] getAnnotations() {
+                  return ArrayUtil.mergeArrays(result.getAnnotations(), classType.getAnnotations());
+                }
+              });
+            }
           }
           return result;
         }
@@ -231,16 +268,9 @@ public class PsiSubstitutorImpl implements PsiSubstitutor {
         final PsiType original = originalSubstitutor.substitute(param);
         if (original == null) {
           substMap.put(param, null);
-        } else {
-          PsiType substituted = substituteInternal(original);
-          if (original instanceof PsiWildcardType && substituted instanceof PsiCapturedWildcardType) {
-            final PsiCapturedWildcardType capturedWildcardType = PsiCapturedWildcardType.create(((PsiCapturedWildcardType)substituted).getWildcard(),
-                                                                                                ((PsiCapturedWildcardType)substituted).getContext(), param);
-            capturedWildcardType.setUpperBound(((PsiCapturedWildcardType)substituted).getUpperBound());
-            substituted = capturedWildcardType;
-          }
-          //if (substituted == null) return false;
-          substMap.put(param, substituted);
+        }
+        else {
+          substMap.put(param, substituteInternal(original));
         }
       }
       if (resolve.hasModifierProperty(PsiModifier.STATIC)) return true;
@@ -280,7 +310,6 @@ public class PsiSubstitutorImpl implements PsiSubstitutor {
 
       @Override
       public PsiType visitType(PsiType type) {
-        LOG.error(type.getInternalCanonicalText());
         return null;
       }
     });

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,11 @@ package com.intellij.application.options.emmet;
 
 import com.intellij.codeInsight.template.emmet.filters.ZenCodingFilter;
 import com.intellij.codeInsight.template.impl.TemplateSettings;
-import com.intellij.openapi.components.*;
+import com.intellij.openapi.components.PersistentStateComponent;
+import com.intellij.openapi.components.ServiceManager;
+import com.intellij.openapi.components.State;
+import com.intellij.openapi.components.Storage;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.xmlb.XmlSerializerUtil;
 import org.jetbrains.annotations.NotNull;
@@ -27,14 +31,20 @@ import java.util.Set;
 
 @State(
   name = "EmmetOptions",
-  storages = @Storage(file = StoragePathMacros.APP_CONFIG + "/emmet.xml")
+  storages = @Storage("emmet.xml")
 )
 public class EmmetOptions implements PersistentStateComponent<EmmetOptions> {
   private boolean myEmmetEnabled = true;
   private int myEmmetExpandShortcut = TemplateSettings.TAB_CHAR;
   private boolean myPreviewEnabled = false;
+  @NotNull
   private Set<String> myFiltersEnabledByDefault = ContainerUtil.newHashSet();
   private boolean myHrefAutoDetectEnabled = true;
+  private boolean myAddEditPointAtTheEndOfTemplate = false;
+
+  @NotNull private String myBemElementSeparator = "__";
+  @NotNull private String myBemModifierSeparator = "_";
+  @NotNull private String myBemShortElementPrefix = "-";
 
   @NotNull
   public Set<String> getFiltersEnabledByDefault() {
@@ -72,13 +82,48 @@ public class EmmetOptions implements PersistentStateComponent<EmmetOptions> {
   public void setEmmetEnabled(boolean emmetEnabled) {
     myEmmetEnabled = emmetEnabled;
   }
-  
+
   public void setHrefAutoDetectEnabled(boolean hrefAutoDetectEnabled) {
     myHrefAutoDetectEnabled = hrefAutoDetectEnabled;
   }
 
   public boolean isHrefAutoDetectEnabled() {
     return myHrefAutoDetectEnabled;
+  }
+
+  public boolean isAddEditPointAtTheEndOfTemplate() {
+    return myAddEditPointAtTheEndOfTemplate;
+  }
+
+  public void setAddEditPointAtTheEndOfTemplate(boolean addEditPointAtTheEndOfTemplate) {
+    myAddEditPointAtTheEndOfTemplate = addEditPointAtTheEndOfTemplate;
+  }
+
+  @NotNull
+  public String getBemElementSeparator() {
+    return myBemElementSeparator;
+  }
+
+  public void setBemElementSeparator(@Nullable String bemElementSeparator) {
+    myBemElementSeparator = StringUtil.notNullize(bemElementSeparator);
+  }
+
+  @NotNull
+  public String getBemModifierSeparator() {
+    return myBemModifierSeparator;
+  }
+
+  public void setBemModifierSeparator(@Nullable String bemModifierSeparator) {
+    myBemModifierSeparator = StringUtil.notNullize(bemModifierSeparator);
+  }
+
+  @NotNull
+  public String getBemShortElementPrefix() {
+    return myBemShortElementPrefix;
+  }
+
+  public void setBemShortElementPrefix(@Nullable String bemShortElementPrefix) {
+    myBemShortElementPrefix = StringUtil.notNullize(bemShortElementPrefix);
   }
 
   @Nullable

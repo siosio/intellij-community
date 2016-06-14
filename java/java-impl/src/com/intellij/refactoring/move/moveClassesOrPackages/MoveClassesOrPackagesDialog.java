@@ -44,7 +44,6 @@ import com.intellij.refactoring.move.MoveHandler;
 import com.intellij.refactoring.move.moveFilesOrDirectories.MoveFilesOrDirectoriesUtil;
 import com.intellij.refactoring.ui.ClassNameReferenceEditor;
 import com.intellij.refactoring.ui.PackageNameReferenceEditorCombo;
-import com.intellij.refactoring.ui.RefactoringDialog;
 import com.intellij.refactoring.util.CommonRefactoringUtil;
 import com.intellij.ui.ComboboxWithBrowseButton;
 import com.intellij.ui.RecentsManager;
@@ -117,11 +116,7 @@ public class MoveClassesOrPackagesDialog extends MoveDialogBase {
 
       myInnerClassChooser.setText(((PsiClass)initialTargetElement).getQualifiedName());
 
-      ApplicationManager.getApplication().invokeLater(new Runnable() {
-        public void run() {
-          myInnerClassChooser.requestFocus();
-        }
-      }, ModalityState.stateForComponent(myMainPanel));
+      ApplicationManager.getApplication().invokeLater(() -> myInnerClassChooser.requestFocus(), ModalityState.stateForComponent(myMainPanel));
     }
     else if (initialTargetElement instanceof PsiPackage) {
       myClassPackageChooser.setText(((PsiPackage)initialTargetElement).getQualifiedName());
@@ -337,22 +332,9 @@ public class MoveClassesOrPackagesDialog extends MoveDialogBase {
     }
     else {
       if (findTargetClass() == null) throw new ConfigurationException("Destination class not found");
-      final String validationError = getValidationError();
+      final String validationError = verifyInnerClassDestination();
       if (validationError != null) throw new ConfigurationException(validationError);
     }
-  }
-
-  protected void validateButtons() {
-    super.validateButtons();
-    setErrorText(getValidationError());
-  }
-
-  @Nullable
-  private String getValidationError() {
-    if (!isMoveToPackage()) {
-      return verifyInnerClassDestination();
-    }
-    return null;
   }
 
   @Nullable
@@ -483,6 +465,7 @@ public class MoveClassesOrPackagesDialog extends MoveDialogBase {
   private void invokeMoveToInner() {
     saveRefactoringSettings();
     final PsiClass targetClass = findTargetClass();
+    if (targetClass == null) return;
     final PsiClass[] classesToMove = new PsiClass[myElementsToMove.length];
     for (int i = 0; i < myElementsToMove.length; i++) {
       classesToMove[i] = (PsiClass)myElementsToMove[i];
@@ -493,7 +476,7 @@ public class MoveClassesOrPackagesDialog extends MoveDialogBase {
   }
 
   //for scala plugin
-  protected MoveClassToInnerProcessor createMoveToInnerProcessor(PsiClass destination, @NotNull PsiClass[] classesToMove, @Nullable final MoveCallback callback) {
+  protected MoveClassToInnerProcessor createMoveToInnerProcessor(@NotNull PsiClass destination, @NotNull PsiClass[] classesToMove, @Nullable final MoveCallback callback) {
     return new MoveClassToInnerProcessor(getProject(), classesToMove, destination, isSearchInComments(), isSearchInNonJavaFiles(), callback);
   }
 
@@ -532,5 +515,10 @@ public class MoveClassesOrPackagesDialog extends MoveDialogBase {
   @Override
   protected String getCbTitle() {
     return "Open moved in editor";
+  }
+
+  @Override
+  protected boolean isEnabledByDefault() {
+    return false;
   }
 }

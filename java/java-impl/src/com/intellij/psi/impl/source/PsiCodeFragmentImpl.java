@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -63,7 +63,7 @@ public class PsiCodeFragmentImpl extends PsiFileImpl implements JavaCodeFragment
                              @Nullable PsiElement context) {
     super(TokenType.CODE_FRAGMENT,
           contentElementType,
-          ((PsiManagerEx)PsiManager.getInstance(project)).getFileManager().createFileViewProvider(
+          PsiManagerEx.getInstanceEx(project).getFileManager().createFileViewProvider(
             new LightVirtualFile(name, FileTypeManager.getInstance().getFileTypeByFileName(name), text), isPhysical)
     );
     myContext = context;
@@ -93,19 +93,13 @@ public class PsiCodeFragmentImpl extends PsiFileImpl implements JavaCodeFragment
     return clone;
   }
 
-  private FileViewProvider myViewProvider = null;
+  private FileViewProvider myViewProvider;
 
   @Override
   @NotNull
   public FileViewProvider getViewProvider() {
     if (myViewProvider != null) return myViewProvider;
     return super.getViewProvider();
-  }
-
-  @Override
-  public boolean isValid() {
-    if (!super.isValid()) return false;
-    return myContext == null || myContext.isValid();
   }
 
   @Override
@@ -116,7 +110,7 @@ public class PsiCodeFragmentImpl extends PsiFileImpl implements JavaCodeFragment
 
   @Override
   public PsiElement getContext() {
-    return myContext;
+    return myContext != null && myContext.isValid() ? myContext : super.getContext();
   }
 
   @Override
@@ -213,7 +207,10 @@ public class PsiCodeFragmentImpl extends PsiFileImpl implements JavaCodeFragment
     }
 
     IElementType i = myContentElementType;
-    if (i == JavaElementType.TYPE_TEXT || i == JavaElementType.EXPRESSION_STATEMENT || i == JavaElementType.REFERENCE_TEXT) {
+    if (i == JavaElementType.TYPE_WITH_CONJUNCTIONS_TEXT ||
+        i == JavaElementType.TYPE_WITH_DISJUNCTIONS_TEXT ||
+        i == JavaElementType.EXPRESSION_STATEMENT ||
+        i == JavaElementType.REFERENCE_TEXT) {
       return true;
     }
     else {

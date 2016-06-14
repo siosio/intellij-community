@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ import com.intellij.psi.util.PsiFormatUtilBase;
 import javax.swing.*;
 
 public class MethodOrFunctionalExpressionCellRenderer extends PsiElementListCellRenderer<NavigatablePsiElement> {
-  private final PsiClassListCellRenderer myClassListCellRenderer = new PsiClassListCellRenderer();
+  private final PsiClassListCellRenderer myClassListCellRenderer = PsiClassListCellRenderer.INSTANCE;
   private final MethodCellRenderer myMethodCellRenderer;
   
   public MethodOrFunctionalExpressionCellRenderer(boolean showMethodNames) {
@@ -39,7 +39,7 @@ public class MethodOrFunctionalExpressionCellRenderer extends PsiElementListCell
   }
 
   protected Icon getIcon(PsiElement element) {
-    return element instanceof PsiMethod ? myMethodCellRenderer.getIcon(element) : null;
+    return element instanceof PsiMethod ? myMethodCellRenderer.getIcon(element) : super.getIcon(element);
   }
 
   public String getContainerText(final NavigatablePsiElement element, final String name) {
@@ -48,6 +48,6 @@ public class MethodOrFunctionalExpressionCellRenderer extends PsiElementListCell
   }
 
   public int getIconFlags() {
-    return myClassListCellRenderer.getIconFlags();
+    return PsiClassListCellRenderer.INSTANCE.getIconFlags();
   }
 }

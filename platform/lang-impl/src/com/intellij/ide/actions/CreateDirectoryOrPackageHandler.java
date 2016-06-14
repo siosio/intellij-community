@@ -135,8 +135,7 @@ public class CreateDirectoryOrPackageHandler implements InputValidatorEx {
   }
 
   @Override
-  public boolean canClose(String inputString) {
-    final String subDirName = inputString;
+  public boolean canClose(final String subDirName) {
 
     if (subDirName.length() == 0) {
       showErrorDialog(IdeBundle.message("error.name.should.be.specified"));
@@ -153,25 +152,39 @@ public class CreateDirectoryOrPackageHandler implements InputValidatorEx {
         return false;
       }
     }
-    
-    boolean createFile = false;
-    if (StringUtil.countChars(subDirName, '.') == 1 && Registry.is("ide.suggest.file.when.creating.filename.like.directory")) {
-      FileType fileType = findFileTypeBoundToName(subDirName);
-      if (fileType != null) {
-        String message = "The name you entered looks like a file name. Do you want to create a file named " + subDirName + " instead?";
-        int ec = Messages.showYesNoDialog(myProject, message,
-                                           "File Name Detected", "Yes, create file",
-                                           "No, create " + (myIsDirectory ? "directory" : "packages"),
-                                           fileType.getIcon());
-        if (ec == Messages.YES) {
-          createFile = true;
-        }
-      }
+
+    final Boolean createFile = suggestCreatingFileInstead(subDirName);
+    if (createFile == null) {
+      return false;
     }
 
     doCreateElement(subDirName, createFile);
 
     return myCreatedElement != null;
+  }
+
+  @Nullable
+  private Boolean suggestCreatingFileInstead(String subDirName) {
+    Boolean createFile = false;
+    if (StringUtil.countChars(subDirName, '.') == 1 && Registry.is("ide.suggest.file.when.creating.filename.like.directory")) {
+      FileType fileType = findFileTypeBoundToName(subDirName);
+      if (fileType != null) {
+        String message = "The name you entered looks like a file name. Do you want to create a file named " + subDirName + " instead?";
+        int ec = Messages.showYesNoCancelDialog(myProject, message,
+                                                "File Name Detected",
+                                                "&Yes, create file",
+                                                "&No, create " + (myIsDirectory ? "directory" : "packages"),
+                                                CommonBundle.getCancelButtonText(),
+                                                fileType.getIcon());
+        if (ec == Messages.CANCEL) {
+          createFile = null;
+        }
+        if (ec == Messages.YES) {
+          createFile = true;
+        }
+      }
+    }
+    return createFile;
   }
 
   @Nullable
@@ -181,40 +194,27 @@ public class CreateDirectoryOrPackageHandler implements InputValidatorEx {
   }
 
   private void doCreateElement(final String subDirName, final boolean createFile) {
-    Runnable command = new Runnable() {
-      @Override
-      public void run() {
-        final Runnable run = new Runnable() {
-          @Override
-          public void run() {
-            LocalHistoryAction action = LocalHistoryAction.NULL;
-            try {
-              String actionName;
-              String dirPath = myDirectory.getVirtualFile().getPresentableUrl();
-              actionName = IdeBundle.message("progress.creating.directory", dirPath, File.separator, subDirName);
-              action = LocalHistory.getInstance().startAction(actionName);
-
-              if (createFile) {
-                myCreatedElement = myDirectory.createFile(subDirName);
-              } else {
-                createDirectories(subDirName);
-              }
-            }
-            catch (final IncorrectOperationException ex) {
-              ApplicationManager.getApplication().invokeLater(new Runnable() {
-                @Override
-                public void run() {
-                  showErrorDialog(CreateElementActionBase.filterMessage(ex.getMessage()));
-                }
-              });
-            }
-            finally {
-              action.finish();
-            }
+    Runnable command = () -> {
+      final Runnable run = () -> {
+        String dirPath = myDirectory.getVirtualFile().getPresentableUrl();
+        String actionName = IdeBundle.message("progress.creating.directory", dirPath, File.separator, subDirName);
+        LocalHistoryAction action = LocalHistory.getInstance().startAction(actionName);
+        try {
+          if (createFile) {
+            CreateFileAction.MkDirs mkdirs = new CreateFileAction.MkDirs(subDirName, myDirectory);
+            myCreatedElement = mkdirs.directory.createFile(mkdirs.newName);
+          } else {
+            createDirectories(subDirName);
           }
-        };
-        ApplicationManager.getApplication().runWriteAction(run);
-      }
+        }
+        catch (final IncorrectOperationException ex) {
+          ApplicationManager.getApplication().invokeLater(() -> showErrorDialog(CreateElementActionBase.filterMessage(ex.getMessage())));
+        }
+        finally {
+          action.finish();
+        }
+      };
+      ApplicationManager.getApplication().runWriteAction(run);
     };
     CommandProcessor.getInstance().executeCommand(myProject, command, createFile ? IdeBundle.message("command.create.file") 
                                                                                  : myIsDirectory

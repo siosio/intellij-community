@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,6 +37,7 @@ import com.intellij.refactoring.RefactoringActionHandler;
 import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.util.CommonRefactoringUtil;
 import com.intellij.refactoring.util.classMembers.ElementNeedsThis;
+import com.intellij.util.ArrayUtil;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -115,26 +116,34 @@ public class AnonymousToInnerHandler implements RefactoringActionHandler {
 
     Map<PsiVariable,VariableInfo> variableInfoMap = new LinkedHashMap<PsiVariable, VariableInfo>();
     collectUsedVariables(variableInfoMap, myAnonClass);
-    myVariableInfos = variableInfoMap.values().toArray(new VariableInfo[variableInfoMap.values().size()]);
+    final VariableInfo[] infos = variableInfoMap.values().toArray(new VariableInfo[variableInfoMap.values().size()]);
+    myVariableInfos = infos;
+    Arrays.sort(myVariableInfos, (o1, o2) -> {
+      final PsiType type1 = o1.variable.getType();
+      final PsiType type2 = o2.variable.getType();
+      if (type1 instanceof PsiEllipsisType) {
+        return 1;
+      }
+      if (type2 instanceof PsiEllipsisType) {
+        return -1;
+      }
+      return ArrayUtil.find(infos, o1) > ArrayUtil.find(infos, o2) ? 1 : -1;
+    });
     if (!showRefactoringDialog()) return;
 
     CommandProcessor.getInstance().executeCommand(
-        myProject, new Runnable() {
-              public void run() {
-                final Runnable action = new Runnable() {
-                  public void run() {
-                    try {
-                      doRefactoring();
-                    } catch (IncorrectOperationException e) {
-                      LOG.error(e);
-                    }
-                  }
-                };
-                ApplicationManager.getApplication().runWriteAction(action);
-              }
-            },
-        REFACTORING_NAME,
-        null
+      myProject, () -> {
+        final Runnable action = () -> {
+          try {
+            doRefactoring();
+          } catch (IncorrectOperationException e) {
+            LOG.error(e);
+          }
+        };
+        ApplicationManager.getApplication().runWriteAction(action);
+      },
+      REFACTORING_NAME,
+      null
     );
 
   }
@@ -249,14 +258,14 @@ public class AnonymousToInnerHandler implements RefactoringActionHandler {
     });
   }
 
-  private Boolean cachedNeedsThis = null;
+  private Boolean cachedNeedsThis;
   public boolean needsThis() {
     if(cachedNeedsThis == null) {
 
       ElementNeedsThis memberNeedsThis = new ElementNeedsThis(myTargetClass, myAnonClass);
       myAnonClass.accept(memberNeedsThis);
       class HasExplicitThis extends JavaRecursiveElementWalkingVisitor {
-        boolean hasExplicitThis = false;
+        boolean hasExplicitThis;
         @Override public void visitReferenceExpression(PsiReferenceExpression expression) {
         }
 
@@ -392,11 +401,7 @@ public class AnonymousToInnerHandler implements RefactoringActionHandler {
       }
     }
 
-    Collections.sort(toAdd, new Comparator<PsiElement>() {
-      public int compare(PsiElement e1, PsiElement e2) {
-        return e1.getTextRange().getStartOffset() - e2.getTextRange().getStartOffset();
-      }
-    });
+    Collections.sort(toAdd, (e1, e2) -> e1.getTextRange().getStartOffset() - e2.getTextRange().getStartOffset());
 
     for (PsiElement element : toAdd) {
       if (element instanceof PsiClassInitializer) {

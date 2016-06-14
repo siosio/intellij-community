@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,10 @@
 package com.intellij.testFramework;
 
 import com.intellij.concurrency.JobSchedulerImpl;
+import com.intellij.execution.ExecutionException;
+import com.intellij.execution.configurations.GeneralCommandLine;
+import com.intellij.execution.process.ProcessOutput;
+import com.intellij.execution.util.ExecUtil;
 import com.intellij.ide.DataManager;
 import com.intellij.ide.IdeEventQueue;
 import com.intellij.ide.util.treeView.AbstractTreeNode;
@@ -23,6 +27,7 @@ import com.intellij.ide.util.treeView.AbstractTreeStructure;
 import com.intellij.idea.Bombed;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.application.ex.ApplicationEx;
@@ -35,6 +40,7 @@ import com.intellij.openapi.extensions.ExtensionsArea;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileEditor.impl.LoadTextUtil;
 import com.intellij.openapi.fileTypes.FileTypes;
+import com.intellij.openapi.paths.WebReference;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Queryable;
 import com.intellij.openapi.util.*;
@@ -45,6 +51,9 @@ import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileFilter;
 import com.intellij.openapi.vfs.ex.temp.TempFileSystem;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiRecursiveElementWalkingVisitor;
+import com.intellij.psi.PsiReference;
 import com.intellij.util.*;
 import com.intellij.util.containers.HashMap;
 import com.intellij.util.io.ZipUtil;
@@ -52,10 +61,7 @@ import com.intellij.util.ui.UIUtil;
 import junit.framework.AssertionFailedError;
 import org.jdom.Element;
 import org.jdom.JDOMException;
-import org.jetbrains.annotations.NonNls;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.TestOnly;
+import org.jetbrains.annotations.*;
 import org.junit.Assert;
 
 import javax.swing.*;
@@ -72,18 +78,42 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.jar.JarFile;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-
 /**
  * @author yole
  */
-@SuppressWarnings("UseOfSystemOutOrSystemErr")
+@SuppressWarnings({"UseOfSystemOutOrSystemErr", "TestOnlyProblems"})
 public class PlatformTestUtil {
   public static final boolean COVERAGE_ENABLED_BUILD = "true".equals(System.getProperty("idea.coverage.enabled.build"));
 
-  private static final boolean SKIP_HEADLESS = GraphicsEnvironment.isHeadless();
-  private static final boolean SKIP_SLOW = Boolean.getBoolean("skip.slow.tests.locally");
+  public static final boolean SKIP_HEADLESS = GraphicsEnvironment.isHeadless();
+  public static final boolean SKIP_SLOW = Boolean.getBoolean("skip.slow.tests.locally");
+
+  @NotNull
+  public static String getTestName(@NotNull String name, boolean lowercaseFirstLetter) {
+    name = StringUtil.trimStart(name, "test");
+    return StringUtil.isEmpty(name) ? "" : lowercaseFirstLetter(name, lowercaseFirstLetter);
+  }
+
+  @NotNull
+  public static String lowercaseFirstLetter(@NotNull String name, boolean lowercaseFirstLetter) {
+    if (lowercaseFirstLetter && !isAllUppercaseName(name)) {
+      name = Character.toLowerCase(name.charAt(0)) + name.substring(1);
+    }
+    return name;
+  }
+
+  public static boolean isAllUppercaseName(@NotNull String name) {
+    int uppercaseChars = 0;
+    for (int i = 0; i < name.length(); i++) {
+      if (Character.isLowerCase(name.charAt(i))) {
+        return false;
+      }
+      if (Character.isUpperCase(name.charAt(i))) {
+        uppercaseChars++;
+      }
+    }
+    return uppercaseChars >= 3;
+  }
 
   public static <T> void registerExtension(@NotNull ExtensionPointName<T> name, @NotNull T t, @NotNull Disposable parentDisposable) {
     registerExtension(Extensions.getRootArea(), name, t, parentDisposable);
@@ -214,7 +244,7 @@ public class PlatformTestUtil {
 
   public static void assertTreeEqual(JTree tree, String expected, boolean checkSelected) {
     String treeStringPresentation = print(tree, checkSelected);
-    assertEquals(expected, treeStringPresentation);
+    Assert.assertEquals(expected, treeStringPresentation);
   }
 
   public static void assertTreeEqualIgnoringNodesOrder(JTree tree, String expected, boolean checkSelected) {
@@ -225,36 +255,38 @@ public class PlatformTestUtil {
 
   @TestOnly
   public static void waitForAlarm(final int delay) throws InterruptedException {
-    assert !ApplicationManager.getApplication().isWriteAccessAllowed(): "It's a bad idea to wait for an alarm under the write action. Somebody creates an alarm which requires read action and you are deadlocked.";
-    assert ApplicationManager.getApplication().isDispatchThread();
+    Application app = ApplicationManager.getApplication();
+    assert !app.isWriteAccessAllowed(): "It's a bad idea to wait for an alarm under the write action. Somebody creates an alarm which requires read action and you are deadlocked.";
+    assert app.isDispatchThread();
 
-    final AtomicBoolean invoked = new AtomicBoolean();
+    final AtomicBoolean runnableInvoked = new AtomicBoolean();
+    final AtomicBoolean alarmInvoked1 = new AtomicBoolean();
+    final AtomicBoolean alarmInvoked2 = new AtomicBoolean();
     final Alarm alarm = new Alarm(Alarm.ThreadToUse.SWING_THREAD);
-    alarm.addRequest(new Runnable() {
-      @Override
-      public void run() {
-        ApplicationManager.getApplication().invokeLater(new Runnable() {
-          @Override
-          public void run() {
-            alarm.addRequest(new Runnable() {
-              @Override
-              public void run() {
-                invoked.set(true);
-              }
-            }, delay);
-          }
-        });
-      }
+
+    alarm.addRequest(() -> {
+      alarmInvoked1.set(true);
+      app.invokeLater(() -> {
+        runnableInvoked.set(true);
+        alarm.addRequest(() -> alarmInvoked2.set(true), delay);
+      });
     }, delay);
 
     UIUtil.dispatchAllInvocationEvents();
 
+    long start = System.currentTimeMillis();
     boolean sleptAlready = false;
-    while (!invoked.get()) {
+    while (!alarmInvoked2.get()) {
       UIUtil.dispatchAllInvocationEvents();
       //noinspection BusyWait
       Thread.sleep(sleptAlready ? 10 : delay);
       sleptAlready = true;
+      if (System.currentTimeMillis() - start > 100 * 1000) {
+        throw new AssertionError("Couldn't await alarm" +
+                                 "; alarm1 passed=" + alarmInvoked1.get() +
+                                 "; invokeLater passed=" + runnableInvoked.get() +
+                                 "; app.disposed=" + app.isDisposed());
+      }
     }
     UIUtil.dispatchAllInvocationEvents();
   }
@@ -262,15 +294,31 @@ public class PlatformTestUtil {
   @TestOnly
   public static void dispatchAllInvocationEventsInIdeEventQueue() throws InterruptedException {
     assert SwingUtilities.isEventDispatchThread() : Thread.currentThread();
-    final EventQueue eventQueue = Toolkit.getDefaultToolkit().getSystemEventQueue();
+    final IdeEventQueue eventQueue = (IdeEventQueue)Toolkit.getDefaultToolkit().getSystemEventQueue();
     while (true) {
       AWTEvent event = eventQueue.peekEvent();
       if (event == null) break;
-        AWTEvent event1 = eventQueue.getNextEvent();
-        if (event1 instanceof InvocationEvent) {
-          IdeEventQueue.getInstance().dispatchEvent(event1);
-        }
+      AWTEvent event1 = eventQueue.getNextEvent();
+      if (event1 instanceof InvocationEvent) {
+        eventQueue.dispatchEvent(event1);
+      }
     }
+  }
+
+  @TestOnly
+  public static void dispatchAllEventsInIdeEventQueue() throws InterruptedException {
+    assert SwingUtilities.isEventDispatchThread() : Thread.currentThread();
+    final IdeEventQueue eventQueue = (IdeEventQueue)Toolkit.getDefaultToolkit().getSystemEventQueue();
+    while (dispatchNextEventIfAny(eventQueue) != null);
+  }
+
+  @TestOnly
+  public static AWTEvent dispatchNextEventIfAny(@NotNull IdeEventQueue eventQueue) throws InterruptedException {
+    AWTEvent event = eventQueue.peekEvent();
+    if (event == null) return null;
+    AWTEvent event1 = eventQueue.getNextEvent();
+    eventQueue.dispatchEvent(event1);
+    return event1;
   }
 
   private static Date raidDate(Bombed bombed) {
@@ -360,16 +408,23 @@ public class PlatformTestUtil {
     return print(tree, false);
   }
 
-  public static void assertTreeStructureEquals(final AbstractTreeStructure treeStructure, final String expected) {
-    assertEquals(expected, print(treeStructure, treeStructure.getRootElement(), 0, null, -1, ' ', null).toString());
+  public static void updateRecursively(@NotNull AbstractTreeNode<?> node) {
+    node.update();
+    for (AbstractTreeNode child : node.getChildren()) {
+      updateRecursively(child);
+    }
+  }
+
+  public static void assertTreeStructureEquals(@NotNull AbstractTreeStructure treeStructure, @NotNull String expected) {
+    Assert.assertEquals(expected.trim(), print(treeStructure, treeStructure.getRootElement(), 0, null, -1, ' ', null).toString().trim());
   }
 
   public static void invokeNamedAction(final String actionId) {
     final AnAction action = ActionManager.getInstance().getAction(actionId);
-    assertNotNull(action);
+    Assert.assertNotNull(action);
     final Presentation presentation = new Presentation();
     @SuppressWarnings("deprecation") final DataContext context = DataManager.getInstance().getDataContext();
-    final AnActionEvent event = new AnActionEvent(null, context, "", presentation, ActionManager.getInstance(), 0);
+    final AnActionEvent event = AnActionEvent.createFromAnAction(action, null, "", context);
     action.update(event);
     Assert.assertTrue(presentation.isEnabled());
     action.actionPerformed(event);
@@ -411,6 +466,7 @@ public class PlatformTestUtil {
   /**
    * example usage: startPerformanceTest("calculating pi",100, testRunnable).cpuBound().assertTiming();
    */
+  @Contract(pure = true) // to warn about not calling .assertTiming() in the end
   public static TestInfo startPerformanceTest(@NonNls @NotNull String message, int expectedMs, @NotNull ThrowableRunnable test) {
     return new TestInfo(test, expectedMs,message);
   }
@@ -437,7 +493,7 @@ public class PlatformTestUtil {
   public static void assertPathsEqual(@Nullable String expected, @Nullable String actual) {
     if (expected != null) expected = FileUtil.toSystemIndependentName(expected);
     if (actual != null) actual = FileUtil.toSystemIndependentName(actual);
-    assertEquals(expected, actual);
+    Assert.assertEquals(expected, actual);
   }
 
   @NotNull
@@ -467,6 +523,7 @@ public class PlatformTestUtil {
     private final String message;         // to print on fail
     private boolean adjustForIO = true;   // true if test uses IO, timings need to be re-calibrated according to this agent disk performance
     private boolean adjustForCPU = true;  // true if test uses CPU, timings need to be re-calibrated according to this agent CPU speed
+    private boolean useLegacyScaling;
 
     private TestInfo(@NotNull ThrowableRunnable test, int expectedMs, String message) {
       this.test = test;
@@ -475,11 +532,23 @@ public class PlatformTestUtil {
       this.message = message;
     }
 
+    @Contract(pure = true) // to warn about not calling .assertTiming() in the end
     public TestInfo setup(@NotNull ThrowableRunnable setup) { assert this.setup==null; this.setup = setup; return this; }
+    @Contract(pure = true) // to warn about not calling .assertTiming() in the end
     public TestInfo usesAllCPUCores() { assert adjustForCPU : "This test configured to be io-bound, it cannot use all cores"; usesAllCPUCores = true; return this; }
+    @Contract(pure = true) // to warn about not calling .assertTiming() in the end
     public TestInfo cpuBound() { adjustForIO = false; adjustForCPU = true; return this; }
+    @Contract(pure = true) // to warn about not calling .assertTiming() in the end
     public TestInfo ioBound() { adjustForIO = true; adjustForCPU = false; return this; }
+    @Contract(pure = true) // to warn about not calling .assertTiming() in the end
     public TestInfo attempts(int attempts) { this.attempts = attempts; return this; }
+    /**
+     * @deprecated Enables procedure for nonlinear scaling of results between different machines. This was historically enabled, but doesn't
+     * seem to be meaningful, and is known to make results worse in some cases. Consider migration off this setting, recalibrating
+     * expected execution time accordingly.
+     */
+    @Contract(pure = true) // to warn about not calling .assertTiming() in the end
+    public TestInfo useLegacyScaling() { useLegacyScaling = true; return this; }
 
     public void assertTiming() {
       assert expectedMs != 0 : "Must call .expect() before run test";
@@ -502,12 +571,12 @@ public class PlatformTestUtil {
 
         int expectedOnMyMachine = expectedMs;
         if (adjustForCPU) {
-          expectedOnMyMachine = adjust(expectedOnMyMachine, Timings.CPU_TIMING, Timings.ETALON_CPU_TIMING);
+          expectedOnMyMachine = adjust(expectedOnMyMachine, Timings.CPU_TIMING, Timings.ETALON_CPU_TIMING, useLegacyScaling);
 
           expectedOnMyMachine = usesAllCPUCores ? expectedOnMyMachine * 8 / JobSchedulerImpl.CORES_COUNT : expectedOnMyMachine;
         }
         if (adjustForIO) {
-          expectedOnMyMachine = adjust(expectedOnMyMachine, Timings.IO_TIMING, Timings.ETALON_IO_TIMING);
+          expectedOnMyMachine = adjust(expectedOnMyMachine, Timings.IO_TIMING, Timings.ETALON_IO_TIMING, useLegacyScaling);
         }
 
         // Allow 10% more in case of test machine is busy.
@@ -573,14 +642,18 @@ public class PlatformTestUtil {
       return result;
     }
 
-    private static int adjust(int expectedOnMyMachine, long thisTiming, long ethanolTiming) {
-      // most of our algorithms are quadratic. sad but true.
-      double speed = 1.0 * thisTiming / ethanolTiming;
-      double delta = speed < 1
-                 ? 0.9 + Math.pow(speed - 0.7, 2)
-                 : 0.45 + Math.pow(speed - 0.25, 2);
-      expectedOnMyMachine *= delta;
-      return expectedOnMyMachine;
+    private static int adjust(int expectedOnMyMachine, long thisTiming, long etalonTiming, boolean useLegacyScaling) {
+      if (useLegacyScaling) {
+        double speed = 1.0 * thisTiming / etalonTiming;
+        double delta = speed < 1
+                       ? 0.9 + Math.pow(speed - 0.7, 2)
+                       : 0.45 + Math.pow(speed - 0.25, 2);
+        expectedOnMyMachine *= delta;
+        return expectedOnMyMachine;
+      }
+      else {
+        return (int)(expectedOnMyMachine * thisTiming / etalonTiming);
+      }
     }
   }
 
@@ -651,7 +724,7 @@ public class PlatformTestUtil {
 
     Set<String> keySetAfter = mapAfter.keySet();
     Set<String> keySetBefore = mapBefore.keySet();
-    assertEquals(dirAfter.getPath(), keySetAfter, keySetBefore);
+    Assert.assertEquals(dirAfter.getPath(), keySetAfter, keySetBefore);
 
     for (String name : keySetAfter) {
       VirtualFile fileAfter = mapAfter.get(name);
@@ -678,7 +751,7 @@ public class PlatformTestUtil {
       }
     }
 
-    assertEquals(sortAndJoin(vfsPaths), sortAndJoin(ioPaths));
+    Assert.assertEquals(sortAndJoin(vfsPaths), sortAndJoin(ioPaths));
   }
 
   private static String sortAndJoin(List<String> strings) {
@@ -715,7 +788,7 @@ public class PlatformTestUtil {
                        : LoadTextUtil.getTextByBinaryPresentation(fileAfter.contentsToByteArray(false), fileAfter).toString();
 
       if (textA != null && textB != null) {
-        assertEquals(fileAfter.getPath(), textA, textB);
+        Assert.assertEquals(fileAfter.getPath(), textA, textB);
       }
       else {
         Assert.assertArrayEquals(fileAfter.getPath(), fileAfter.contentsToByteArray(), fileBefore.contentsToByteArray());
@@ -745,22 +818,19 @@ public class PlatformTestUtil {
     }
 
     final VirtualFile dirAfter = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(tempDirectory1);
-    assertNotNull(tempDirectory1.toString(), dirAfter);
+    Assert.assertNotNull(tempDirectory1.toString(), dirAfter);
     final VirtualFile dirBefore = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(tempDirectory2);
-    assertNotNull(tempDirectory2.toString(), dirBefore);
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      @Override
-      public void run() {
-        dirAfter.refresh(false, true);
-        dirBefore.refresh(false, true);
-      }
+    Assert.assertNotNull(tempDirectory2.toString(), dirBefore);
+    ApplicationManager.getApplication().runWriteAction(() -> {
+      dirAfter.refresh(false, true);
+      dirBefore.refresh(false, true);
     });
     assertDirectoriesEqual(dirAfter, dirBefore);
   }
 
   public static void assertElementsEqual(final Element expected, final Element actual) throws IOException {
     if (!JDOMUtil.areElementsEqual(expected, actual)) {
-      assertEquals(printElement(expected), printElement(actual));
+      Assert.assertEquals(printElement(expected), printElement(actual));
     }
   }
 
@@ -768,10 +838,7 @@ public class PlatformTestUtil {
     try {
       assertElementsEqual(JDOMUtil.loadDocument(expected).getRootElement(), actual);
     }
-    catch (IOException e) {
-      throw new AssertionError(e);
-    }
-    catch (JDOMException e) {
+    catch (IOException | JDOMException e) {
       throw new AssertionError(e);
     }
   }
@@ -796,19 +863,16 @@ public class PlatformTestUtil {
 
 
   public static Comparator<AbstractTreeNode> createComparator(final Queryable.PrintInfo printInfo) {
-    return new Comparator<AbstractTreeNode>() {
-      @Override
-      public int compare(final AbstractTreeNode o1, final AbstractTreeNode o2) {
-        String displayText1 = o1.toTestString(printInfo);
-        String displayText2 = o2.toTestString(printInfo);
-        return Comparing.compare(displayText1, displayText2);
-      }
+    return (o1, o2) -> {
+      String displayText1 = o1.toTestString(printInfo);
+      String displayText2 = o2.toTestString(printInfo);
+      return Comparing.compare(displayText1, displayText2);
     };
   }
 
   @NotNull
   public static <T> T notNull(@Nullable T t) {
-    assertNotNull(t);
+    Assert.assertNotNull(t);
     return t;
   }
 
@@ -821,18 +885,9 @@ public class PlatformTestUtil {
     GCUtil.tryGcSoftlyReachableObjects();
   }
 
-  public static void withEncoding(@NotNull String encoding, @NotNull final Runnable r) {
-    withEncoding(encoding, new ThrowableRunnable() {
-      @Override
-      public void run() throws Throwable {
-        r.run();
-      }
-    });
-  }
-
   public static void withEncoding(@NotNull String encoding, @NotNull ThrowableRunnable r) {
-    Charset oldCharset = Charset.defaultCharset();
     try {
+      Charset oldCharset = Charset.defaultCharset();
       try {
         patchSystemFileEncoding(encoding);
         r.run();
@@ -867,4 +922,31 @@ public class PlatformTestUtil {
     @Override
     public void write(int b) throws IOException { }
   };
+
+  public static void assertSuccessful(@NotNull GeneralCommandLine command) {
+    try {
+      ProcessOutput output = ExecUtil.execAndGetOutput(command.withRedirectErrorStream(true));
+      Assert.assertEquals(output.getStdout(), 0, output.getExitCode());
+    }
+    catch (ExecutionException e) {
+      throw new RuntimeException(e);
+    }
+  }
+
+  @NotNull
+  public static List<WebReference> collectWebReferences(@NotNull PsiElement element) {
+    List<WebReference> refs = new ArrayList<>();
+    element.accept(new PsiRecursiveElementWalkingVisitor() {
+      @Override
+      public void visitElement(PsiElement element) {
+        for (PsiReference ref : element.getReferences()) {
+          if (ref instanceof WebReference) {
+            refs.add((WebReference)ref);
+          }
+        }
+        super.visitElement(element);
+      }
+    });
+    return refs;
+  }
 }

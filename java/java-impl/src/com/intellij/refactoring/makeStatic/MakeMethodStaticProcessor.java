@@ -15,6 +15,7 @@
  */
 package com.intellij.refactoring.makeStatic;
 
+import com.intellij.codeInsight.AnnotationUtil;
 import com.intellij.codeInsight.TestFrameworks;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
@@ -25,7 +26,10 @@ import com.intellij.psi.javadoc.PsiDocTag;
 import com.intellij.psi.util.InheritanceUtil;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
-import com.intellij.refactoring.changeSignature.*;
+import com.intellij.refactoring.changeSignature.JavaChangeInfoImpl;
+import com.intellij.refactoring.changeSignature.JavaChangeSignatureUsageProcessor;
+import com.intellij.refactoring.changeSignature.ParameterInfoImpl;
+import com.intellij.refactoring.changeSignature.ThrownExceptionInfo;
 import com.intellij.refactoring.changeSignature.inCallers.JavaCallerChooser;
 import com.intellij.refactoring.util.CanonicalTypes;
 import com.intellij.refactoring.util.RefactoringUtil;
@@ -37,7 +41,10 @@ import com.intellij.util.VisibilityUtil;
 import com.intellij.util.containers.MultiMap;
 import com.intellij.util.ui.tree.TreeUtil;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Set;
 
 /**
  * @author dsl
@@ -60,12 +67,8 @@ public class MakeMethodStaticProcessor extends MakeMethodOrClassStaticProcessor<
         }
       }
       else {
-        final JavaCallerChooser chooser = new MakeStaticJavaCallerChooser(myMember, myProject, new Consumer<Set<PsiMethod>>() {
-          @Override
-          public void consume(Set<PsiMethod> methods) {
-            myAdditionalMethods.addAll(methods);
-          }
-        }) {
+        final JavaCallerChooser chooser = new MakeStaticJavaCallerChooser(myMember, myProject,
+                                                                          methods -> myAdditionalMethods.addAll(methods)) {
           @Override
           protected ArrayList<UsageInfo> getTopLevelItems() {
             return new ArrayList<UsageInfo>(toMakeStatic);
@@ -139,10 +142,6 @@ public class MakeMethodStaticProcessor extends MakeMethodOrClassStaticProcessor<
       List<ParameterInfoImpl> params = new ArrayList<ParameterInfoImpl>();
       PsiParameter[] parameters = myMember.getParameterList().getParameters();
 
-      for (int i = 0; i < parameters.length; i++) {
-        params.add(new ParameterInfoImpl(i));
-      }
-
       if (mySettings.isMakeClassParameter()) {
         params.add(new ParameterInfoImpl(-1, mySettings.getClassParameterName(),
                                          factory.createType(containingClass, PsiSubstitutor.EMPTY), "this"));
@@ -152,6 +151,10 @@ public class MakeMethodStaticProcessor extends MakeMethodOrClassStaticProcessor<
         for (Settings.FieldParameter parameter : mySettings.getParameterOrderList()) {
           params.add(new ParameterInfoImpl(-1, mySettings.getClassParameterName(), parameter.type, parameter.field.getName()));
         }
+      }
+
+      for (int i = 0; i < parameters.length; i++) {
+        params.add(new ParameterInfoImpl(i));
       }
 
       final PsiType returnType = myMember.getReturnType();
@@ -205,6 +208,10 @@ public class MakeMethodStaticProcessor extends MakeMethodOrClassStaticProcessor<
   }
 
   private void makeStatic(PsiMethod member) {
+    final PsiAnnotation overrideAnnotation = AnnotationUtil.findAnnotation(member, CommonClassNames.JAVA_LANG_OVERRIDE);
+    if (overrideAnnotation != null) {
+      overrideAnnotation.delete();
+    }
     setupTypeParameterList(member);
     // Add static modifier
     final PsiModifierList modifierList = member.getModifierList();

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -61,7 +61,7 @@ public class GroovyShortNamesCache extends PsiShortNamesCache {
   @NotNull
   public PsiClass[] getClassesByName(@NotNull @NonNls String name, @NotNull GlobalSearchScope scope) {
     Collection<PsiClass> allClasses = new SmartList<PsiClass>();
-    processClassesWithName(name, new CommonProcessors.CollectProcessor<PsiClass>(allClasses), scope, null);
+    processClassesWithName(name, Processors.cancelableCollectProcessor(allClasses), scope, null);
     if (allClasses.isEmpty()) return PsiClass.EMPTY_ARRAY;
     return allClasses.toArray(new PsiClass[allClasses.size()]);
   }
@@ -87,19 +87,8 @@ public class GroovyShortNamesCache extends PsiShortNamesCache {
   }
 
   @NotNull
-  public List<PsiClass> getClassesByFQName(@NotNull @NonNls String name, @NotNull GlobalSearchScope scope) {
-    final List<PsiClass> result = addClasses(name, scope, true);
-    if (result.isEmpty()) {
-      result.addAll(addClasses(name, scope, false));
-    }
-    if (result.isEmpty()) {
-      result.addAll(addClasses(name, GlobalSearchScope.projectScope(myProject), false));
-    }
-    return result;
-  }
-
-  private List<PsiClass> addClasses(String name, GlobalSearchScope scope, boolean inSource) {
-    final List<PsiClass> result = new ArrayList<PsiClass>(getScriptClassesByFQName(name, scope, inSource));
+  public List<PsiClass> getClassesByFQName(String name, GlobalSearchScope scope, boolean inSource) {
+    final List<PsiClass> result = ContainerUtil.newArrayList();
 
     for (PsiElement psiClass : StubIndex.getElements(GrFullClassNameIndex.KEY, name.hashCode(), myProject,
                                                      inSource ? new GrSourceFilterScope(scope) : scope, PsiClass.class)) {
@@ -108,6 +97,7 @@ public class GroovyShortNamesCache extends PsiShortNamesCache {
         result.add((PsiClass)psiClass);
       }
     }
+    result.addAll(getScriptClassesByFQName(name, scope, inSource));
     return result;
   }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.groovy.extensions.GroovyNamedArgumentProvider;
 import org.jetbrains.plugins.groovy.extensions.NamedArgumentDescriptor;
+import org.jetbrains.plugins.groovy.extensions.impl.TypeCondition;
 import org.jetbrains.plugins.groovy.lang.psi.api.GroovyResolveResult;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.arguments.GrArgumentList;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.GrCall;
@@ -119,8 +120,9 @@ public class GroovyConstructorNamedArgumentProvider extends GroovyNamedArgumentP
       ResolveUtil.processAllDeclarations(type, processor, ResolveState.initial(), call);
 
       for (Map.Entry<String, Trinity<PsiType, PsiElement, PsiSubstitutor>> entry : map.entrySet()) {
-        result.put(entry.getKey(), new NamedArgumentDescriptor.TypeCondition(entry.getValue().first, entry.getValue().getSecond(), entry.getValue().getThird()).setPriority(
-          NamedArgumentDescriptor.Priority.AS_LOCAL_VARIABLE));
+        result.put(entry.getKey(), new TypeCondition(
+          entry.getValue().first, entry.getValue().getSecond(), entry.getValue().getThird(), NamedArgumentDescriptor.Priority.AS_LOCAL_VARIABLE
+        ));
       }
     }
     else {
@@ -128,8 +130,7 @@ public class GroovyConstructorNamedArgumentProvider extends GroovyNamedArgumentP
         @Override
         protected void addNamedArgument(String propertyName, PsiType type, PsiElement element, PsiSubstitutor substitutor) {
           if (result.containsKey(propertyName)) return;
-          result.put(propertyName, new NamedArgumentDescriptor.TypeCondition(type, element, substitutor).setPriority(
-            NamedArgumentDescriptor.Priority.AS_LOCAL_VARIABLE));
+          result.put(propertyName, new TypeCondition(type, element, substitutor, NamedArgumentDescriptor.Priority.AS_LOCAL_VARIABLE));
         }
       };
 
@@ -169,7 +170,7 @@ public class GroovyConstructorNamedArgumentProvider extends GroovyNamedArgumentP
 
   private abstract static class MyPsiScopeProcessor implements PsiScopeProcessor, NameHint, ClassHint, ElementClassHint {
     private String myNameHint;
-    private EnumSet<ResolveKind> myResolveTargetKinds;
+    private EnumSet<DeclarationKind> myResolveTargetKinds;
 
     @Override
     public boolean execute(@NotNull PsiElement element, @NotNull ResolveState state) {
@@ -178,7 +179,7 @@ public class GroovyConstructorNamedArgumentProvider extends GroovyNamedArgumentP
         PsiType type;
 
         if (element instanceof PsiMethod) {
-          if (!myResolveTargetKinds.contains(ResolveKind.METHOD)) return true;
+          if (!myResolveTargetKinds.contains(DeclarationKind.METHOD)) return true;
 
           PsiMethod method = (PsiMethod)element;
           if (!GroovyPropertyUtils.isSimplePropertySetter(method)) return true;
@@ -189,7 +190,7 @@ public class GroovyConstructorNamedArgumentProvider extends GroovyNamedArgumentP
           type = method.getParameterList().getParameters()[0].getType();
         }
         else {
-          if (!myResolveTargetKinds.contains(ResolveKind.PROPERTY)) return true;
+          if (!myResolveTargetKinds.contains(DeclarationKind.FIELD)) return true;
 
           type = ((PsiField)element).getType();
           propertyName = ((PsiField)element).getName();
@@ -214,7 +215,7 @@ public class GroovyConstructorNamedArgumentProvider extends GroovyNamedArgumentP
 
     @Override
     public <T> T getHint(@NotNull Key<T> hintKey) {
-      if ((NameHint.KEY == hintKey && myNameHint != null) || ClassHint.KEY == hintKey || ElementClassHint.KEY == hintKey) {
+      if (NameHint.KEY == hintKey && myNameHint != null || ElementClassHint.KEY == hintKey) {
         //noinspection unchecked
         return (T) this;
       }
@@ -228,30 +229,8 @@ public class GroovyConstructorNamedArgumentProvider extends GroovyNamedArgumentP
     }
 
     @Override
-    public boolean shouldProcess(ResolveKind resolveKind) {
-      return myResolveTargetKinds.contains(resolveKind);
-    }
-
-    @Override
     public boolean shouldProcess(DeclarationKind kind) {
-      switch (kind) {
-        case CLASS:
-          return shouldProcess(ResolveKind.CLASS);
-
-        case ENUM_CONST:
-        case VARIABLE:
-        case FIELD:
-          return shouldProcess(ResolveKind.PROPERTY);
-
-        case METHOD:
-          return shouldProcess(ResolveKind.METHOD);
-
-        case PACKAGE:
-          return shouldProcess(ResolveKind.PACKAGE);
-
-        default:
-          return false;
-      }
+      return myResolveTargetKinds.contains(kind);
     }
 
     @Override
@@ -263,7 +242,7 @@ public class GroovyConstructorNamedArgumentProvider extends GroovyNamedArgumentP
       myNameHint = nameHint;
     }
 
-    public void setResolveTargetKinds(EnumSet<ResolveKind> resolveTargetKinds) {
+    public void setResolveTargetKinds(EnumSet<DeclarationKind> resolveTargetKinds) {
       myResolveTargetKinds = resolveTargetKinds;
     }
   }

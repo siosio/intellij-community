@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package com.intellij.ide.passwordSafe.impl.providers.masterKey.windows;
 
 import com.intellij.ide.passwordSafe.MasterPasswordUnavailableException;
+import com.intellij.util.containers.ContainerUtil;
 import com.sun.jna.Memory;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
@@ -24,9 +25,11 @@ import com.sun.jna.win32.StdCallLibrary;
 import com.sun.jna.win32.W32APIFunctionMapper;
 import com.sun.jna.win32.W32APITypeMapper;
 
-import java.util.HashMap;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 
+import static com.intellij.openapi.util.Pair.pair;
 import static com.sun.jna.Library.OPTION_FUNCTION_MAPPER;
 import static com.sun.jna.Library.OPTION_TYPE_MAPPER;
 
@@ -37,10 +40,9 @@ public class WindowsCryptUtils {
   /**
    * Unicode options for the libraries
    */
-  static final Map<String, Object> UNICODE_OPTIONS = new HashMap<String, Object>() {{
-    put(OPTION_TYPE_MAPPER, W32APITypeMapper.UNICODE);
-    put(OPTION_FUNCTION_MAPPER, W32APIFunctionMapper.UNICODE);
-  }};
+  private static final Map<String, Object> UNICODE_OPTIONS = ContainerUtil.newHashMap(
+    pair(OPTION_TYPE_MAPPER, W32APITypeMapper.UNICODE),
+    pair(OPTION_FUNCTION_MAPPER, W32APIFunctionMapper.UNICODE));
 
   private WindowsCryptUtils() { }
 
@@ -123,8 +125,15 @@ public class WindowsCryptUtils {
                                DATA_BLOB pDataOut);
 
     class DATA_BLOB extends Structure implements Structure.ByReference {
+      private static final List __FIELDS = Arrays.asList("cbData", "pbData");
+
       public W32API.DWORD cbData;
       public Pointer pbData;
+
+      @Override
+      protected List getFieldOrder() {
+        return __FIELDS;
+      }
     }
   }
 

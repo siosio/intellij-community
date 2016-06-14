@@ -46,6 +46,8 @@ import com.intellij.pom.Navigatable;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
+import com.intellij.psi.codeStyle.MinusculeMatcher;
+import com.intellij.psi.codeStyle.NameUtil;
 import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.ui.*;
 import com.intellij.ui.docking.DockManager;
@@ -264,7 +266,7 @@ public class FileStructureDialog extends DialogWrapper {
       @Override
       public void stateChanged(ChangeEvent e) {
         myShouldNarrowDown = checkBox.isSelected();
-        PropertiesComponent.getInstance().setValue(ourPropertyKey, Boolean.toString(myShouldNarrowDown));
+        PropertiesComponent.getInstance().setValue(ourPropertyKey, myShouldNarrowDown);
 
         ProjectListBuilder builder = (ProjectListBuilder)myCommanderPanel.getBuilder();
         if (builder == null) {
@@ -370,17 +372,14 @@ public class FileStructureDialog extends DialogWrapper {
             return;
           }
           builder.addUpdateRequest(hasPrefixShortened(evt));
-          ApplicationManager.getApplication().invokeLater(new Runnable() {
-            @Override
-            public void run() {
-              int index = myList.getSelectedIndex();
-              if (index != -1 && index < myList.getModel().getSize()) {
-                myList.clearSelection();
-                ListScrollingUtil.selectItem(myList, index);
-              }
-              else {
-                ListScrollingUtil.ensureSelectionExists(myList);
-              }
+          ApplicationManager.getApplication().invokeLater(() -> {
+            int index = myList.getSelectedIndex();
+            if (index != -1 && index < myList.getModel().getSize()) {
+              myList.clearSelection();
+              ScrollingUtil.selectItem(myList, index);
+            }
+            else {
+              ScrollingUtil.ensureSelectionExists(myList);
             }
           });
         }
@@ -397,12 +396,9 @@ public class FileStructureDialog extends DialogWrapper {
     public boolean navigateSelectedElement() {
       final Ref<Boolean> succeeded = new Ref<Boolean>();
       final CommandProcessor commandProcessor = CommandProcessor.getInstance();
-      commandProcessor.executeCommand(myProject, new Runnable() {
-        @Override
-        public void run() {
-          succeeded.set(MyCommanderPanel.super.navigateSelectedElement());
-          IdeDocumentHistory.getInstance(myProject).includeCurrentCommandAsNavigation();
-        }
+      commandProcessor.executeCommand(myProject, () -> {
+        succeeded.set(MyCommanderPanel.super.navigateSelectedElement());
+        IdeDocumentHistory.getInstance(myProject).includeCurrentCommandAsNavigation();
       }, "Navigate", null);
       if (succeeded.get()) {
         close(CANCEL_EXIT_CODE);
@@ -436,7 +432,7 @@ public class FileStructureDialog extends DialogWrapper {
     public void scrollSelectionInView() {
       int selectedIndex = myList.getSelectedIndex();
       if (selectedIndex >= 0) {
-        ListScrollingUtil.ensureIndexIsVisible(myList, selectedIndex, 0);
+        ScrollingUtil.ensureIndexIsVisible(myList, selectedIndex, 0);
       }
     }
   }
@@ -488,6 +484,17 @@ public class FileStructureDialog extends DialogWrapper {
   }
 
   private static SpeedSearchComparator createSpeedSearchComparator() {
-    return new SpeedSearchComparator(false);
+    return new SpeedSearchComparator(false) {
+      @NotNull
+      @Override
+      protected MinusculeMatcher createMatcher(@NotNull String pattern) {
+        return createFileStructureMatcher(pattern);
+      }
+    };
+  }
+
+  @NotNull
+  public static MinusculeMatcher createFileStructureMatcher(@NotNull String pattern) {
+    return NameUtil.buildMatcher(pattern).withSeparators(" ()").build();
   }
 }

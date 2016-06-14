@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,13 +35,13 @@ import com.intellij.util.diff.FlyweightCapableTreeStructure;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import sun.reflect.ConstructorAccessor;
 
 import java.lang.reflect.Constructor;
 
 public interface JavaElementType {
+  @SuppressWarnings("deprecation")
   class JavaCompositeElementType extends IJavaElementType implements ICompositeElementType {
-    private final ConstructorAccessor myConstructor;
+    private final Constructor<? extends ASTNode> myConstructor;
 
     private JavaCompositeElementType(@NonNls final String debugName, final Class<? extends ASTNode> nodeClass) {
       this(debugName, nodeClass, false);
@@ -49,14 +49,13 @@ public interface JavaElementType {
 
     private JavaCompositeElementType(@NonNls final String debugName, final Class<? extends ASTNode> nodeClass, final boolean leftBound) {
       super(debugName, leftBound);
-      Constructor<? extends ASTNode> constructor = ReflectionUtil.getDefaultConstructor(nodeClass);
-      myConstructor = ReflectionUtil.getConstructorAccessor(constructor);
+      myConstructor = ReflectionUtil.getDefaultConstructor(nodeClass);
     }
 
     @NotNull
     @Override
     public ASTNode createCompositeNode() {
-      return ReflectionUtil.createInstanceViaConstructorAccessor(myConstructor);
+      return ReflectionUtil.createInstance(myConstructor);
     }
   }
 
@@ -83,8 +82,8 @@ public interface JavaElementType {
   IElementType PARAMETER_LIST = JavaStubElementTypes.PARAMETER_LIST;
   IElementType EXTENDS_BOUND_LIST = JavaStubElementTypes.EXTENDS_BOUND_LIST;
   IElementType THROWS_LIST = JavaStubElementTypes.THROWS_LIST;
+  IElementType LITERAL_EXPRESSION = JavaStubElementTypes.LITERAL_EXPRESSION;
 
-  IElementType LITERAL_EXPRESSION = new JavaCompositeElementType("LITERAL_EXPRESSION", PsiLiteralExpressionImpl.class);
   IElementType IMPORT_STATIC_REFERENCE = new JavaCompositeElementType("IMPORT_STATIC_REFERENCE", PsiImportStaticReferenceElementImpl.class);
   IElementType TYPE = new JavaCompositeElementType("TYPE", PsiTypeElementImpl.class);
   IElementType DIAMOND_TYPE = new JavaCompositeElementType("DIAMOND_TYPE", PsiDiamondTypeElementImpl.class);
@@ -133,6 +132,7 @@ public interface JavaElementType {
   IElementType TRY_STATEMENT = new JavaCompositeElementType("TRY_STATEMENT", PsiTryStatementImpl.class);
   IElementType RESOURCE_LIST = new JavaCompositeElementType("RESOURCE_LIST", PsiResourceListImpl.class);
   IElementType RESOURCE_VARIABLE = new JavaCompositeElementType("RESOURCE_VARIABLE", PsiResourceVariableImpl.class);
+  IElementType RESOURCE_EXPRESSION = new JavaCompositeElementType("RESOURCE_EXPRESSION", PsiResourceExpressionImpl.class);
   IElementType CATCH_SECTION = new JavaCompositeElementType("CATCH_SECTION", PsiCatchSectionImpl.class);
   IElementType LABELED_STATEMENT = new JavaCompositeElementType("LABELED_STATEMENT", PsiLabeledStatementImpl.class);
   IElementType ASSERT_STATEMENT = new JavaCompositeElementType("ASSERT_STATEMENT", PsiAssertStatementImpl.class);
@@ -239,12 +239,24 @@ public interface JavaElementType {
     }
   };
 
-  IElementType TYPE_TEXT = new ICodeFragmentElementType("TYPE_TEXT", JavaLanguage.INSTANCE) {
+  IElementType TYPE_WITH_DISJUNCTIONS_TEXT = new TypeTextElementType("TYPE_WITH_DISJUNCTIONS_TEXT", ReferenceParser.DISJUNCTIONS);
+  IElementType TYPE_WITH_CONJUNCTIONS_TEXT = new TypeTextElementType("TYPE_WITH_CONJUNCTIONS_TEXT", ReferenceParser.CONJUNCTIONS);
+
+  class TypeTextElementType extends ICodeFragmentElementType {
+    private final int myFlags;
+
+    public TypeTextElementType(@NonNls String debugName, int flags) {
+      super(debugName, JavaLanguage.INSTANCE);
+      myFlags = flags;
+    }
+
     private final JavaParserUtil.ParserWrapper myParser = new JavaParserUtil.ParserWrapper() {
       @Override
       public void parse(final PsiBuilder builder) {
-        JavaParser.INSTANCE.getReferenceParser().parseType(builder, ReferenceParser.EAT_LAST_DOT | ReferenceParser.ELLIPSIS |
-                                                                    ReferenceParser.WILDCARD | ReferenceParser.DISJUNCTIONS);
+        JavaParser.INSTANCE.getReferenceParser().parseType(builder, ReferenceParser.EAT_LAST_DOT |
+                                                                    ReferenceParser.ELLIPSIS |
+                                                                    ReferenceParser.WILDCARD |
+                                                                    myFlags);
       }
     };
 
@@ -253,7 +265,7 @@ public interface JavaElementType {
     public ASTNode parseContents(final ASTNode chameleon) {
       return JavaParserUtil.parseFragment(chameleon, myParser);
     }
-  };
+  }
 
   class JavaDummyElementType extends ILazyParseableElementType implements ICompositeElementType {
     private JavaDummyElementType() {

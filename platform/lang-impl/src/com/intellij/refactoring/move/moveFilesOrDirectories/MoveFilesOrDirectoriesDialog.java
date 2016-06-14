@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.fileChooser.FileChooserFactory;
 import com.intellij.openapi.help.HelpManager;
 import com.intellij.openapi.keymap.KeymapUtil;
+import com.intellij.openapi.project.DumbModePermission;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
@@ -91,7 +92,7 @@ public class MoveFilesOrDirectoriesDialog extends DialogWrapper {
 
   @Override
   public JComponent getPreferredFocusedComponent() {
-    return myTargetDirectoryField.getChildComponent();
+    return myTargetDirectoryField;
   }
 
   @Override
@@ -168,8 +169,13 @@ public class MoveFilesOrDirectoriesDialog extends DialogWrapper {
                           RefactoringBundle.message("move.specified.elements"));
     }
 
-    myTargetDirectoryField.getChildComponent()
-      .setText(initialTargetDirectory == null ? "" : initialTargetDirectory.getVirtualFile().getPresentableUrl());
+    final String initialTargetPath = initialTargetDirectory == null ? "" : initialTargetDirectory.getVirtualFile().getPresentableUrl();
+    myTargetDirectoryField.getChildComponent().setText(initialTargetPath);
+    final int lastDirectoryIdx = initialTargetPath.lastIndexOf(File.separator);
+    final int textLength = initialTargetPath.length();
+    if (lastDirectoryIdx > 0 && lastDirectoryIdx + 1 < textLength) {
+      myTargetDirectoryField.getChildComponent().getTextEditor().select(lastDirectoryIdx + 1, textLength);
+    }
 
     validateOKButton();
     myHelpID = helpID;
@@ -184,7 +190,7 @@ public class MoveFilesOrDirectoriesDialog extends DialogWrapper {
     if (ApplicationManager.getApplication().isUnitTestMode()) {
       return false;
     }
-    return PropertiesComponent.getInstance().getBoolean(MOVE_FILES_OPEN_IN_EDITOR, true);
+    return PropertiesComponent.getInstance().getBoolean(MOVE_FILES_OPEN_IN_EDITOR, false);
   } 
 
   private void validateOKButton() {
@@ -193,7 +199,7 @@ public class MoveFilesOrDirectoriesDialog extends DialogWrapper {
 
   @Override
   protected void doOKAction() {
-    PropertiesComponent.getInstance().setValue(MOVE_FILES_OPEN_IN_EDITOR, String.valueOf(myOpenInEditorCb.isSelected()));
+    PropertiesComponent.getInstance().setValue(MOVE_FILES_OPEN_IN_EDITOR, myOpenInEditorCb.isSelected(), false);
     //myTargetDirectoryField.getChildComponent().addCurrentTextToHistory();
     RecentsManager.getInstance(myProject).registerRecentEntry(RECENT_KEYS, myTargetDirectoryField.getChildComponent().getText());
     RefactoringSettings.getInstance().MOVE_SEARCH_FOR_REFERENCES_FOR_FILE = myCbSearchForReferences.isSelected();
@@ -203,22 +209,18 @@ public class MoveFilesOrDirectoriesDialog extends DialogWrapper {
       return;
     }
     
-    CommandProcessor.getInstance().executeCommand(myProject, new Runnable() {
-      @Override
-      public void run() {
-        final Runnable action = new Runnable() {
-          @Override
-          public void run() {
-            String directoryName = myTargetDirectoryField.getChildComponent().getText().replace(File.separatorChar, '/');
-            try {
-              myTargetDirectory = DirectoryUtil.mkdirs(PsiManager.getInstance(myProject), directoryName);
-            }
-            catch (IncorrectOperationException e) {
-              // ignore
-            }
-          }
-        };
+    CommandProcessor.getInstance().executeCommand(myProject, () -> {
+      final Runnable action = () -> {
+        String directoryName = myTargetDirectoryField.getChildComponent().getText().replace(File.separatorChar, '/');
+        try {
+          myTargetDirectory = DirectoryUtil.mkdirs(PsiManager.getInstance(myProject), directoryName);
+        }
+        catch (IncorrectOperationException e) {
+          // ignore
+        }
+      };
 
+      DumbService.allowStartingDumbModeInside(DumbModePermission.MAY_START_MODAL, () -> {
         ApplicationManager.getApplication().runWriteAction(action);
         if (myTargetDirectory == null) {
           CommonRefactoringUtil.showErrorMessage(getTitle(),
@@ -226,11 +228,17 @@ public class MoveFilesOrDirectoriesDialog extends DialogWrapper {
           return;
         }
         myCallback.run(MoveFilesOrDirectoriesDialog.this);
-      }
+      });
     }, RefactoringBundle.message("move.title"), null);
   }
 
   public PsiDirectory getTargetDirectory() {
     return myTargetDirectory;
   }
+
+  @Override
+  public void show() {
+    DumbService.allowStartingDumbModeInside(DumbModePermission.MAY_START_BACKGROUND, () -> MoveFilesOrDirectoriesDialog.super.show());
+  }
+
 }

@@ -119,7 +119,7 @@ public class PsiElementRenameHandler implements RenameHandler {
     rename(element, project, nameSuggestionContext, editor);
   }
 
-  static boolean canRename(Project project, Editor editor, PsiElement element) throws CommonRefactoringUtil.RefactoringErrorHintException {
+  public static boolean canRename(Project project, Editor editor, PsiElement element) throws CommonRefactoringUtil.RefactoringErrorHintException {
     String message = renameabilityStatus(project, element);
     if (StringUtil.isNotEmpty(message)) {
       showErrorMessage(project, editor, message);
@@ -142,7 +142,7 @@ public class PsiElementRenameHandler implements RenameHandler {
     if (!PsiManager.getInstance(project).isInProject(element)) {
       if (element.isPhysical()) {
         VirtualFile virtualFile = PsiUtilCore.getVirtualFile(element);
-        if (!(virtualFile != null && NonProjectFileWritingAccessProvider.isWriteAccessAllowedExplicitly(virtualFile, project))) {
+        if (!(virtualFile != null && NonProjectFileWritingAccessProvider.isWriteAccessAllowed(virtualFile, project))) {
           String message = RefactoringBundle.message("error.out.of.project.element", UsageViewUtil.getType(element));
           return RefactoringBundle.getCannotRefactorMessage(message);
         }

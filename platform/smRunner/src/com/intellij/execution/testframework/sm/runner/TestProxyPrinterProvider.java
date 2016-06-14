@@ -27,9 +27,6 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.StringTokenizer;
 
-/**
- * @author Sergey Simonchik
- */
 public final class TestProxyPrinterProvider {
 
   private final TestProxyFilterProvider myFilterProvider;
@@ -52,12 +49,8 @@ public final class TestProxyPrinterProvider {
 
   private static class HyperlinkPrinter extends TestsOutputConsolePrinter {
 
-    public static final Condition<ConsoleViewContentType> ERROR_CONTENT_TYPE = new Condition<ConsoleViewContentType>() {
-      @Override
-      public boolean value(ConsoleViewContentType contentType) {
-        return ConsoleViewContentType.ERROR_OUTPUT == contentType;
-      }
-    };
+    public static final Condition<ConsoleViewContentType> ERROR_CONTENT_TYPE =
+      contentType -> ConsoleViewContentType.ERROR_OUTPUT == contentType;
     private static final String NL = "\n";
 
     private final Condition<ConsoleViewContentType> myContentTypeCondition;

@@ -23,7 +23,6 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.Sdk;
-import com.intellij.util.Consumer;
 import com.intellij.webcore.packaging.InstalledPackage;
 import com.intellij.webcore.packaging.InstalledPackagesPanel;
 import com.intellij.webcore.packaging.PackageManagementService;
@@ -77,10 +76,7 @@ public class PyInstalledPackagesPanel extends InstalledPackagesPanel {
             PackagesNotificationPanel.showError("Failed to install Python packaging tools", description);
           }
           packageManager.refresh();
-          updatePackages(new PyPackageManagementService(myProject, sdk));
-          for (Consumer<Sdk> listener : myPathChangedListeners) {
-            listener.consume(sdk);
-          }
+          updatePackages(PyPackageManagers.getInstance().getManagementService(myProject, sdk));
           updateNotifications(sdk);
         }
       });
@@ -94,60 +90,51 @@ public class PyInstalledPackagesPanel extends InstalledPackagesPanel {
       return;
     }
     final Application application = ApplicationManager.getApplication();
-    application.executeOnPooledThread(new Runnable() {
-      @Override
-      public void run() {
-        PyExecutionException exception = null;
-        try {
-          myHasManagement = PyPackageManager.getInstance(selectedSdk).hasManagement(false);
-          if (!myHasManagement) {
-            throw new PyExecutionException("Python packaging tools not found", "pip", Collections.<String>emptyList(), "", "", 0,
-                                           ImmutableList.of(new PyInstallPackageManagementFix()));
-          }
+    application.executeOnPooledThread(() -> {
+      PyExecutionException exception = null;
+      try {
+        myHasManagement = PyPackageManager.getInstance(selectedSdk).hasManagement(false);
+        if (!myHasManagement) {
+          throw new PyExecutionException("Python packaging tools not found", "pip", Collections.<String>emptyList(), "", "", 0,
+                                         ImmutableList.of(new PyInstallPackageManagementFix()));
         }
-        catch (PyExecutionException e) {
-          exception = e;
-        }
-        catch (ExecutionException e) {
-          return;
-        }
-        final PyExecutionException problem = exception;
-        application.invokeLater(new Runnable() {
-          @Override
-          public void run() {
-            if (selectedSdk == getSelectedSdk()) {
-              myNotificationArea.hide();
-              if (problem != null) {
-                final boolean invalid = PythonSdkType.isInvalid(selectedSdk);
-                if (!invalid) {
-                  final StringBuilder builder = new StringBuilder(problem.getMessage());
-                  builder.append(". ");
-                  for (final PyExecutionFix fix : problem.getFixes()) {
-                    final String key = "id" + fix.hashCode();
-                    final String link = "<a href=\"" + key + "\">" + fix.getName() + "</a>";
-                    builder.append(link);
-                    builder.append(" ");
-                    myNotificationArea.addLinkHandler(key, new Runnable() {
-                      @Override
-                      public void run() {
-                        final Sdk sdk = getSelectedSdk();
-                        if (sdk != null) {
-                          fix.run(sdk);
-                          myNotificationArea.removeLinkHandler(key);
-                          updatePackages(new PyPackageManagementService(myProject, sdk));
-                          updateNotifications(sdk);
-                        }
-                      }
-                    });
-                  }
-                  myNotificationArea.showWarning(builder.toString());
-                }
-                myInstallButton.setEnabled(!invalid && myHasManagement);
-              }
-            }
-          }
-        }, ModalityState.any());
       }
+      catch (PyExecutionException e) {
+        exception = e;
+      }
+      catch (ExecutionException e) {
+        return;
+      }
+      final PyExecutionException problem = exception;
+      application.invokeLater(() -> {
+        if (selectedSdk == getSelectedSdk()) {
+          myNotificationArea.hide();
+          if (problem != null) {
+            final boolean invalid = PythonSdkType.isInvalid(selectedSdk);
+            if (!invalid) {
+              final StringBuilder builder = new StringBuilder(problem.getMessage());
+              builder.append(". ");
+              for (final PyExecutionFix fix : problem.getFixes()) {
+                final String key = "id" + fix.hashCode();
+                final String link = "<a href=\"" + key + "\">" + fix.getName() + "</a>";
+                builder.append(link);
+                builder.append(" ");
+                myNotificationArea.addLinkHandler(key, () -> {
+                  final Sdk sdk = getSelectedSdk();
+                  if (sdk != null) {
+                    fix.run(sdk);
+                    myNotificationArea.removeLinkHandler(key);
+                    updatePackages(PyPackageManagers.getInstance().getManagementService(myProject, sdk));
+                    updateNotifications(sdk);
+                  }
+                });
+              }
+              myNotificationArea.showWarning(builder.toString());
+            }
+            myInstallButton.setEnabled(!invalid && installEnabled());
+          }
+        }
+      }, ModalityState.any());
     });
   }
 
@@ -159,6 +146,9 @@ public class PyInstalledPackagesPanel extends InstalledPackagesPanel {
   @Override
   protected boolean canUninstallPackage(InstalledPackage pkg) {
     if (!myHasManagement) return false;
+
+    if (!PyPackageUtil.packageManagementEnabled(getSelectedSdk())) return false;
+
     if (PythonSdkType.isVirtualEnv(getSelectedSdk()) && pkg instanceof PyPackage) {
       final String location = ((PyPackage)pkg).getLocation();
       if (location != null && location.startsWith(PySdkUtil.getUserSite())) {
@@ -168,7 +158,8 @@ public class PyInstalledPackagesPanel extends InstalledPackagesPanel {
     final String name = pkg.getName();
     if (PyPackageManager.PIP.equals(name) ||
         PyPackageManager.SETUPTOOLS.equals(name) ||
-        PyPackageManager.DISTRIBUTE.equals(name)) {
+        PyPackageManager.DISTRIBUTE.equals(name) ||
+        PyCondaPackageManagerImpl.PYTHON.equals(name)) {
       return false;
     }
     return true;
@@ -176,11 +167,20 @@ public class PyInstalledPackagesPanel extends InstalledPackagesPanel {
 
   @Override
   protected boolean canInstallPackage(@NotNull final InstalledPackage pyPackage) {
+    return installEnabled();
+  }
+
+  @Override
+  protected boolean installEnabled() {
+    if (!PyPackageUtil.packageManagementEnabled(getSelectedSdk())) return false;
+
     return myHasManagement;
   }
 
   @Override
   protected boolean canUpgradePackage(InstalledPackage pyPackage) {
-    return myHasManagement;
+    if (!PyPackageUtil.packageManagementEnabled(getSelectedSdk())) return false;
+
+    return myHasManagement && !PyCondaPackageManagerImpl.PYTHON.equals(pyPackage.getName());
   }
 }

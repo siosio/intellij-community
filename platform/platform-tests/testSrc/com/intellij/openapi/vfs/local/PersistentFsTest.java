@@ -59,7 +59,7 @@ public class PersistentFsTest extends PlatformTestCase {
     int id = ((VirtualFileWithId)vFile).getId();
     assertEquals(vFile, myFs.findFileById(id));
 
-    vFile.delete(this);
+    delete(vFile);
     assertNull(myFs.findFileById(id));
   }
 
@@ -136,6 +136,7 @@ public class PersistentFsTest extends PlatformTestCase {
     try {
       String rootUrl = "jar://" + FileUtil.toSystemIndependentName(jarFile.getPath()) + "!/";
       String entryUrl = rootUrl + JarFile.MANIFEST_NAME;
+      assertNotNull(getVirtualFile(jarFile));
       VirtualFile jarRoot = VirtualFileManager.getInstance().findFileByUrl(rootUrl);
       assertNotNull(jarRoot);
       assertTrue(jarRoot.isValid());

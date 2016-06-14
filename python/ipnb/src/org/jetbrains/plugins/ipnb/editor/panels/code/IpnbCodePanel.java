@@ -22,11 +22,12 @@ import org.jetbrains.plugins.ipnb.format.cells.output.*;
 
 import javax.swing.*;
 import java.awt.*;
+import java.util.Arrays;
 import java.util.List;
 
 public class IpnbCodePanel extends IpnbEditablePanel<JComponent, IpnbCodeCell> {
   private final Project myProject;
-  private final IpnbFileEditor myParent;
+  @NotNull private final IpnbFileEditor myParent;
   private IpnbCodeSourcePanel myCodeSourcePanel;
   private final List<IpnbPanel> myOutputPanels = Lists.newArrayList();
 
@@ -39,6 +40,7 @@ public class IpnbCodePanel extends IpnbEditablePanel<JComponent, IpnbCodeCell> {
     add(myViewPanel);
   }
 
+  @NotNull
   public IpnbFileEditor getFileEditor() {
     return myParent;
   }
@@ -83,11 +85,11 @@ public class IpnbCodePanel extends IpnbEditablePanel<JComponent, IpnbCodeCell> {
     }
     else if (outputCell instanceof IpnbHtmlOutputCell) {
       addPromptPanel(panel, myCell.getPromptNumber(), promptType,
-                     new IpnbHtmlPanel((IpnbHtmlOutputCell)outputCell));
+                     new IpnbHtmlPanel((IpnbHtmlOutputCell)outputCell, myParent.getIpnbFilePanel()));
     }
     else if (outputCell instanceof IpnbLatexOutputCell) {
       addPromptPanel(panel, myCell.getPromptNumber(), promptType,
-                     new IpnbLatexPanel((IpnbLatexOutputCell)outputCell));
+                     new IpnbLatexPanel((IpnbLatexOutputCell)outputCell, myParent.getIpnbFilePanel()));
     }
     else if (outputCell instanceof IpnbErrorOutputCell) {
       addPromptPanel(panel, myCell.getPromptNumber(), promptType,
@@ -99,7 +101,7 @@ public class IpnbCodePanel extends IpnbEditablePanel<JComponent, IpnbCodeCell> {
     }
     else if (outputCell.getSourceAsString() != null) {
       addPromptPanel(panel, myCell.getPromptNumber(), promptType,
-                     new IpnbCodeOutputPanel<IpnbOutputCell>(outputCell));
+                     new IpnbCodeOutputPanel<IpnbOutputCell>(outputCell, myParent.getIpnbFilePanel()));
     }
     mainPanel.add(panel);
   }
@@ -134,16 +136,16 @@ public class IpnbCodePanel extends IpnbEditablePanel<JComponent, IpnbCodeCell> {
   public void updateCellSource() {
     final Document document = myCodeSourcePanel.getEditor().getDocument();
     final String text = document.getText();
-    myCell.setSource(StringUtil.splitByLinesKeepSeparators(text));
+    myCell.setSource(Arrays.asList(StringUtil.splitByLinesKeepSeparators(text)));
   }
 
   public void updatePanel(@Nullable final String replacementContent, @Nullable final List<IpnbOutputCell> outputContent) {
     final Application application = ApplicationManager.getApplication();
-    application.invokeLater(new Runnable() {
+    UIUtil.invokeAndWaitIfNeeded(new Runnable() {
       @Override
       public void run() {
         if (replacementContent != null) {
-          myCell.setSource(StringUtil.splitByLinesKeepSeparators(replacementContent));
+          myCell.setSource(Arrays.asList(StringUtil.splitByLinesKeepSeparators(replacementContent)));
           application.runWriteAction(new Runnable() {
             @Override
             public void run() {

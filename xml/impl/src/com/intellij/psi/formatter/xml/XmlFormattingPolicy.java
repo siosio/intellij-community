@@ -15,10 +15,7 @@
  */
 package com.intellij.psi.formatter.xml;
 
-import com.intellij.formatting.Block;
-import com.intellij.formatting.FormattingDocumentModel;
-import com.intellij.formatting.FormattingModelBuilder;
-import com.intellij.formatting.WrapType;
+import com.intellij.formatting.*;
 import com.intellij.lang.ASTNode;
 import com.intellij.lang.Language;
 import com.intellij.lang.LanguageFormatting;
@@ -88,6 +85,17 @@ public abstract class XmlFormattingPolicy {
 
   public abstract boolean insertLineBreakBeforeTag(XmlTag xmlTag);
 
+  /**
+   * Tells how many additional blank lines must be added if there is an automatic line break before 
+   * tag ({@link #insertLineBreakBeforeTag(XmlTag)} returns <code>true</code>). Returns 0 by default (i.e. only a line break
+   * will be added).
+   * @param xmlTag The tag to check.
+   * @return The number of blank lines to insert.
+   */
+  public int getBlankLinesBeforeTag(XmlTag xmlTag) {
+    return 0;
+  }
+
   public abstract boolean insertLineBreakBeforeFirstAttribute(XmlAttribute attribute);
 
   public abstract boolean insertLineBreakAfterLastAttribute(XmlAttribute attribute);
@@ -126,6 +134,8 @@ public abstract class XmlFormattingPolicy {
 
   public abstract int getWhiteSpaceAroundCDATAOption();
 
+  public Indent getTagEndIndent() { return Indent.getNoneIndent(); }
+
   public abstract CodeStyleSettings getSettings();
 
   public boolean processJsp() {
@@ -148,8 +158,26 @@ public abstract class XmlFormattingPolicy {
     return myProcessJavaTree;
   }
 
-
   public void dontProcessJavaTree() {
     myProcessJavaTree = false;
+  }
+
+  /**
+   * Inline tags are the ones which:
+   * <ul>
+   *   <li>Have no line breaks around them,</li>
+   *   <li>Do not contain any another nested tags.</li>
+   * </ul> F
+   * or example:
+   * <pre>
+   *   &lt;para&gt;
+   *     Some &lt;em&gt;emphasized&lt;/em&gt; text.
+   *   &lt;/para&gt;
+   * </pre>
+   * If true, spaces around such tags will be preserved, no line breaks inserted. 
+   * @return <code>false</code> by default.
+   */
+  public boolean isKeepSpacesAroundInlineTags() {
+    return false;
   }
 }

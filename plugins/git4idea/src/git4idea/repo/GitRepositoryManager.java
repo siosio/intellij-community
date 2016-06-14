@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,32 +21,59 @@ import com.intellij.dvcs.repo.VcsRepositoryManager;
 import com.intellij.openapi.project.Project;
 import git4idea.GitPlatformFacade;
 import git4idea.GitUtil;
+import git4idea.GitVcs;
+import git4idea.config.GitVcsSettings;
+import git4idea.rebase.GitRebaseSpec;
 import git4idea.ui.branch.GitMultiRootBranchConfig;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
 
+import static com.intellij.util.ObjectUtils.assertNotNull;
+
 public class GitRepositoryManager extends AbstractRepositoryManager<GitRepository> {
 
-  @NotNull private final GitPlatformFacade myPlatformFacade;
-  @NotNull private final Project myProject;
+  @NotNull private final GitVcsSettings mySettings;
+  @Nullable private volatile GitRebaseSpec myOngoingRebaseSpec;
 
+  /**
+   * @deprecated To remove in IDEA 2017. Use {@link #GitRepositoryManager(Project, VcsRepositoryManager)}.
+   */
+  @SuppressWarnings("UnusedParameters")
+  @Deprecated
   public GitRepositoryManager(@NotNull Project project, @NotNull GitPlatformFacade platformFacade,
                               @NotNull VcsRepositoryManager vcsRepositoryManager) {
-    super(vcsRepositoryManager, platformFacade.getVcs(project), GitUtil.DOT_GIT);
-    myProject = project;
-    myPlatformFacade = platformFacade;
+    this(project, vcsRepositoryManager);
+  }
+
+  public GitRepositoryManager(@NotNull Project project, @NotNull VcsRepositoryManager vcsRepositoryManager) {
+    super(vcsRepositoryManager, assertNotNull(GitVcs.getInstance(project)), GitUtil.DOT_GIT);
+    mySettings = GitVcsSettings.getInstance(project);
   }
 
   @Override
   public boolean isSyncEnabled() {
-    return myPlatformFacade.getSettings(myProject).getSyncSetting() == DvcsSyncSettings.Value.SYNC &&
-           !new GitMultiRootBranchConfig(getRepositories()).diverged();
+    return mySettings.getSyncSetting() == DvcsSyncSettings.Value.SYNC && !new GitMultiRootBranchConfig(getRepositories()).diverged();
   }
 
   @NotNull
   @Override
   public List<GitRepository> getRepositories() {
     return getRepositories(GitRepository.class);
+  }
+
+  @Nullable
+  public GitRebaseSpec getOngoingRebaseSpec() {
+    GitRebaseSpec rebaseSpec = myOngoingRebaseSpec;
+    return rebaseSpec != null && rebaseSpec.isValid() ? rebaseSpec : null;
+  }
+
+  public boolean hasOngoingRebase() {
+    return getOngoingRebaseSpec() != null;
+  }
+
+  public void setOngoingRebaseSpec(@Nullable GitRebaseSpec ongoingRebaseSpec) {
+    myOngoingRebaseSpec = ongoingRebaseSpec != null && ongoingRebaseSpec.isValid() ? ongoingRebaseSpec : null;
   }
 }

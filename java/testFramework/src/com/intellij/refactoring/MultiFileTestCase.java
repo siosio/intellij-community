@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -56,11 +56,7 @@ public abstract class MultiFileTestCase extends CodeInsightTestCase {
       final VirtualFile rootAfter = LocalFileSystem.getInstance().findFileByPath(pathAfter.replace(File.separatorChar, '/'));
 
       performAction.performAction(rootDir, rootAfter);
-      WriteCommandAction.runWriteCommandAction(getProject(), new Runnable() {
-        public void run() {
-          myProject.getComponent(PostprocessReformattingAspect.class).doPostponedFormatting();
-        }
-      });
+      WriteCommandAction.runWriteCommandAction(getProject(), () -> myProject.getComponent(PostprocessReformattingAspect.class).doPostponedFormatting());
 
       FileDocumentManager.getInstance().saveAllDocuments();
 
@@ -87,10 +83,5 @@ public abstract class MultiFileTestCase extends CodeInsightTestCase {
 
   protected interface PerformAction {
     void performAction(VirtualFile rootDir, VirtualFile rootAfter) throws Exception;
-  }
-
-  @Override
-  protected boolean isRunInWriteAction() {
-    return false;
   }
 }

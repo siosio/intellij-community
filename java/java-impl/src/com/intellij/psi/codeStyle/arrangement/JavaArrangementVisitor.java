@@ -25,7 +25,7 @@ import com.intellij.psi.search.searches.SuperMethodsSearch;
 import com.intellij.psi.util.MethodSignatureBackedByPsiMethod;
 import com.intellij.psi.util.PropertyUtil;
 import com.intellij.util.Consumer;
-import com.intellij.util.Function;
+import com.intellij.util.Functions;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.ContainerUtilRt;
 import com.intellij.util.containers.Stack;
@@ -85,13 +85,10 @@ public class JavaArrangementVisitor extends JavaRecursiveElementVisitor {
     myGroupingRules = getGroupingRules(settings);
 
     myMethodBodyProcessor = new MethodBodyProcessor(infoHolder);
-    mySectionDetector = new ArrangementSectionDetector(document, settings, new Consumer<ArrangementSectionEntryTemplate>() {
-      @Override
-      public void consume(ArrangementSectionEntryTemplate data) {
-        TextRange range = data.getTextRange();
-        JavaSectionArrangementEntry entry = new JavaSectionArrangementEntry(getCurrent(), data.getToken(), range, data.getText(), true);
-        registerEntry(data.getElement(), entry);
-      }
+    mySectionDetector = new ArrangementSectionDetector(document, settings, data -> {
+      TextRange range = data.getTextRange();
+      JavaSectionArrangementEntry entry = new JavaSectionArrangementEntry(getCurrent(), data.getToken(), range, data.getText(), true);
+      registerEntry(data.getElement(), entry);
     });
   }
 
@@ -127,17 +124,14 @@ public class JavaArrangementVisitor extends JavaRecursiveElementVisitor {
       return;
     }
 
-    processChildrenWithinEntryScope(entry, new Runnable() {
-      @Override
-      public void run() {
-        PsiElement current = lBrace;
-        while (current != rBrace) {
-          current = current.getNextSibling();
-          if (current == null) {
-            break;
-          }
-          current.accept(JavaArrangementVisitor.this);
+    processChildrenWithinEntryScope(entry, () -> {
+      PsiElement current = lBrace;
+      while (current != rBrace) {
+        current = current.getNextSibling();
+        if (current == null) {
+          break;
         }
+        current.accept(JavaArrangementVisitor.this);
       }
     });
   }
@@ -168,16 +162,13 @@ public class JavaArrangementVisitor extends JavaRecursiveElementVisitor {
     if (entry == null) {
       return;
     }
-    processChildrenWithinEntryScope(entry, new Runnable() {
-      @Override
-      public void run() {
-        PsiExpressionList list = aClass.getArgumentList();
-        if (list != null && list.getTextLength() > 0) {
-          JavaElementArrangementEntry listEntry = createNewEntry(list, list.getTextRange(), ANON_CLASS_PARAMETER_LIST, aClass.getName(), true);
-          processEntry(listEntry, null, list);
-        }
-        createAndProcessAnonymousClassBodyEntry(aClass);
+    processChildrenWithinEntryScope(entry, () -> {
+      PsiExpressionList list = aClass.getArgumentList();
+      if (list != null && list.getTextLength() > 0) {
+        JavaElementArrangementEntry listEntry = createNewEntry(list, list.getTextRange(), ANON_CLASS_PARAMETER_LIST, aClass.getName(), true);
+        processEntry(listEntry, null, list);
       }
+      createAndProcessAnonymousClassBodyEntry(aClass);
     });
   }
 
@@ -268,7 +259,7 @@ public class JavaArrangementVisitor extends JavaRecursiveElementVisitor {
 
     Set<PsiField> classFields = myCachedClassFields.get(containingClass);
     if (classFields == null) {
-      classFields = ContainerUtil.map2Set(containingClass.getFields(), new Function.Self<PsiField, PsiField>());
+      classFields = ContainerUtil.map2Set(containingClass.getFields(), Functions.<PsiField>id());
       myCachedClassFields.put(containingClass, classFields);
     }
 
@@ -485,12 +476,7 @@ public class JavaArrangementVisitor extends JavaRecursiveElementVisitor {
     if (nextPsiRoot == null) {
       return;
     }
-    processChildrenWithinEntryScope(entry, new Runnable() {
-      @Override
-      public void run() {
-        nextPsiRoot.acceptChildren(JavaArrangementVisitor.this);
-      }
-    });
+    processChildrenWithinEntryScope(entry, () -> nextPsiRoot.acceptChildren(JavaArrangementVisitor.this));
   }
 
   private void processChildrenWithinEntryScope(@NotNull JavaElementArrangementEntry entry, @NotNull Runnable childrenProcessing) {

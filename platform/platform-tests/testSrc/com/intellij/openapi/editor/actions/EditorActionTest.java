@@ -208,4 +208,30 @@ public class EditorActionTest extends AbstractEditorTest {
     left();
     checkResultByText("<selection><caret>ab</selection>c");
   }
+  
+  public void testDuplicateLinesWhenSelectionEndsAtLineStart() throws IOException {
+    initText("a\n<selection>b\n</selection>c");
+    executeAction(IdeActions.ACTION_EDITOR_DUPLICATE_LINES);
+    checkResultByText("a\nb\n<selection>b\n</selection>c");
+  }
+  
+  public void testSmartHomeAfterFoldedRegion() throws IOException {
+    initText(" text with [multiline\nfold region]<caret>");
+    foldOccurrences("(?s)\\[.*\\]", "...");
+    myEditor.getSettings().setSmartHome(true);
+    home();
+    checkResultByText(" <caret>text with [multiline\nfold region]");
+  }
+
+  public void testToggleCaseForTextAfterEscapedSlash() throws IOException {
+    init("class C { String s = \"<selection>ab\\\\cd<caret></selection>\"; }", TestFileType.JAVA);
+    executeAction(IdeActions.ACTION_EDITOR_TOGGLE_CASE);
+    checkResultByText("class C { String s = \"<selection>AB\\\\CD<caret></selection>\"; }");
+  }
+
+  public void testToggleCaseForEscapedChar() throws IOException {
+    init("class C { String s = \"<selection>ab\\ncd<caret></selection>\"; }", TestFileType.JAVA);
+    executeAction(IdeActions.ACTION_EDITOR_TOGGLE_CASE);
+    checkResultByText("class C { String s = \"<selection>AB\\nCD<caret></selection>\"; }");
+  }
 }

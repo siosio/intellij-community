@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,36 +26,21 @@ import com.intellij.testFramework.LightCodeInsightTestCase;
 public class ExtendsBoundListTest extends LightCodeInsightTestCase {
   public void testRemoveBoundFromFront() throws Exception {
     final PsiTypeParameter typeParameter = getTypeParameter();
-    WriteCommandAction.runWriteCommandAction(null, new Runnable() {
-      @Override
-      public void run() {
-        typeParameter.getExtendsList().getReferenceElements()[0].delete();
-      }
-    });
+    WriteCommandAction.runWriteCommandAction(null, () -> typeParameter.getExtendsList().getReferenceElements()[0].delete());
 
     check();
   }
 
   public void testRemoveBoundFromEnd() throws Exception {
     final PsiTypeParameter typeParameter = getTypeParameter();
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      @Override
-      public void run() {
-        typeParameter.getExtendsList().getReferenceElements()[1].delete();
-      }
-    });
+    ApplicationManager.getApplication().runWriteAction(() -> typeParameter.getExtendsList().getReferenceElements()[1].delete());
 
     check();
   }
 
   public void testRemoveBoundFromMiddle() throws Exception {
     final PsiTypeParameter typeParameter = getTypeParameter();
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      @Override
-      public void run() {
-        typeParameter.getExtendsList().getReferenceElements()[1].delete();
-      }
-    });
+    ApplicationManager.getApplication().runWriteAction(() -> typeParameter.getExtendsList().getReferenceElements()[1].delete());
 
     check();
   }
@@ -66,7 +51,10 @@ public class ExtendsBoundListTest extends LightCodeInsightTestCase {
     final PsiClass cloneableClass = getJavaFacade().findClass("java.lang.Cloneable");
     assertNotNull(cloneableClass);
     final PsiJavaCodeReferenceElement reference = getJavaFacade().getElementFactory().createClassReferenceElement(cloneableClass);
-    extendsList.addAfter(reference, extendsList.getReferenceElements()[0]);
+    ApplicationManager.getApplication().runWriteAction(() -> {
+      extendsList.addAfter(reference, extendsList.getReferenceElements()[0]);
+    });
+
     check();
   }
 
@@ -76,7 +64,10 @@ public class ExtendsBoundListTest extends LightCodeInsightTestCase {
     final PsiClass cloneableClass = getJavaFacade().findClass("java.lang.Cloneable");
     assertNotNull(cloneableClass);
     final PsiJavaCodeReferenceElement reference = getJavaFacade().getElementFactory().createClassReferenceElement(cloneableClass);
-    extendsList.addBefore(reference, extendsList.getReferenceElements()[0]);
+    ApplicationManager.getApplication().runWriteAction(() -> {
+      extendsList.addBefore(reference, extendsList.getReferenceElements()[0]);
+    });
+
     check();
   }
 
@@ -86,7 +77,10 @@ public class ExtendsBoundListTest extends LightCodeInsightTestCase {
     final PsiClass cloneableClass = getJavaFacade().findClass("java.lang.Cloneable");
     assertNotNull(cloneableClass);
     final PsiJavaCodeReferenceElement reference = getJavaFacade().getElementFactory().createClassReferenceElement(cloneableClass);
-    extendsList.addBefore(reference, null);
+    ApplicationManager.getApplication().runWriteAction(() -> {
+      extendsList.addBefore(reference, null);
+    });
+
     check();
   }
 
@@ -96,7 +90,10 @@ public class ExtendsBoundListTest extends LightCodeInsightTestCase {
     final PsiClass cloneableClass = getJavaFacade().findClass(CommonClassNames.JAVA_LANG_RUNNABLE);
     assertNotNull(cloneableClass);
     final PsiJavaCodeReferenceElement reference = getJavaFacade().getElementFactory().createClassReferenceElement(cloneableClass);
-    extendsList.add(reference);
+    ApplicationManager.getApplication().runWriteAction(() -> {
+      extendsList.add(reference);
+    });
+
     check();
   }
 

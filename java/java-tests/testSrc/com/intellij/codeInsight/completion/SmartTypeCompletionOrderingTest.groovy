@@ -257,7 +257,7 @@ public class SmartTypeCompletionOrderingTest extends CompletionSortingTestCase {
     invokeCompletion(getTestName(false) + ".java");
     assertPreferredItems(0, "foo", "false");
     myFixture.type(',');
-    complete();
+    myFixture.complete(CompletionType.SMART)
     assertPreferredItems(0, "bar", "foo", "equals", "false", "true");
   }
 
@@ -322,6 +322,9 @@ public class SmartTypeCompletionOrderingTest extends CompletionSortingTestCase {
     checkPreferredItems 0, 'Foo.class', 'forName'
   }
   public void testGetWildcardLogger() {
+    checkPreferredItems 0, 'Foo.class', 'forName'
+  }
+  public void testGetWildcardFactoryLogger() {
     checkPreferredItems 0, 'Foo.class', 'forName'
   }
   public void testPreferLocalWildcardClassOverObject() {

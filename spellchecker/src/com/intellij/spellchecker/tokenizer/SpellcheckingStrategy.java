@@ -25,7 +25,6 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.source.tree.injected.InjectedLanguageUtil;
 import com.intellij.psi.xml.XmlAttributeValue;
-import com.intellij.psi.xml.XmlText;
 import com.intellij.psi.xml.XmlToken;
 import com.intellij.psi.xml.XmlTokenType;
 import com.intellij.spellchecker.inspections.PlainTextSplitter;
@@ -39,7 +38,6 @@ import org.jetbrains.annotations.NotNull;
 public class SpellcheckingStrategy {
   protected final Tokenizer<PsiComment> myCommentTokenizer = new CommentTokenizer();
   protected final Tokenizer<XmlAttributeValue> myXmlAttributeTokenizer = new XmlAttributeValueTokenizer();
-  protected final Tokenizer<XmlText> myXmlTextTokenizer = new XmlTextTokenizer();
 
   public static final ExtensionPointName<SpellcheckingStrategy> EP_NAME = ExtensionPointName.create("com.intellij.spellchecker.support");
   public static final Tokenizer EMPTY_TOKENIZER = new Tokenizer() {
@@ -54,6 +52,9 @@ public class SpellcheckingStrategy {
 
   @NotNull
   public Tokenizer getTokenizer(PsiElement element) {
+    if (element instanceof PsiWhiteSpace) {
+      return EMPTY_TOKENIZER;
+    }
     if (element instanceof PsiLanguageInjectionHost && InjectedLanguageUtil.hasInjections((PsiLanguageInjectionHost)element)) {
       return EMPTY_TOKENIZER;
     }
@@ -65,7 +66,6 @@ public class SpellcheckingStrategy {
       return myCommentTokenizer;
     }
     if (element instanceof XmlAttributeValue) return myXmlAttributeTokenizer;
-    if (element instanceof XmlText) return myXmlTextTokenizer;
     if (element instanceof PsiPlainText) {
       PsiFile file = element.getContainingFile();
       FileType fileType = file == null ? null : file.getFileType();

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,9 +27,6 @@ import java.util.List;
 
 public class AsyncResult<T> extends ActionCallback {
   private static final Logger LOG = Logger.getInstance(AsyncResult.class);
-
-  private static final AsyncResult REJECTED = new Rejected();
-  private static final AsyncResult DONE_LIST = new Done<Object>(Collections.EMPTY_LIST);
 
   protected T myResult;
 
@@ -68,18 +65,23 @@ public class AsyncResult<T> extends ActionCallback {
     return subResult;
   }
 
+  /**
+   * @deprecated Don't use AsyncResult - use Promise instead.
+   */
+  @SuppressWarnings("unused")
   @NotNull
+  @Deprecated
   public ActionCallback subCallback(@NotNull Consumer<T> doneHandler) {
     ActionCallback subCallback = new ActionCallback();
     doWhenDone(new SubCallbackDoneCallback<T>(subCallback, doneHandler)).notifyWhenRejected(subCallback);
     return subCallback;
   }
 
-  @NotNull
-  @Deprecated
   /**
    * @deprecated Use {@link #doWhenDone(com.intellij.util.Consumer)} (to remove in IDEA 16)
    */
+  @NotNull
+  @Deprecated
   public AsyncResult<T> doWhenDone(@SuppressWarnings("deprecation") @NotNull final Handler<T> handler) {
     doWhenDone(new Runnable() {
       @Override
@@ -96,21 +98,6 @@ public class AsyncResult<T> extends ActionCallback {
       @Override
       public void run() {
         consumer.consume(myResult);
-      }
-    });
-    return this;
-  }
-
-  @NotNull
-  @Deprecated
-  /**
-   * @deprecated Use {@link #doWhenRejected(com.intellij.util.Consumer)} (to remove in IDEA 16)
-   */
-  public AsyncResult<T> doWhenRejected(@SuppressWarnings("deprecation") @NotNull final Handler<T> handler) {
-    doWhenRejected(new Runnable() {
-      @Override
-      public void run() {
-        handler.run(myResult);
       }
     });
     return this;
@@ -160,20 +147,28 @@ public class AsyncResult<T> extends ActionCallback {
     return this;
   }
 
-  @Deprecated
   /**
    * @deprecated Use {@link com.intellij.util.Consumer} (to remove in IDEA 16)
    */
+  @Deprecated
   public interface Handler<T> {
     void run(T t);
   }
 
+  /**
+   * @deprecated Don't use AsyncResult - use Promise instead.
+   */
+  @Deprecated
   public static class Done<T> extends AsyncResult<T> {
     public Done(T value) {
       setDone(value);
     }
   }
 
+  /**
+   * @deprecated Don't use AsyncResult - use Promise instead.
+   */
+  @Deprecated
   public static class Rejected<T> extends AsyncResult<T> {
     public Rejected() {
       setRejected();
@@ -184,13 +179,21 @@ public class AsyncResult<T> extends ActionCallback {
     }
   }
 
+  /**
+   * @deprecated Don't use AsyncResult - use Promise instead.
+   */
   @NotNull
+  @Deprecated
   public static <R> AsyncResult<R> rejected() {
-    //noinspection unchecked
-    return REJECTED;
+    //noinspection unchecked,deprecation
+    return new Rejected();
   }
 
+  /**
+   * @deprecated Don't use AsyncResult - use Promise instead.
+   */
   @NotNull
+  @Deprecated
   public static <R> AsyncResult<R> rejected(@NotNull String errorMessage) {
     AsyncResult<R> result = new AsyncResult<R>();
     result.reject(errorMessage);
@@ -202,10 +205,14 @@ public class AsyncResult<T> extends ActionCallback {
     return new AsyncResult<R>().setDone(result);
   }
 
+  /**
+   * @deprecated Don't use AsyncResult - use Promise instead.
+   */
   @NotNull
+  @Deprecated
   public static <R extends List> AsyncResult<R> doneList() {
     //noinspection unchecked
-    return DONE_LIST;
+    return done((R)Collections.emptyList());
   }
 
   // we don't use inner class, avoid memory leak, we don't want to hold this result while dependent is computing

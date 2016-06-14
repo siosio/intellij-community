@@ -1,5 +1,6 @@
 package org.editorconfig.plugincomponents;
 
+import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
@@ -50,24 +51,21 @@ public class SettingsProviderComponent {
       return Collections.emptySet();
     }
 
-    return CachedValuesManager.getManager(project).getCachedValue(project, new CachedValueProvider<Set<String>>() {
-      @Nullable
-      @Override
-      public Result<Set<String>> compute() {
-        final Set<String> dirs = new HashSet<String>();
-        final VirtualFile projectBase = project.getBaseDir();
-        if (projectBase != null) {
-          dirs.add(project.getBasePath());
-          for (Module module : ModuleManager.getInstance(project).getModules()) {
-            for (VirtualFile root : ModuleRootManager.getInstance(module).getContentRoots()) {
-              if (!VfsUtilCore.isAncestor(projectBase, root, false)) {
-                dirs.add(root.getPath());
-              }
+    return CachedValuesManager.getManager(project).getCachedValue(project, () -> {
+      final Set<String> dirs = new HashSet<String>();
+      final VirtualFile projectBase = project.getBaseDir();
+      if (projectBase != null) {
+        dirs.add(project.getBasePath());
+        for (Module module : ModuleManager.getInstance(project).getModules()) {
+          for (VirtualFile root : ModuleRootManager.getInstance(module).getContentRoots()) {
+            if (!VfsUtilCore.isAncestor(projectBase, root, false)) {
+              dirs.add(root.getPath());
             }
           }
         }
-        return new Result<Set<String>>(dirs, ProjectRootModificationTracker.getInstance(project));
       }
+      dirs.add(PathManager.getConfigPath());
+      return new CachedValueProvider.Result<Set<String>>(dirs, ProjectRootModificationTracker.getInstance(project));
     });
   }
 }

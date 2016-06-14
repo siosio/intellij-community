@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,13 +16,15 @@
 package com.intellij.openapi.actionSystem;
 
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.PossiblyDumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.Key;
 import com.intellij.util.SmartList;
+import com.intellij.util.ui.UIUtil;
 import org.intellij.lang.annotations.JdkConstants;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -33,9 +35,9 @@ import java.util.List;
  * Represents an entity that has a state, a presentation and can be performed.
  *
  * For an action to be useful, you need to implement {@link AnAction#actionPerformed}
- * and optionally to override {@link com.intellij.openapi.actionSystem.AnAction#update}. By overriding the
- * {@link com.intellij.openapi.actionSystem.AnAction#update} method you can dynamically change action's presentation
- * depending on the place (for more information on places see {@link ActionPlaces}.
+ * and optionally to override {@link AnAction#update}. By overriding the
+ * {@link AnAction#update} method you can dynamically change action's presentation
+ * depending on the place (for more information on places see {@link com.intellij.openapi.actionSystem.ActionPlaces}.
  *
  * The same action can have various presentations.
  *
@@ -60,20 +62,21 @@ import java.util.List;
  *
  * @see AnActionEvent
  * @see Presentation
- * @see ActionPlaces
+ * @see com.intellij.openapi.actionSystem.ActionPlaces
  */
 public abstract class AnAction implements PossiblyDumbAware {
+  private static final Logger LOG = Logger.getInstance(AnAction.class);
+
+  public static final Key<List<AnAction>> ACTIONS_KEY = Key.create("AnAction.shortcutSet");
   public static final AnAction[] EMPTY_ARRAY = new AnAction[0];
-  @NonNls public static final String ourClientProperty = "AnAction.shortcutSet";
 
   private Presentation myTemplatePresentation;
   private ShortcutSet myShortcutSet;
   private boolean myEnabledInModalContext;
 
-
-  private static final ShortcutSet ourEmptyShortcutSet = new CustomShortcutSet();
   private boolean myIsDefaultIcon = true;
   private boolean myWorksInInjected;
+  private boolean myIsGlobal; // action is registered in ActionManager
 
 
   /**
@@ -115,7 +118,7 @@ public abstract class AnAction implements PossiblyDumbAware {
    * @param icon Action's icon
    */
   public AnAction(@Nullable String text, @Nullable String description, @Nullable Icon icon){
-    myShortcutSet = ourEmptyShortcutSet;
+    myShortcutSet = CustomShortcutSet.EMPTY;
     myEnabledInModalContext = false;
     Presentation presentation = getTemplatePresentation();
     presentation.setText(text);
@@ -140,42 +143,43 @@ public abstract class AnAction implements PossiblyDumbAware {
    * @param shortcutSet the shortcuts for the action.
    * @param component   the component for which the shortcuts will be active.
    */
-  public final void registerCustomShortcutSet(@NotNull ShortcutSet shortcutSet, @Nullable JComponent component){
-    myShortcutSet = shortcutSet;
-    if (component != null){
-      @SuppressWarnings("unchecked")
-      List<AnAction> actionList = (List<AnAction>)component.getClientProperty(ourClientProperty);
-      if (actionList == null){
-        actionList = new SmartList<AnAction>();
-        component.putClientProperty(ourClientProperty, actionList);
-      }
-      if (!actionList.contains(this)){
-        actionList.add(this);
-      }
-    }
+  public final void registerCustomShortcutSet(@NotNull ShortcutSet shortcutSet, @Nullable JComponent component) {
+    registerCustomShortcutSet(shortcutSet, component, null);
   }
 
   public final void registerCustomShortcutSet(int keyCode, @JdkConstants.InputEventMask int modifiers, @Nullable JComponent component) {
     registerCustomShortcutSet(new CustomShortcutSet(KeyStroke.getKeyStroke(keyCode, modifiers)), component);
   }
 
-  public final void registerCustomShortcutSet(@NotNull ShortcutSet shortcutSet, @NotNull final JComponent component, @NotNull Disposable parentDisposable) {
-    registerCustomShortcutSet(shortcutSet, component);
-    Disposer.register(parentDisposable, new Disposable() {
-      @Override
-      public void dispose() {
-        unregisterCustomShortcutSet(component);
-      }
-    });
+  public final void registerCustomShortcutSet(@NotNull ShortcutSet shortcutSet, @Nullable JComponent component, @Nullable Disposable parentDisposable) {
+    setShortcutSet(shortcutSet);
+    registerCustomShortcutSet(component, parentDisposable);
   }
 
-  public final void unregisterCustomShortcutSet(JComponent component){
-    if (component != null){
-      @SuppressWarnings("unchecked")
-      List<AnAction> actionList = (List<AnAction>)component.getClientProperty(ourClientProperty);
-      if (actionList != null){
-        actionList.remove(this);
-      }
+  public final void registerCustomShortcutSet(@Nullable JComponent component, @Nullable Disposable parentDisposable) {
+    if (component == null) return;
+    List<AnAction> actionList = UIUtil.getClientProperty(component, ACTIONS_KEY);
+    if (actionList == null) {
+      UIUtil.putClientProperty(component, ACTIONS_KEY, actionList = new SmartList<AnAction>());
+    }
+    if (!actionList.contains(this)) {
+      actionList.add(this);
+    }
+
+    if (parentDisposable != null) {
+      Disposer.register(parentDisposable, new Disposable() {
+        @Override
+        public void dispose() {
+          unregisterCustomShortcutSet(component);
+        }
+      });
+    }
+  }
+
+  public final void unregisterCustomShortcutSet(@Nullable JComponent component) {
+    List<AnAction> actionList = UIUtil.getClientProperty(component, ACTIONS_KEY);
+    if (actionList != null) {
+      actionList.remove(this);
     }
   }
 
@@ -188,13 +192,13 @@ public abstract class AnAction implements PossiblyDumbAware {
     Presentation sourcePresentation = sourceAction.getTemplatePresentation();
     Presentation presentation = getTemplatePresentation();
     presentation.setIcon(sourcePresentation.getIcon());
-    presentation.setText(sourcePresentation.getTextWithMnemonic());
+    presentation.setText(sourcePresentation.getTextWithMnemonic(), sourcePresentation.getDisplayedMnemonicIndex() >= 0);
     presentation.setDescription(sourcePresentation.getDescription());
     copyShortcutFrom(sourceAction);
   }
 
   public final void copyShortcutFrom(@NotNull AnAction sourceAction) {
-    myShortcutSet = sourceAction.myShortcutSet;
+    setShortcutSet(sourceAction.getShortcutSet());
   }
 
 
@@ -270,6 +274,11 @@ public abstract class AnAction implements PossiblyDumbAware {
   public abstract void actionPerformed(AnActionEvent e);
 
   protected void setShortcutSet(ShortcutSet shortcutSet) {
+    if (myIsGlobal && myShortcutSet != shortcutSet) {
+      LOG.warn("ShortcutSet of global AnActions should not be changed outside of KeymapManager.\n" +
+               "This is likely not what you wanted to do. Consider setting shortcut in keymap defaults, inheriting from other action " +
+               "using `use-shortcut-of` or wrapping with EmptyAction.wrap().", new Throwable());
+    }
     myShortcutSet = shortcutSet;
   }
 
@@ -310,6 +319,10 @@ public abstract class AnAction implements PossiblyDumbAware {
     return this instanceof DumbAware;
   }
 
+  public boolean startInTransaction() {
+    return true;
+  }
+
   public interface TransparentUpdate {
   }
 
@@ -321,5 +334,9 @@ public abstract class AnAction implements PossiblyDumbAware {
   @Override
   public String toString() {
     return getTemplatePresentation().toString();
+  }
+
+  void markAsGlobal() {
+    myIsGlobal = true;
   }
 }

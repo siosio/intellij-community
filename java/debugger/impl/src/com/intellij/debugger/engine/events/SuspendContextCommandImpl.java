@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import com.intellij.debugger.engine.SuspendContextImpl;
 import com.intellij.debugger.engine.managerThread.SuspendContextCommand;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.util.containers.Stack;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -34,7 +35,18 @@ public abstract class SuspendContextCommandImpl extends DebuggerCommandImpl {
     mySuspendContext = suspendContext;
   }
 
-  public abstract void contextAction() throws Exception;
+  /**
+   * @deprecated override {@link #contextAction(SuspendContextImpl)}
+   */
+  @Deprecated
+  public void contextAction() throws Exception {
+    throw new AbstractMethodError();
+  }
+
+  public void contextAction(@NotNull SuspendContextImpl suspendContext) throws Exception {
+    //noinspection deprecation
+    contextAction();
+  }
 
   @Override
   public final void action() throws Exception {
@@ -58,7 +70,7 @@ public abstract class SuspendContextCommandImpl extends DebuggerCommandImpl {
       try {
         if (!suspendContext.isResumed()) {
           suspendContext.myInProgress = true;
-          contextAction();
+          contextAction(suspendContext);
         }
         else {
           notifyCancelled();
@@ -74,7 +86,7 @@ public abstract class SuspendContextCommandImpl extends DebuggerCommandImpl {
         else {
           SuspendContextCommandImpl postponed = suspendContext.pollPostponedCommand();
           if (postponed != null) {
-            final Stack<SuspendContextCommandImpl> stack = new Stack<SuspendContextCommandImpl>();
+            final Stack<SuspendContextCommandImpl> stack = new Stack<>();
             while (postponed != null) {
               stack.push(postponed);
               postponed = suspendContext.pollPostponedCommand();

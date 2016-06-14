@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,30 +14,39 @@
  * limitations under the License.
  */
 
-/**
- * @author cdr
- */
 package com.intellij.ide.projectView.impl;
 
 import com.intellij.ide.DataManager;
 import com.intellij.ide.PsiCopyPasteManager;
 import com.intellij.ide.projectView.BaseProjectTreeBuilder;
+import com.intellij.ide.projectView.PresentationData;
 import com.intellij.ide.projectView.impl.nodes.PsiDirectoryNode;
 import com.intellij.ide.ui.customization.CustomizationUtil;
 import com.intellij.ide.util.treeView.AbstractTreeBuilder;
 import com.intellij.ide.util.treeView.AbstractTreeUpdater;
+import com.intellij.ide.util.treeView.PresentableNodeDescriptor;
 import com.intellij.ide.util.treeView.TreeBuilderUtil;
 import com.intellij.openapi.actionSystem.ActionPlaces;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.IdeActions;
+import com.intellij.openapi.editor.colors.EditorColorsManager;
+import com.intellij.openapi.editor.colors.TextAttributesKey;
+import com.intellij.openapi.editor.markup.EffectType;
+import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.ActionCallback;
+import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.ui.TreeSpeedSearch;
+import com.intellij.ui.stripe.ErrorStripe;
+import com.intellij.ui.stripe.ErrorStripePainter;
+import com.intellij.ui.stripe.TreeUpdater;
 import com.intellij.util.EditSourceOnDoubleClickHandler;
 import com.intellij.util.OpenSourceUtil;
 import com.intellij.util.ui.UIUtil;
+import com.intellij.util.ui.accessibility.ScreenReader;
 import com.intellij.util.ui.tree.TreeUtil;
 import org.jetbrains.annotations.NotNull;
 
@@ -71,6 +80,38 @@ public abstract class AbstractProjectViewPSIPane extends AbstractProjectViewPane
     myTree = createTree(treeModel);
     enableDnD();
     myComponent = ScrollPaneFactory.createScrollPane(myTree);
+    if (Registry.is("error.stripe.enabled")) {
+      ErrorStripePainter painter = new ErrorStripePainter(true);
+      Disposer.register(this, new TreeUpdater<ErrorStripePainter>(painter, myComponent, myTree) {
+        @Override
+        protected void update(ErrorStripePainter painter, int index, Object object) {
+          if (object instanceof DefaultMutableTreeNode) {
+            DefaultMutableTreeNode node = (DefaultMutableTreeNode)object;
+            object = node.getUserObject();
+          }
+          if (object instanceof PsiDirectoryNode && !myTree.isCollapsed(index)) {
+            object = null;
+          }
+          super.update(painter, index, object);
+        }
+
+        @Override
+        protected ErrorStripe getErrorStripe(Object object) {
+          if (object instanceof PresentableNodeDescriptor) {
+            PresentableNodeDescriptor node = (PresentableNodeDescriptor)object;
+            PresentationData presentation = node.getPresentation();
+            TextAttributesKey key = presentation.getTextAttributesKey();
+            if (key != null) {
+              TextAttributes attributes = EditorColorsManager.getInstance().getGlobalScheme().getAttributes(key);
+              if (attributes != null && EffectType.WAVE_UNDERSCORE == attributes.getEffectType()) {
+                return ErrorStripe.create(attributes.getEffectColor(), 1);
+              }
+            }
+          }
+          return null;
+        }
+      });
+    }
     myTreeStructure = createStructure();
     setTreeBuilder(createBuilder(treeModel));
 
@@ -140,7 +181,7 @@ public abstract class AbstractProjectViewPSIPane extends AbstractProjectViewPane
           }
 
           DataContext dataContext = DataManager.getInstance().getDataContext(myTree);
-          OpenSourceUtil.openSourcesFrom(dataContext, false);
+          OpenSourceUtil.openSourcesFrom(dataContext, ScreenReader.isActive());
         }
         else if (KeyEvent.VK_ESCAPE == e.getKeyCode()) {
           if (e.isConsumed()) return;
@@ -165,15 +206,12 @@ public abstract class AbstractProjectViewPSIPane extends AbstractProjectViewPane
     final ActionCallback cb = new ActionCallback();
     if (restoreExpandedPaths) {
       TreeBuilderUtil.storePaths(getTreeBuilder(), (DefaultMutableTreeNode)myTree.getModel().getRoot(), pathsToExpand, selectionPaths, true);
-      afterUpdate = new Runnable() {
-        @Override
-        public void run() {
-          if (myTree != null && getTreeBuilder() != null && !getTreeBuilder().isDisposed()) {
-            myTree.setSelectionPaths(new TreePath[0]);
-            TreeBuilderUtil.restorePaths(getTreeBuilder(), pathsToExpand, selectionPaths, true);
-          }
-          cb.setDone();
+      afterUpdate = () -> {
+        if (myTree != null && getTreeBuilder() != null && !getTreeBuilder().isDisposed()) {
+          myTree.setSelectionPaths(new TreePath[0]);
+          TreeBuilderUtil.restorePaths(getTreeBuilder(), pathsToExpand, selectionPaths, true);
         }
+        cb.setDone();
       };
     }
     else {
@@ -196,7 +234,7 @@ public abstract class AbstractProjectViewPSIPane extends AbstractProjectViewPane
     if (file != null) {
       return ((BaseProjectTreeBuilder)getTreeBuilder()).select(element, file, requestFocus);
     }
-    return new ActionCallback.Done(); 
+    return ActionCallback.DONE;
   }
 
   @NotNull

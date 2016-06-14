@@ -17,6 +17,7 @@ package com.intellij.refactoring;
 
 import com.intellij.codeInsight.template.impl.TemplateManagerImpl;
 import com.intellij.codeInsight.template.impl.TemplateState;
+import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.openapi.actionSystem.IdeActions;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.actionSystem.EditorActionManager;
@@ -25,6 +26,9 @@ import com.intellij.openapi.util.Pass;
 import com.intellij.psi.PsiExpression;
 import com.intellij.psi.PsiLiteralExpression;
 import com.intellij.psi.PsiLocalVariable;
+import com.intellij.psi.codeStyle.CodeStyleSettings;
+import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
+import com.intellij.psi.impl.source.tree.injected.InjectedLanguageUtil;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.refactoring.introduce.inplace.AbstractInplaceIntroducer;
 import com.intellij.refactoring.introduce.inplace.OccurrencesChooser;
@@ -43,6 +47,9 @@ public class InplaceIntroduceVariableTest extends AbstractJavaInplaceIntroduceTe
       return expression;
     }
     final PsiExpression expr = PsiTreeUtil.getParentOfType(getFile().findElementAt(getEditor().getCaretModel().getOffset()), PsiExpression.class);
+    if (expr == null && InjectedLanguageManager.getInstance(getProject()).isInjectedFragment(getFile())) {
+      return PsiTreeUtil.getParentOfType(InjectedLanguageUtil.getTopLevelFile(getFile()).findElementAt(InjectedLanguageUtil.getTopLevelEditor(getEditor()).getCaretModel().getOffset()), PsiExpression.class);
+    }
     return expr instanceof PsiLiteralExpression ? expr : null;
   }
 
@@ -55,7 +62,52 @@ public class InplaceIntroduceVariableTest extends AbstractJavaInplaceIntroduceTe
      });
   }
 
+  public void testConflictingInnerClassName() throws Exception {
+    final CodeStyleSettings settings = CodeStyleSettingsManager.getSettings(getProject());
+    final boolean oldOption = settings.INSERT_INNER_CLASS_IMPORTS;
+    try {
+      settings.INSERT_INNER_CLASS_IMPORTS = true;
+      doTest(new Pass<AbstractInplaceIntroducer>() {
+         @Override
+         public void pass(AbstractInplaceIntroducer inplaceIntroduceFieldPopup) {
+           type("constants");
+         }
+       });
+    }
+    finally {
+      settings.INSERT_INNER_CLASS_IMPORTS = oldOption;
+    }
+  }
+
+  public void testInsideInjectedString() throws Exception {
+    doTestInsideInjection(new Pass<AbstractInplaceIntroducer>() {
+      @Override
+      public void pass(AbstractInplaceIntroducer inplaceIntroduceFieldPopup) {
+        type("expr");
+      }
+    });
+  }
+
+  public void testInjectedString() throws Exception {
+    doTestInsideInjection(new Pass<AbstractInplaceIntroducer>() {
+      @Override
+      public void pass(AbstractInplaceIntroducer inplaceIntroduceFieldPopup) {
+        bringRealEditorBack();
+        type("expr");
+      }
+    });
+  }
+
   public void testPlaceInsideLoopAndRename() throws Exception {
+    doTest(new Pass<AbstractInplaceIntroducer>() {
+      @Override
+      public void pass(AbstractInplaceIntroducer inplaceIntroduceFieldPopup) {
+        type("expr");
+      }
+    });
+  }
+  
+  public void testPlaceInsideLambdaBody() throws Exception {
     doTest(new Pass<AbstractInplaceIntroducer>() {
       @Override
       public void pass(AbstractInplaceIntroducer inplaceIntroduceFieldPopup) {

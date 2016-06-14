@@ -74,12 +74,11 @@ public abstract class ServerType<C extends ServerConfiguration> {
 
   @NotNull
   public Comparator<Deployment> getDeploymentComparator() {
-    return new Comparator<Deployment>() {
+    return (o1, o2) -> o1.getName().compareTo(o2.getName());
+  }
 
-      @Override
-      public int compare(Deployment o1, Deployment o2) {
-        return o1.getName().compareTo(o2.getName());
-      }
-    };
+  @Nullable
+  public String getCustomToolWindowId() {
+    return null;
   }
 }

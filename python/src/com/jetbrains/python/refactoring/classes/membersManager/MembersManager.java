@@ -105,12 +105,7 @@ public abstract class MembersManager<T extends PyElement> implements Function<T,
     @NotNull final PyClass... to
   ) {
     List<PyMemberInfo<PyElement>> memberInfosSorted = new ArrayList<PyMemberInfo<PyElement>>(memberInfos);
-    Collections.sort(memberInfosSorted, new Comparator<PyMemberInfo<PyElement>>() {
-      @Override
-      public int compare(PyMemberInfo<PyElement> o1, PyMemberInfo<PyElement> o2) {
-        return PyDependenciesComparator.INSTANCE.compare(o1.getMember(), o2.getMember());
-      }
-    });
+    Collections.sort(memberInfosSorted, (o1, o2) -> PyDependenciesComparator.INSTANCE.compare(o1.getMember(), o2.getMember()));
 
     for (PyMemberInfo<PyElement> info : memberInfosSorted) {
       TypeSafeMovingStrategy.moveCheckingTypesAtRunTime(from, info.getMembersManager(), Collections.singleton(info), to);
@@ -302,7 +297,7 @@ public abstract class MembersManager<T extends PyElement> implements Function<T,
       while (classesIterator.hasNext()) {
         final PyClass memberClass = classesIterator.next();
         if (memberClass.equals(destinationClass) ||
-            ArrayUtil.contains(memberClass, destinationClass.getSuperClasses())) { // IF still would be available
+            ArrayUtil.contains(memberClass, destinationClass.getSuperClasses(null))) { // IF still would be available
           classesIterator.remove();
         }
       }

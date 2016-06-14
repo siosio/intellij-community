@@ -126,7 +126,8 @@ public class WeakestTypeFinder {
       }
       else if (referenceGrandParent instanceof PsiMethodCallExpression) {
         final PsiMethodCallExpression methodCallExpression = (PsiMethodCallExpression)referenceGrandParent;
-        if (!findWeakestType(methodCallExpression, weakestTypeClasses)) {
+        if (PsiUtil.skipParenthesizedExprUp(methodCallExpression.getParent()) instanceof PsiTypeCastExpression || 
+            !findWeakestType(methodCallExpression, weakestTypeClasses)) {
           return Collections.emptyList();
         }
       }
@@ -398,13 +399,8 @@ public class WeakestTypeFinder {
       }
     }
     if (!checked) {
-      final PsiType returnType = method.getReturnType();
-      if (returnType instanceof PsiClassType) {
-        final PsiClassType classType = (PsiClassType)returnType;
-        final PsiClass aClass = classType.resolve();
-        if (aClass instanceof PsiTypeParameter) {
-          return false;
-        }
+      if (TypeUtils.isTypeParameter(method.getReturnType())) {
+        return false;
       }
       final PsiClass containingClass = method.getContainingClass();
       checkClass(containingClass, weakestTypeClasses);
@@ -413,36 +409,29 @@ public class WeakestTypeFinder {
   }
 
   private static List<PsiMethod> findAllSuperMethods(PsiMethod method) {
-    final List<PsiMethod> result = new ArrayList();
-    SuperMethodsSearch.search(method, null, true, false).forEach(new Processor<MethodSignatureBackedByPsiMethod>() {
-
-      @Override
-      public boolean process(MethodSignatureBackedByPsiMethod method) {
-        result.add(method.getMethod());
-        return true;
-      }
+    final List<PsiMethod> result = new ArrayList<PsiMethod>();
+    SuperMethodsSearch.search(method, null, true, false).forEach(method12 -> {
+      result.add(method12.getMethod());
+      return true;
     });
-    Collections.sort(result, new Comparator<PsiMethod>() {
-      @Override
-      public int compare(PsiMethod method1, PsiMethod method2) {
-        // methods from deepest super classes first
-        final PsiClass aClass1 = method1.getContainingClass();
-        final PsiClass aClass2 = method2.getContainingClass();
-        if (aClass1 == null || aClass2 == null || aClass1.equals(aClass2)) {
-          return 0;
-        } else if (aClass1.isInterface() && !aClass2.isInterface()) {
-          return -1;
-        } else if (!aClass1.isInterface() && aClass2.isInterface()) {
-          return 1;
-        } else if (aClass1.isInheritor(aClass2, true)) {
-          return 1;
-        } else if (aClass2.isInheritor(aClass1, true)) {
-          return -1;
-        }
-        final String name1 = aClass1.getName();
-        final String name2 = aClass2.getName();
-        return name1.compareTo(name2);
+    Collections.sort(result, (method1, method2) -> {
+      // methods from deepest super classes first
+      final PsiClass aClass1 = method1.getContainingClass();
+      final PsiClass aClass2 = method2.getContainingClass();
+      if (aClass1 == null || aClass2 == null || aClass1.equals(aClass2)) {
+        return 0;
+      } else if (aClass1.isInterface() && !aClass2.isInterface()) {
+        return -1;
+      } else if (!aClass1.isInterface() && aClass2.isInterface()) {
+        return 1;
+      } else if (aClass1.isInheritor(aClass2, true)) {
+        return 1;
+      } else if (aClass2.isInheritor(aClass1, true)) {
+        return -1;
       }
+      final String name1 = aClass1.getName();
+      final String name2 = aClass2.getName();
+      return name1.compareTo(name2);
     });
     return result;
   }

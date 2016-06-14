@@ -21,6 +21,7 @@ import com.intellij.codeInsight.generation.PsiGenerationInfo;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.Presentation;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.diagnostic.Logger;
@@ -107,29 +108,26 @@ public class GenerateMainAction extends AnAction {
 
     mainBuilder.append("}\n");
 
-    CommandProcessor.getInstance().executeCommand(project, new Runnable() {
-      public void run() {
-        ApplicationManager.getApplication().runWriteAction(new Runnable() {
-          public void run() {
-            try {
-              PsiMethod method =
-                JavaPsiFacade.getInstance(file.getProject()).getElementFactory().createMethodFromText(mainBuilder.toString(), file);
-              List<PsiGenerationInfo<PsiMethod>> infos = Collections.singletonList(new PsiGenerationInfo<PsiMethod>(method));
-              List<PsiGenerationInfo<PsiMethod>> resultMembers = GenerateMembersUtil.insertMembersAtOffset(file, offset, infos);
-              resultMembers.get(0).positionCaret(editor, false);
-            }
-            catch (IncorrectOperationException e1) {
-              LOG.error(e1);
-            }
-          }
-        });
+    CommandProcessor.getInstance().executeCommand(project, () -> ApplicationManager.getApplication().runWriteAction(() -> {
+      try {
+        PsiMethod method =
+          JavaPsiFacade.getInstance(file.getProject()).getElementFactory().createMethodFromText(mainBuilder.toString(), file);
+        List<PsiGenerationInfo<PsiMethod>> infos = Collections.singletonList(new PsiGenerationInfo<PsiMethod>(method));
+        List<PsiGenerationInfo<PsiMethod>> resultMembers = GenerateMembersUtil.insertMembersAtOffset(file, offset, infos);
+        resultMembers.get(0).positionCaret(editor, false);
       }
-    }, null, null);
+      catch (IncorrectOperationException e1) {
+        LOG.error(e1);
+      }
+    }), null, null);
   }
 
   @Override
   public void update(AnActionEvent e) {
-    e.getPresentation().setVisible(isActionEnabled(e));
+    boolean enabled = isActionEnabled(e);
+    Presentation presentation = e.getPresentation();
+    presentation.setEnabled(enabled);
+    presentation.setVisible(enabled);
   }
 
   private static boolean isActionEnabled(final AnActionEvent e) {

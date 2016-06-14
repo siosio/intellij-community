@@ -87,7 +87,7 @@ public class DomFileIndex extends ScalarIndexExtension<String>{
   @NotNull
   @Override
   public KeyDescriptor<String> getKeyDescriptor() {
-    return new EnumeratorStringDescriptor();
+    return EnumeratorStringDescriptor.INSTANCE;
   }
 
   @NotNull
@@ -103,6 +103,6 @@ public class DomFileIndex extends ScalarIndexExtension<String>{
 
   @Override
   public int getVersion() {
-    return DomApplicationComponent.getInstance().getCumulativeVersion();
+    return DomApplicationComponent.getInstance().getCumulativeVersion(false);
   }
 }

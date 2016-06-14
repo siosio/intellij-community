@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import com.intellij.diff.DiffContext;
 import com.intellij.diff.DiffDialogHints;
 import com.intellij.diff.DiffTool;
 import com.intellij.diff.SuppressiveDiffTool;
+import com.intellij.diff.comparison.ByWord;
 import com.intellij.diff.comparison.ComparisonManager;
 import com.intellij.diff.comparison.ComparisonPolicy;
 import com.intellij.diff.contents.DiffContent;
@@ -28,21 +29,33 @@ import com.intellij.diff.contents.EmptyContent;
 import com.intellij.diff.contents.FileContent;
 import com.intellij.diff.fragments.DiffFragment;
 import com.intellij.diff.fragments.LineFragment;
+import com.intellij.diff.fragments.MergeLineFragment;
+import com.intellij.diff.impl.DiffSettingsHolder;
+import com.intellij.diff.impl.DiffSettingsHolder.DiffSettings;
 import com.intellij.diff.requests.ContentDiffRequest;
 import com.intellij.diff.requests.DiffRequest;
-import com.intellij.diff.tools.util.LineFragmentCache;
-import com.intellij.diff.tools.util.LineFragmentCache.PolicyData;
+import com.intellij.diff.tools.simple.MergeInnerDifferences;
 import com.intellij.diff.tools.util.base.HighlightPolicy;
 import com.intellij.diff.tools.util.base.IgnorePolicy;
+import com.intellij.diff.tools.util.base.TextDiffViewerUtil;
+import com.intellij.icons.AllIcons;
+import com.intellij.lang.Language;
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.DataKey;
 import com.intellij.openapi.actionSystem.DataProvider;
 import com.intellij.openapi.actionSystem.DefaultActionGroup;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.impl.LaterInvocator;
 import com.intellij.openapi.command.CommandProcessor;
-import com.intellij.openapi.components.StoragePathMacros;
+import com.intellij.openapi.command.UndoConfirmationPolicy;
+import com.intellij.openapi.command.undo.DocumentReference;
+import com.intellij.openapi.command.undo.DocumentReferenceManager;
+import com.intellij.openapi.command.undo.UndoManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.diff.DiffBundle;
+import com.intellij.openapi.diff.impl.GenericDataProvider;
 import com.intellij.openapi.diff.impl.external.DiffManagerImpl;
 import com.intellij.openapi.editor.*;
 import com.intellij.openapi.editor.colors.EditorColors;
@@ -55,46 +68,65 @@ import com.intellij.openapi.editor.highlighter.EditorHighlighter;
 import com.intellij.openapi.editor.highlighter.EditorHighlighterFactory;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileTypes.FileType;
+import com.intellij.openapi.fileTypes.PlainTextFileType;
+import com.intellij.openapi.fileTypes.SyntaxHighlighter;
+import com.intellij.openapi.fileTypes.SyntaxHighlighterFactory;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.ui.DialogWrapperDialog;
+import com.intellij.openapi.ui.MessageType;
 import com.intellij.openapi.ui.WindowWrapper;
+import com.intellij.openapi.ui.popup.Balloon;
+import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.ReadonlyStatusHandler;
+import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.vfs.newvfs.RefreshQueue;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.openapi.wm.impl.IdeFrameImpl;
 import com.intellij.testFramework.LightVirtualFile;
-import com.intellij.ui.IdeBorderFactory;
-import com.intellij.ui.JBColor;
-import com.intellij.ui.ScreenUtil;
-import com.intellij.util.Function;
+import com.intellij.ui.*;
+import com.intellij.ui.awt.RelativePoint;
+import com.intellij.ui.components.JBLabel;
+import com.intellij.util.ArrayUtil;
+import com.intellij.util.DocumentUtil;
 import com.intellij.util.LineSeparator;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.ui.JBInsets;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
+import gnu.trove.Equality;
 import org.jetbrains.annotations.CalledInAwt;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import javax.swing.border.Border;
+import javax.swing.event.HyperlinkEvent;
+import javax.swing.event.HyperlinkListener;
 import java.awt.*;
 import java.nio.charset.Charset;
-import java.util.ArrayList;
-import java.util.BitSet;
-import java.util.Collections;
+import java.util.*;
 import java.util.List;
 
 public class DiffUtil {
   private static final Logger LOG = Logger.getInstance(DiffUtil.class);
 
-  @NotNull public static final String DIFF_CONFIG = StoragePathMacros.APP_CONFIG + "/diff.xml";
+  @NotNull public static final String DIFF_CONFIG = "diff.xml";
+  public static final int TITLE_GAP = JBUI.scale(2);
 
   //
   // Editor
   //
+
+  public static boolean isDiffEditor(@NotNull Editor editor) {
+    return editor.getUserData(DiffManagerImpl.EDITOR_IS_DIFF_KEY) != null;
+  }
 
   @Nullable
   public static EditorHighlighter initEditorHighlighter(@Nullable Project project,
@@ -114,22 +146,29 @@ public class DiffUtil {
   }
 
   @Nullable
-  public static EditorHighlighter createEditorHighlighter(@Nullable Project project, @NotNull DocumentContent content) {
+  private static EditorHighlighter createEditorHighlighter(@Nullable Project project, @NotNull DocumentContent content) {
     FileType type = content.getContentType();
     VirtualFile file = content.getHighlightFile();
+    Language language = content.getUserData(DiffUserDataKeys.LANGUAGE);
 
-    if ((file != null && file.getFileType() == type) || file instanceof LightVirtualFile) {
-      return EditorHighlighterFactory.getInstance().createEditorHighlighter(project, file);
+    EditorHighlighterFactory highlighterFactory = EditorHighlighterFactory.getInstance();
+    if (language != null) {
+      SyntaxHighlighter syntaxHighlighter = SyntaxHighlighterFactory.getSyntaxHighlighter(language, project, file);
+      return highlighterFactory.createEditorHighlighter(syntaxHighlighter, EditorColorsManager.getInstance().getGlobalScheme());
+    }
+    if (file != null) {
+      if ((type == null || type == PlainTextFileType.INSTANCE) || file.getFileType() == type || file instanceof LightVirtualFile) {
+        return highlighterFactory.createEditorHighlighter(project, file);
+      }
     }
     if (type != null) {
-      return EditorHighlighterFactory.getInstance().createEditorHighlighter(project, type);
+      return highlighterFactory.createEditorHighlighter(project, type);
     }
-
     return null;
   }
 
   @NotNull
-  public static EditorHighlighter createEmptyEditorHighlighter() {
+  private static EditorHighlighter createEmptyEditorHighlighter() {
     return new EmptyEditorHighlighter(EditorColorsManager.getInstance().getGlobalScheme().getAttributes(HighlighterColors.TEXT));
   }
 
@@ -166,7 +205,7 @@ public class DiffUtil {
 
     editor.putUserData(DiffManagerImpl.EDITOR_IS_DIFF_KEY, Boolean.TRUE);
 
-    editor.getSettings().setLineNumbersShown(true);
+    editor.getSettings().setShowIntentionBulb(false);
     ((EditorMarkupModel)editor.getMarkupModel()).setErrorStripeVisible(true);
     editor.getGutterComponentEx().setShowDefaultGutterPopup(false);
 
@@ -198,6 +237,12 @@ public class DiffUtil {
   //
   // Scrolling
   //
+
+  public static void disableBlitting(@NotNull EditorEx editor) {
+    if (Registry.is("diff.divider.repainting.disable.blitting")) {
+      editor.getScrollPane().getViewport().setScrollMode(JViewport.SIMPLE_SCROLL_MODE);
+    }
+  }
 
   public static void moveCaret(@Nullable final Editor editor, int line) {
     if (editor == null) return;
@@ -244,29 +289,42 @@ public class DiffUtil {
   }
 
   //
-  // UI
+  // Icons
   //
 
   @NotNull
+  public static Icon getArrowIcon(@NotNull Side sourceSide) {
+    return sourceSide.select(AllIcons.Diff.ArrowRight, AllIcons.Diff.Arrow);
+  }
+
+  @NotNull
+  public static Icon getArrowDownIcon(@NotNull Side sourceSide) {
+    return sourceSide.select(AllIcons.Diff.ArrowRightDown, AllIcons.Diff.ArrowLeftDown);
+  }
+
+  //
+  // UI
+  //
+
+  public static void registerAction(@NotNull AnAction action, @NotNull JComponent component) {
+    action.registerCustomShortcutSet(action.getShortcutSet(), component);
+  }
+
+  @NotNull
   public static JPanel createMessagePanel(@NotNull String message) {
-    Pair<JPanel, JLabel> pair = createMessagePanel();
-    pair.getSecond().setText(message);
-    return pair.getFirst();
-  }
-
-  @NotNull
-  public static Pair<JPanel, JLabel> createMessagePanel() {
-    JLabel label = new JLabel();
+    String text = StringUtil.replace(message, "\n", "<br>");
+    JLabel label = new JBLabel(text) {
+      @Override
+      public Dimension getMinimumSize() {
+        Dimension size = super.getMinimumSize();
+        size.width = Math.min(size.width, 200);
+        size.height = Math.min(size.height, 100);
+        return size;
+      }
+    }.setCopyable(true);
     label.setForeground(UIUtil.getInactiveTextColor());
-    JPanel wrapper = createMessagePanel(label);
-    return Pair.create(wrapper, label);
-  }
 
-  @NotNull
-  public static JPanel createMessagePanel(@NotNull JComponent comp) {
-    JPanel wrapper = new JPanel(new GridBagLayout());
-    wrapper.add(comp, new GridBagConstraints(0, 0, 1, 1, 0, 0, GridBagConstraints.CENTER, GridBagConstraints.NONE, JBUI.insets(1), 0, 0));
-    return wrapper;
+    return new CenteredPanel(label, JBUI.Borders.empty(5));
   }
 
   public static void addActionBlock(@NotNull DefaultActionGroup group, AnAction... actions) {
@@ -284,15 +342,81 @@ public class DiffUtil {
     group.addAll(actions);
   }
 
+  @NotNull
+  public static String getSettingsConfigurablePath() {
+    return "Settings | Tools | Diff";
+  }
+
+  @NotNull
+  public static String createTooltipText(@NotNull String text, @Nullable String appendix) {
+    StringBuilder result = new StringBuilder();
+    result.append("<html><body>");
+    result.append(text);
+    if (appendix != null) {
+      result.append("<br><div style='margin-top: 5px'><font size='2'>");
+      result.append(appendix);
+      result.append("</font></div>");
+    }
+    result.append("</body></html>");
+    return result.toString();
+  }
+
+  @NotNull
+  public static String createNotificationText(@NotNull String text, @Nullable String appendix) {
+    StringBuilder result = new StringBuilder();
+    result.append("<html><body>");
+    result.append(text);
+    if (appendix != null) {
+      result.append("<br><span style='color:#").append(ColorUtil.toHex(JBColor.gray)).append("'><small>");
+      result.append(appendix);
+      result.append("</small></span>");
+    }
+    result.append("</body></html>");
+    return result.toString();
+  }
+
+  public static void showSuccessPopup(@NotNull String message,
+                                      @NotNull RelativePoint point,
+                                      @NotNull Disposable disposable,
+                                      @Nullable Runnable hyperlinkHandler) {
+    HyperlinkListener listener = null;
+    if (hyperlinkHandler != null) {
+      listener = new HyperlinkAdapter() {
+        @Override
+        protected void hyperlinkActivated(HyperlinkEvent e) {
+          hyperlinkHandler.run();
+        }
+      };
+    }
+
+    Color bgColor = MessageType.INFO.getPopupBackground();
+
+    Balloon balloon = JBPopupFactory.getInstance()
+      .createHtmlTextBalloonBuilder(message, null, bgColor, listener)
+      .setAnimationCycle(200)
+      .createBalloon();
+    balloon.show(point, Balloon.Position.below);
+    Disposer.register(disposable, balloon);
+  }
+
+  //
   // Titles
+  //
 
   @NotNull
   public static List<JComponent> createSimpleTitles(@NotNull ContentDiffRequest request) {
+    List<DiffContent> contents = request.getContents();
     List<String> titles = request.getContentTitles();
 
-    List<JComponent> components = new ArrayList<JComponent>(titles.size());
-    for (String title : titles) {
-      components.add(createTitle(title));
+    if (!ContainerUtil.exists(titles, Condition.NOT_NULL)) {
+      return Collections.nCopies(titles.size(), null);
+    }
+
+    List<JComponent> components = new ArrayList<>(titles.size());
+    for (int i = 0; i < contents.size(); i++) {
+      JComponent title = createTitle(StringUtil.notNullize(titles.get(i)));
+      title = createTitleWithNotifications(title, contents.get(i));
+      components.add(title);
     }
 
     return components;
@@ -303,49 +427,34 @@ public class DiffUtil {
     List<DiffContent> contents = request.getContents();
     List<String> titles = request.getContentTitles();
 
-    List<Charset> charsets = ContainerUtil.map(contents, new Function<DiffContent, Charset>() {
-      @Override
-      public Charset fun(DiffContent content) {
-        if (content instanceof EmptyContent) return null;
-        return ((DocumentContent)content).getCharset();
-      }
-    });
-    List<LineSeparator> separators = ContainerUtil.map(contents, new Function<DiffContent, LineSeparator>() {
-      @Override
-      public LineSeparator fun(DiffContent content) {
-        if (content instanceof EmptyContent) return null;
-        return ((DocumentContent)content).getLineSeparator();
-      }
-    });
+    boolean equalCharsets = TextDiffViewerUtil.areEqualCharsets(contents);
+    boolean equalSeparators = TextDiffViewerUtil.areEqualLineSeparators(contents);
 
-    boolean equalCharsets = isEqualElements(charsets);
-    boolean equalSeparators = isEqualElements(separators);
+    List<JComponent> result = new ArrayList<>(contents.size());
 
-    List<JComponent> result = new ArrayList<JComponent>(contents.size());
-
-    if (equalCharsets && equalSeparators && ContainerUtil.find(titles, Condition.NOT_NULL) == null) {
+    if (equalCharsets && equalSeparators && !ContainerUtil.exists(titles, Condition.NOT_NULL)) {
       return Collections.nCopies(titles.size(), null);
     }
 
     for (int i = 0; i < contents.size(); i++) {
-      result.add(createTitle(StringUtil.notNullize(titles.get(i)), contents.get(i), equalCharsets, equalSeparators, editors.get(i)));
+      JComponent title = createTitle(StringUtil.notNullize(titles.get(i)), contents.get(i), equalCharsets, equalSeparators, editors.get(i));
+      title = createTitleWithNotifications(title, contents.get(i));
+      result.add(title);
     }
 
     return result;
   }
 
-  private static boolean isEqualElements(@NotNull List elements) {
-    for (int i = 0; i < elements.size(); i++) {
-      for (int j = i + 1; j < elements.size(); j++) {
-        if (!isEqualElements(elements.get(i), elements.get(j))) return false;
-      }
-    }
-    return true;
-  }
+  @Nullable
+  private static JComponent createTitleWithNotifications(@Nullable JComponent title,
+                                                         @NotNull DiffContent content) {
+    List<JComponent> notifications = getCustomNotifications(content);
+    if (notifications.isEmpty()) return title;
 
-  private static boolean isEqualElements(@Nullable Object element1, @Nullable Object element2) {
-    if (element1 == null || element2 == null) return true;
-    return element1.equals(element2);
+    List<JComponent> components = new ArrayList<>();
+    if (title != null) components.add(title);
+    components.addAll(notifications);
+    return createStackedComponents(components, TITLE_GAP);
   }
 
   @Nullable
@@ -365,7 +474,7 @@ public class DiffUtil {
 
   @NotNull
   public static JComponent createTitle(@NotNull String title) {
-    return createTitle(title, null, null, true);
+    return createTitle(title, null, null, false);
   }
 
   @NotNull
@@ -377,7 +486,7 @@ public class DiffUtil {
 
     JPanel panel = new JPanel(new BorderLayout());
     panel.setBorder(IdeBorderFactory.createEmptyBorder(0, 4, 0, 4));
-    panel.add(createTitlePanel(title), BorderLayout.CENTER);
+    panel.add(new JBLabel(title).setCopyable(true), BorderLayout.CENTER);
     if (charset != null && separator != null) {
       JPanel panel2 = new JPanel();
       panel2.setLayout(new BoxLayout(panel2, BoxLayout.X_AXIS));
@@ -393,11 +502,6 @@ public class DiffUtil {
       panel.add(createSeparatorPanel(separator), BorderLayout.EAST);
     }
     return panel;
-  }
-
-  @NotNull
-  private static JComponent createTitlePanel(@NotNull String title) {
-    return CopyableLabel.create(title);
   }
 
   @NotNull
@@ -436,6 +540,29 @@ public class DiffUtil {
     return label;
   }
 
+  @NotNull
+  public static List<JComponent> createSyncHeightComponents(@NotNull final List<JComponent> components) {
+    if (!ContainerUtil.exists(components, Condition.NOT_NULL)) return components;
+    List<JComponent> result = new ArrayList<>();
+    for (int i = 0; i < components.size(); i++) {
+      result.add(new SyncHeightComponent(components, i));
+    }
+    return result;
+  }
+
+  @NotNull
+  public static JComponent createStackedComponents(@NotNull List<JComponent> components, int gap) {
+    JPanel panel = new JPanel();
+    panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+
+    for (int i = 0; i < components.size(); i++) {
+      if (i != 0) panel.add(Box.createVerticalStrut(JBUI.scale(gap)));
+      panel.add(components.get(i));
+    }
+
+    return panel;
+  }
+
   //
   // Focus
   //
@@ -459,86 +586,126 @@ public class DiffUtil {
   //
 
   @NotNull
-  public static List<LineFragment> compareWithCache(@NotNull DiffRequest request,
-                                                    @NotNull DocumentData data,
-                                                    @NotNull DiffConfig config,
-                                                    @NotNull ProgressIndicator indicator) {
-    return compareWithCache(request, data.getText1(), data.getText2(), data.getStamp1(), data.getStamp2(), config, indicator);
-  }
+  public static List<LineFragment> compare(@NotNull DiffRequest request,
+                                           @NotNull CharSequence text1,
+                                           @NotNull CharSequence text2,
+                                           @NotNull DiffConfig config,
+                                           @NotNull ProgressIndicator indicator) {
+    indicator.checkCanceled();
 
-  @NotNull
-  public static List<LineFragment> compareWithCache(@NotNull DiffRequest request,
-                                                    @NotNull CharSequence text1,
-                                                    @NotNull CharSequence text2,
-                                                    long stamp1,
-                                                    long stamp2,
-                                                    @NotNull DiffConfig config,
-                                                    @NotNull ProgressIndicator indicator) {
-    List<LineFragment> fragments = doCompareWithCache(request, text1, text2, stamp1, stamp2, config, indicator);
+    DiffUserDataKeysEx.DiffComputer diffComputer = request.getUserData(DiffUserDataKeysEx.CUSTOM_DIFF_COMPUTER);
+
+    List<LineFragment> fragments;
+    if (diffComputer != null) {
+      fragments = diffComputer.compute(text1, text2, config.policy, config.innerFragments, indicator);
+    }
+    else {
+      if (config.innerFragments) {
+        fragments = ComparisonManager.getInstance().compareLinesInner(text1, text2, config.policy, indicator);
+      }
+      else {
+        fragments = ComparisonManager.getInstance().compareLines(text1, text2, config.policy, indicator);
+      }
+    }
 
     indicator.checkCanceled();
     return ComparisonManager.getInstance().processBlocks(fragments, text1, text2,
                                                          config.policy, config.squashFragments, config.trimFragments);
   }
 
-  @NotNull
-  private static List<LineFragment> doCompareWithCache(@NotNull DiffRequest request,
-                                                       @NotNull CharSequence text1,
-                                                       @NotNull CharSequence text2,
-                                                       long stamp1,
-                                                       long stamp2,
-                                                       @NotNull DiffConfig config,
-                                                       @NotNull ProgressIndicator indicator) {
-    indicator.checkCanceled();
-    PolicyData cachedData = getFromCache(request, config, stamp1, stamp2);
-
-    List<LineFragment> newFragments;
-    if (cachedData != null) {
-      if (cachedData.getFragments().isEmpty()) return cachedData.getFragments();
-      if (!config.innerFragments) return cachedData.getFragments();
-      if (cachedData.isInnerFragments()) return cachedData.getFragments();
-      newFragments = ComparisonManager.getInstance().compareLinesInner(text1, text2, cachedData.getFragments(), config.policy, indicator);
-    }
-    else {
-      if (config.innerFragments) {
-        newFragments = ComparisonManager.getInstance().compareLinesInner(text1, text2, config.policy, indicator);
-      }
-      else {
-        newFragments = ComparisonManager.getInstance().compareLines(text1, text2, config.policy, indicator);
-      }
-    }
-
-    indicator.checkCanceled();
-    putToCache(request, config, stamp1, stamp2, newFragments, config.innerFragments);
-    return newFragments;
-  }
-
   @Nullable
-  public static PolicyData getFromCache(@NotNull DiffRequest request, @NotNull DiffConfig config, long stamp1, long stamp2) {
-    LineFragmentCache cache = request.getUserData(DiffUserDataKeysEx.LINE_FRAGMENT_CACHE);
-    if (cache != null && cache.checkStamps(stamp1, stamp2)) {
-      return cache.getData(config.policy);
+  public static MergeInnerDifferences compareThreesideInner(@NotNull List<CharSequence> chunks,
+                                                            @NotNull ComparisonPolicy comparisonPolicy,
+                                                            @NotNull ProgressIndicator indicator) {
+    if (chunks.get(0) == null && chunks.get(1) == null && chunks.get(2) == null) return null; // ---
+
+    if (comparisonPolicy == ComparisonPolicy.IGNORE_WHITESPACES) {
+      if (isChunksEquals(chunks.get(0), chunks.get(1), comparisonPolicy) &&
+          isChunksEquals(chunks.get(0), chunks.get(2), comparisonPolicy)) {
+        // whitespace-only changes, ex: empty lines added/removed
+        return new MergeInnerDifferences(Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
+      }
     }
-    return null;
+
+    if (chunks.get(0) == null && chunks.get(1) == null ||
+        chunks.get(0) == null && chunks.get(2) == null ||
+        chunks.get(1) == null && chunks.get(2) == null) { // =--, -=-, --=
+      return null;
+    }
+
+    if (chunks.get(0) != null && chunks.get(1) != null && chunks.get(2) != null) { // ===
+      List<DiffFragment> fragments1 = ByWord.compare(chunks.get(1), chunks.get(0), comparisonPolicy, indicator);
+      List<DiffFragment> fragments2 = ByWord.compare(chunks.get(1), chunks.get(2), comparisonPolicy, indicator);
+
+      List<TextRange> left = new ArrayList<TextRange>();
+      List<TextRange> base = new ArrayList<TextRange>();
+      List<TextRange> right = new ArrayList<TextRange>();
+
+      for (DiffFragment wordFragment : fragments1) {
+        base.add(new TextRange(wordFragment.getStartOffset1(), wordFragment.getEndOffset1()));
+        left.add(new TextRange(wordFragment.getStartOffset2(), wordFragment.getEndOffset2()));
+      }
+
+      for (DiffFragment wordFragment : fragments2) {
+        base.add(new TextRange(wordFragment.getStartOffset1(), wordFragment.getEndOffset1()));
+        right.add(new TextRange(wordFragment.getStartOffset2(), wordFragment.getEndOffset2()));
+      }
+
+      return new MergeInnerDifferences(left, base, right);
+    }
+
+    // ==-, =-=, -==
+    final ThreeSide side1 = chunks.get(0) != null ? ThreeSide.LEFT : ThreeSide.BASE;
+    final ThreeSide side2 = chunks.get(2) != null ? ThreeSide.RIGHT : ThreeSide.BASE;
+    CharSequence chunk1 = side1.select(chunks);
+    CharSequence chunk2 = side2.select(chunks);
+
+    List<DiffFragment> wordConflicts = ByWord.compare(chunk1, chunk2, comparisonPolicy, indicator);
+
+    List<List<TextRange>> textRanges = ThreeSide.map(side -> {
+      if (side == side1) {
+        return ContainerUtil.map(wordConflicts, fragment -> new TextRange(fragment.getStartOffset1(), fragment.getEndOffset1()));
+      }
+      if (side == side2) {
+        return ContainerUtil.map(wordConflicts, fragment -> new TextRange(fragment.getStartOffset2(), fragment.getEndOffset2()));
+      }
+      return null;
+    });
+
+    return new MergeInnerDifferences(textRanges.get(0), textRanges.get(1), textRanges.get(2));
   }
 
-  public static void putToCache(@NotNull DiffRequest request, @NotNull DiffConfig config, long stamp1, long stamp2,
-                                @NotNull List<LineFragment> fragments, boolean isInnerFragments) {
-    // We can't rely on monotonicity on modificationStamps, so we can't check if we actually compared freshest versions of documents
-    // Possible data races also could make cache outdated.
-    // But these cases shouldn't be often and won't break anything.
+  private static boolean isChunksEquals(@Nullable CharSequence chunk1,
+                                        @Nullable CharSequence chunk2,
+                                        @NotNull ComparisonPolicy comparisonPolicy) {
+    if (chunk1 == null) chunk1 = "";
+    if (chunk2 == null) chunk2 = "";
+    return ComparisonManager.getInstance().isEquals(chunk1, chunk2, comparisonPolicy);
+  }
 
-    LineFragmentCache oldCache = request.getUserData(DiffUserDataKeysEx.LINE_FRAGMENT_CACHE);
-    LineFragmentCache cache;
-    if (oldCache == null || !oldCache.checkStamps(stamp1, stamp2)) {
-      cache = new LineFragmentCache(stamp1, stamp2);
-    }
-    else {
-      cache = new LineFragmentCache(oldCache);
+  @NotNull
+  public static <T> int[] getSortedIndexes(@NotNull List<T> values, @NotNull Comparator<T> comparator) {
+    final List<Integer> indexes = new ArrayList<>(values.size());
+    for (int i = 0; i < values.size(); i++) {
+      indexes.add(i);
     }
 
-    cache.putData(config.policy, fragments, isInnerFragments);
-    request.putUserData(DiffUserDataKeysEx.LINE_FRAGMENT_CACHE, cache);
+    ContainerUtil.sort(indexes, (i1, i2) -> {
+      T val1 = values.get(indexes.get(i1));
+      T val2 = values.get(indexes.get(i2));
+      return comparator.compare(val1, val2);
+    });
+
+    return ArrayUtil.toIntArray(indexes);
+  }
+
+  @NotNull
+  public static int[] invertIndexes(@NotNull int[] indexes) {
+    int[] inverted = new int[indexes.length];
+    for (int i = 0; i < indexes.length; i++) {
+      inverted[indexes[i]] = i;
+    }
+    return inverted;
   }
 
   //
@@ -587,7 +754,7 @@ public class DiffUtil {
     }
   }
 
-  public static void deleteLines(@NotNull Document document, int line1, int line2) {
+  private static void deleteLines(@NotNull Document document, int line1, int line2) {
     TextRange range = getLinesRange(document, line1, line2);
     int offset1 = range.getStartOffset();
     int offset2 = range.getEndOffset();
@@ -601,7 +768,7 @@ public class DiffUtil {
     document.deleteString(offset1, offset2);
   }
 
-  public static void insertLines(@NotNull Document document, int line, @NotNull CharSequence text) {
+  private static void insertLines(@NotNull Document document, int line, @NotNull CharSequence text) {
     if (line == getLineCount(document)) {
       document.insertString(document.getTextLength(), "\n" + text);
     }
@@ -610,7 +777,7 @@ public class DiffUtil {
     }
   }
 
-  public static void replaceLines(@NotNull Document document, int line1, int line2, @NotNull CharSequence text) {
+  private static void replaceLines(@NotNull Document document, int line1, int line2, @NotNull CharSequence text) {
     TextRange currentTextRange = getLinesRange(document, line1, line2);
     int offset1 = currentTextRange.getStartOffset();
     int offset2 = currentTextRange.getEndOffset();
@@ -618,12 +785,20 @@ public class DiffUtil {
     document.replaceString(offset1, offset2, text);
   }
 
-  public static void insertLines(@NotNull Document document1, int line, @NotNull Document document2, int otherLine1, int otherLine2) {
-    insertLines(document1, line, getLinesContent(document2, otherLine1, otherLine2));
-  }
-
-  public static void replaceLines(@NotNull Document document1, int line1, int line2, @NotNull Document document2, int oLine1, int oLine2) {
-    replaceLines(document1, line1, line2, getLinesContent(document2, oLine1, oLine2));
+  public static void applyModification(@NotNull Document document,
+                                       int line1,
+                                       int line2,
+                                       @NotNull List<? extends CharSequence> newLines) {
+    if (line1 == line2 && newLines.isEmpty()) return;
+    if (line1 == line2) {
+      insertLines(document, line1, StringUtil.join(newLines, "\n"));
+    }
+    else if (newLines.isEmpty()) {
+      deleteLines(document, line1, line2);
+    }
+    else {
+      replaceLines(document, line1, line2, StringUtil.join(newLines, "\n"));
+    }
   }
 
   public static void applyModification(@NotNull Document document1,
@@ -634,13 +809,13 @@ public class DiffUtil {
                                        int oLine2) {
     if (line1 == line2 && oLine1 == oLine2) return;
     if (line1 == line2) {
-      insertLines(document1, line1, document2, oLine1, oLine2);
+      insertLines(document1, line1, getLinesContent(document2, oLine1, oLine2));
     }
     else if (oLine1 == oLine2) {
       deleteLines(document1, line1, line2);
     }
     else {
-      replaceLines(document1, line1, line2, document2, oLine1, oLine2);
+      replaceLines(document1, line1, line2, getLinesContent(document2, oLine1, oLine2));
     }
   }
 
@@ -656,8 +831,12 @@ public class DiffUtil {
    * we consider '\n' not as a part of line, but a separator between lines
    * ex: if last line is not empty, the last symbol will not be '\n'
    */
-  @NotNull
   public static TextRange getLinesRange(@NotNull Document document, int line1, int line2) {
+    return getLinesRange(document, line1, line2, false);
+  }
+
+  @NotNull
+  public static TextRange getLinesRange(@NotNull Document document, int line1, int line2, boolean includeNewline) {
     if (line1 == line2) {
       int lineStartOffset = line1 < getLineCount(document) ? document.getLineStartOffset(line1) : document.getTextLength();
       return new TextRange(lineStartOffset, lineStartOffset);
@@ -665,6 +844,7 @@ public class DiffUtil {
     else {
       int startOffset = document.getLineStartOffset(line1);
       int endOffset = document.getLineEndOffset(line2 - 1);
+      if (includeNewline && endOffset < document.getTextLength()) endOffset++;
       return new TextRange(startOffset, endOffset);
     }
   }
@@ -682,9 +862,37 @@ public class DiffUtil {
     return Math.max(document.getLineCount(), 1);
   }
 
+  @NotNull
+  public static List<String> getLines(@NotNull Document document) {
+    return getLines(document, 0, getLineCount(document));
+  }
+
+  @NotNull
+  public static List<String> getLines(@NotNull Document document, int startLine, int endLine) {
+    if (startLine < 0 || startLine > endLine || endLine > getLineCount(document)) {
+      throw new IndexOutOfBoundsException(String.format("Wrong line range: [%d, %d); lineCount: '%d'",
+                                                        startLine, endLine, document.getLineCount()));
+    }
+
+    List<String> result = new ArrayList<>();
+    for (int i = startLine; i < endLine; i++) {
+      int start = document.getLineStartOffset(i);
+      int end = document.getLineEndOffset(i);
+      result.add(document.getText(new TextRange(start, end)));
+    }
+    return result;
+  }
+
   //
   // Updating ranges on change
   //
+
+  @NotNull
+  public static LineRange getAffectedLineRange(@NotNull DocumentEvent e) {
+    int line1 = e.getDocument().getLineNumber(e.getOffset());
+    int line2 = e.getDocument().getLineNumber(e.getOffset() + e.getOldLength()) + 1;
+    return new LineRange(line1, line2);
+  }
 
   public static int countLinesShift(@NotNull DocumentEvent e) {
     return StringUtil.countNewLines(e.getNewFragment()) - StringUtil.countNewLines(e.getOldFragment());
@@ -744,31 +952,110 @@ public class DiffUtil {
 
   @NotNull
   public static TextDiffType getLineDiffType(@NotNull LineFragment fragment) {
-    boolean left = fragment.getEndOffset1() != fragment.getStartOffset1() || fragment.getStartLine1() != fragment.getEndLine1();
-    boolean right = fragment.getEndOffset2() != fragment.getStartOffset2() || fragment.getStartLine2() != fragment.getEndLine2();
-    return getType(left, right);
+    boolean left = fragment.getStartLine1() != fragment.getEndLine1();
+    boolean right = fragment.getStartLine2() != fragment.getEndLine2();
+    return getDiffType(left, right);
   }
 
   @NotNull
   public static TextDiffType getDiffType(@NotNull DiffFragment fragment) {
     boolean left = fragment.getEndOffset1() != fragment.getStartOffset1();
     boolean right = fragment.getEndOffset2() != fragment.getStartOffset2();
-    return getType(left, right);
+    return getDiffType(left, right);
   }
 
-  private static TextDiffType getType(boolean left, boolean right) {
-    if (left && right) {
+  @NotNull
+  public static TextDiffType getDiffType(boolean hasDeleted, boolean hasInserted) {
+    if (hasDeleted && hasInserted) {
       return TextDiffType.MODIFIED;
     }
-    else if (left) {
+    else if (hasDeleted) {
       return TextDiffType.DELETED;
     }
-    else if (right) {
+    else if (hasInserted) {
       return TextDiffType.INSERTED;
     }
     else {
-      throw new IllegalArgumentException();
+      LOG.error("Diff fragment should not be empty");
+      return TextDiffType.MODIFIED;
     }
+  }
+
+  @NotNull
+  public static MergeConflictType getMergeType(@NotNull Condition<ThreeSide> emptiness,
+                                               @NotNull Equality<ThreeSide> equality) {
+    boolean isLeftEmpty = emptiness.value(ThreeSide.LEFT);
+    boolean isBaseEmpty = emptiness.value(ThreeSide.BASE);
+    boolean isRightEmpty = emptiness.value(ThreeSide.RIGHT);
+    assert !isLeftEmpty || !isBaseEmpty || !isRightEmpty;
+
+    if (isBaseEmpty) {
+      if (isLeftEmpty) { // --=
+        return new MergeConflictType(TextDiffType.INSERTED, false, true);
+      }
+      else if (isRightEmpty) { // =--
+        return new MergeConflictType(TextDiffType.INSERTED, true, false);
+      }
+      else { // =-=
+        boolean equalModifications = equality.equals(ThreeSide.LEFT, ThreeSide.RIGHT);
+        return new MergeConflictType(equalModifications ? TextDiffType.INSERTED : TextDiffType.CONFLICT);
+      }
+    }
+    else {
+      if (isLeftEmpty && isRightEmpty) { // -=-
+        return new MergeConflictType(TextDiffType.DELETED);
+      }
+      else { // -==, ==-, ===
+        boolean unchangedLeft = equality.equals(ThreeSide.BASE, ThreeSide.LEFT);
+        boolean unchangedRight = equality.equals(ThreeSide.BASE, ThreeSide.RIGHT);
+        assert !unchangedLeft || !unchangedRight;
+
+        if (unchangedLeft) return new MergeConflictType(isRightEmpty ? TextDiffType.DELETED : TextDiffType.MODIFIED, false, true);
+        if (unchangedRight) return new MergeConflictType(isLeftEmpty ? TextDiffType.DELETED : TextDiffType.MODIFIED, true, false);
+
+        boolean equalModifications = equality.equals(ThreeSide.LEFT, ThreeSide.RIGHT);
+        return new MergeConflictType(equalModifications ? TextDiffType.MODIFIED : TextDiffType.CONFLICT);
+      }
+    }
+  }
+
+  @NotNull
+  public static MergeConflictType getLineMergeType(@NotNull MergeLineFragment fragment,
+                                                   @NotNull List<? extends Document> documents,
+                                                   @NotNull ComparisonPolicy policy) {
+    return getMergeType((side) -> isLineMergeIntervalEmpty(fragment, side),
+                        (side1, side2) -> compareLineMergeContents(fragment, documents, policy, side1, side2));
+  }
+
+  private static boolean compareLineMergeContents(@NotNull MergeLineFragment fragment,
+                                                  @NotNull List<? extends Document> documents,
+                                                  @NotNull ComparisonPolicy policy,
+                                                  @NotNull ThreeSide side1,
+                                                  @NotNull ThreeSide side2) {
+    int start1 = fragment.getStartLine(side1);
+    int end1 = fragment.getEndLine(side1);
+    int start2 = fragment.getStartLine(side2);
+    int end2 = fragment.getEndLine(side2);
+
+    if (end2 - start2 != end1 - start1) return false;
+
+    Document document1 = side1.select(documents);
+    Document document2 = side2.select(documents);
+
+    for (int i = 0; i < end1 - start1; i++) {
+      int line1 = start1 + i;
+      int line2 = start2 + i;
+
+      CharSequence content1 = getLinesContent(document1, line1, line1 + 1);
+      CharSequence content2 = getLinesContent(document2, line2, line2 + 1);
+      if (!ComparisonManager.getInstance().isEquals(content1, content2, policy)) return false;
+    }
+
+    return true;
+  }
+
+  private static boolean isLineMergeIntervalEmpty(@NotNull MergeLineFragment fragment, @NotNull ThreeSide side) {
+    return fragment.getStartLine(side) == fragment.getEndLine(side);
   }
 
   //
@@ -776,17 +1063,37 @@ public class DiffUtil {
   //
 
   @CalledInAwt
+  public static void executeWriteCommand(@Nullable Project project,
+                                         @NotNull Document document,
+                                         @Nullable String commandName,
+                                         @Nullable String commandGroupId,
+                                         @NotNull UndoConfirmationPolicy confirmationPolicy,
+                                         boolean underBulkUpdate,
+                                         @NotNull Runnable task) {
+    if (!makeWritable(project, document)) {
+      VirtualFile file = FileDocumentManager.getInstance().getFile(document);
+      LOG.warn("Document is read-only" + (file != null ? ": " + file.getPresentableName() : ""));
+      return;
+    }
+
+    ApplicationManager.getApplication().runWriteAction(() -> {
+      CommandProcessor.getInstance().executeCommand(project, () -> {
+        if (underBulkUpdate) {
+          DocumentUtil.executeInBulk(document, true, task);
+        }
+        else {
+          task.run();
+        }
+      }, commandName, commandGroupId, confirmationPolicy, document);
+    });
+  }
+
+  @CalledInAwt
   public static void executeWriteCommand(@NotNull final Document document,
                                          @Nullable final Project project,
-                                         @Nullable final String name,
+                                         @Nullable final String commandName,
                                          @NotNull final Runnable task) {
-    if (!makeWritable(project, document)) return;
-
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      public void run() {
-        CommandProcessor.getInstance().executeCommand(project, task, name, null);
-      }
-    });
+    executeWriteCommand(project, document, commandName, null, UndoConfirmationPolicy.DEFAULT, false, task);
   }
 
   public static boolean isEditable(@NotNull Editor editor) {
@@ -798,17 +1105,41 @@ public class DiffUtil {
       return true;
     }
     VirtualFile file = FileDocumentManager.getInstance().getFile(document);
-    if (file != null && file.isInLocalFileSystem()) {
-      return true;
+    if (file != null && file.isValid() && file.isInLocalFileSystem()) {
+      // decompiled file can be writable, but Document with decompiled content is still read-only
+      return !file.isWritable();
     }
     return false;
   }
 
   @CalledInAwt
   public static boolean makeWritable(@Nullable Project project, @NotNull Document document) {
-    if (document.isWritable()) return true;
-    if (project == null) return false;
-    return ReadonlyStatusHandler.ensureDocumentWritable(project, document);
+    VirtualFile file = FileDocumentManager.getInstance().getFile(document);
+    if (file == null || !file.isValid()) return document.isWritable();
+    return makeWritable(project, file) && document.isWritable();
+  }
+
+  @CalledInAwt
+  public static boolean makeWritable(@Nullable Project project, @NotNull VirtualFile file) {
+    if (project == null) project = ProjectManager.getInstance().getDefaultProject();
+    return !ReadonlyStatusHandler.getInstance(project).ensureFilesWritable(file).hasReadonlyFiles();
+  }
+
+  public static void putNonundoableOperation(@Nullable Project project, @NotNull Document document) {
+    UndoManager undoManager = project != null ? UndoManager.getInstance(project) : UndoManager.getGlobalInstance();
+    if (undoManager != null) {
+      DocumentReference ref = DocumentReferenceManager.getInstance().create(document);
+      undoManager.nonundoableActionPerformed(ref, false);
+    }
+  }
+
+  /**
+   * Difference with {@link VfsUtil#markDirtyAndRefresh} is that refresh from VfsUtil will be performed with ModalityState.NON_MODAL.
+   */
+  public static void markDirtyAndRefresh(boolean async, boolean recursive, boolean reloadChildren, @NotNull VirtualFile... files) {
+    ModalityState modalityState = ApplicationManager.getApplication().getDefaultModalityState();
+    VfsUtil.markDirty(recursive, reloadChildren, files);
+    RefreshQueue.getInstance().refresh(async, recursive, null, modalityState, files);
   }
 
   //
@@ -881,28 +1212,34 @@ public class DiffUtil {
     return false;
   }
 
-  public static <T> T getUserData(@Nullable DiffRequest request, @Nullable DiffContext context, @NotNull Key<T> key) {
-    if (request != null) {
-      T data = request.getUserData(key);
+  public static <T> T getUserData(@Nullable UserDataHolder first, @Nullable UserDataHolder second, @NotNull Key<T> key) {
+    if (first != null) {
+      T data = first.getUserData(key);
       if (data != null) return data;
     }
-    if (context != null) {
-      T data = context.getUserData(key);
+    if (second != null) {
+      T data = second.getUserData(key);
       if (data != null) return data;
     }
     return null;
   }
 
-  public static <T> T getUserData(@Nullable DiffContext context, @Nullable DiffRequest request, @NotNull Key<T> key) {
-    if (context != null) {
-      T data = context.getUserData(key);
-      if (data != null) return data;
-    }
-    if (request != null) {
-      T data = request.getUserData(key);
-      if (data != null) return data;
-    }
-    return null;
+  public static void addNotification(@Nullable JComponent component, @NotNull UserDataHolder holder) {
+    if (component == null) return;
+    List<JComponent> oldComponents = ContainerUtil.notNullize(holder.getUserData(DiffUserDataKeys.NOTIFICATIONS));
+    holder.putUserData(DiffUserDataKeys.NOTIFICATIONS, ContainerUtil.append(oldComponents, component));
+  }
+
+  @NotNull
+  public static List<JComponent> getCustomNotifications(@NotNull DiffContext context, @NotNull DiffRequest request) {
+    List<JComponent> requestComponents = request.getUserData(DiffUserDataKeys.NOTIFICATIONS);
+    List<JComponent> contextComponents = context.getUserData(DiffUserDataKeys.NOTIFICATIONS);
+    return ContainerUtil.concat(ContainerUtil.notNullize(contextComponents), ContainerUtil.notNullize(requestComponents));
+  }
+
+  @NotNull
+  public static List<JComponent> getCustomNotifications(@NotNull DiffContent content) {
+    return ContainerUtil.notNullize(content.getUserData(DiffUserDataKeys.NOTIFICATIONS));
   }
 
   //
@@ -944,6 +1281,25 @@ public class DiffUtil {
     return null;
   }
 
+  public static <T> void putDataKey(@NotNull UserDataHolder holder, @NotNull DataKey<T> key, @Nullable T value) {
+    DataProvider dataProvider = holder.getUserData(DiffUserDataKeys.DATA_PROVIDER);
+    if (!(dataProvider instanceof GenericDataProvider)) {
+      dataProvider = new GenericDataProvider(dataProvider);
+      holder.putUserData(DiffUserDataKeys.DATA_PROVIDER, dataProvider);
+    }
+    ((GenericDataProvider)dataProvider).putData(key, value);
+  }
+
+  @NotNull
+  public static DiffSettings getDiffSettings(@NotNull DiffContext context) {
+    DiffSettings settings = context.getUserData(DiffSettingsHolder.KEY);
+    if (settings == null) {
+      settings = DiffSettings.getSettings(context.getUserData(DiffUserDataKeys.PLACE));
+      context.putUserData(DiffSettingsHolder.KEY, settings);
+    }
+    return settings;
+  }
+
   //
   // Tools
   //
@@ -952,7 +1308,7 @@ public class DiffUtil {
   public static <T extends DiffTool> List<T> filterSuppressedTools(@NotNull List<T> tools) {
     if (tools.size() < 2) return tools;
 
-    final List<Class<? extends DiffTool>> suppressedTools = new ArrayList<Class<? extends DiffTool>>();
+    final List<Class<? extends DiffTool>> suppressedTools = new ArrayList<>();
     for (T tool : tools) {
       try {
         if (tool instanceof SuppressiveDiffTool) suppressedTools.addAll(((SuppressiveDiffTool)tool).getSuppressedTools());
@@ -964,51 +1320,13 @@ public class DiffUtil {
 
     if (suppressedTools.isEmpty()) return tools;
 
-    List<T> filteredTools = ContainerUtil.filter(tools, new Condition<T>() {
-      @Override
-      public boolean value(T tool) {
-        return !suppressedTools.contains(tool.getClass());
-      }
-    });
-
+    List<T> filteredTools = ContainerUtil.filter(tools, tool -> !suppressedTools.contains(tool.getClass()));
     return filteredTools.isEmpty() ? tools : filteredTools;
   }
 
   //
   // Helpers
   //
-
-  public static class DocumentData {
-    @NotNull private final CharSequence myText1;
-    @NotNull private final CharSequence myText2;
-    private final long myStamp1;
-    private final long myStamp2;
-
-    public DocumentData(@NotNull CharSequence text1, @NotNull CharSequence text2, long stamp1, long stamp2) {
-      myText1 = text1;
-      myText2 = text2;
-      myStamp1 = stamp1;
-      myStamp2 = stamp2;
-    }
-
-    @NotNull
-    public CharSequence getText1() {
-      return myText1;
-    }
-
-    @NotNull
-    public CharSequence getText2() {
-      return myText2;
-    }
-
-    public long getStamp1() {
-      return myStamp1;
-    }
-
-    public long getStamp2() {
-      return myStamp2;
-    }
-  }
 
   public static class DiffConfig {
     @NotNull public final ComparisonPolicy policy;
@@ -1026,6 +1344,83 @@ public class DiffUtil {
     public DiffConfig(@NotNull IgnorePolicy ignorePolicy, @NotNull HighlightPolicy highlightPolicy) {
       this(ignorePolicy.getComparisonPolicy(), highlightPolicy.isFineFragments(), highlightPolicy.isShouldSquash(),
            ignorePolicy.isShouldTrimChunks());
+    }
+  }
+
+  private static class SyncHeightComponent extends JPanel {
+    @NotNull private final List<JComponent> myComponents;
+
+    public SyncHeightComponent(@NotNull List<JComponent> components, int index) {
+      super(new BorderLayout());
+      myComponents = components;
+      JComponent delegate = components.get(index);
+      if (delegate != null) add(delegate, BorderLayout.CENTER);
+    }
+
+    @Override
+    public Dimension getPreferredSize() {
+      Dimension size = super.getPreferredSize();
+      size.height = getPreferredHeight();
+      return size;
+    }
+
+    private int getPreferredHeight() {
+      int height = 0;
+      for (JComponent component : myComponents) {
+        if (component == null) continue;
+        height = Math.max(height, component.getPreferredSize().height);
+      }
+      return height;
+    }
+  }
+
+  public static class CenteredPanel extends JPanel {
+    private final JComponent myComponent;
+
+    public CenteredPanel(@NotNull JComponent component) {
+      myComponent = component;
+      add(component);
+    }
+
+    public CenteredPanel(@NotNull JComponent component, @NotNull Border border) {
+      this(component);
+      setBorder(border);
+    }
+
+    @Override
+    public void doLayout() {
+      final Dimension size = getSize();
+      final Dimension preferredSize = myComponent.getPreferredSize();
+
+      Insets insets = getInsets();
+      JBInsets.removeFrom(size, insets);
+
+      int width = Math.min(size.width, preferredSize.width);
+      int height = Math.min(size.height, preferredSize.height);
+      int x = Math.max(0, (size.width - preferredSize.width) / 2);
+      int y = Math.max(0, (size.height - preferredSize.height) / 2);
+
+      myComponent.setBounds(insets.left + x, insets.top + y, width, height);
+    }
+
+    @Override
+    public Dimension getPreferredSize() {
+      return addInsets(myComponent.getPreferredSize());
+    }
+
+    @Override
+    public Dimension getMinimumSize() {
+      return addInsets(myComponent.getMinimumSize());
+    }
+
+    @Override
+    public Dimension getMaximumSize() {
+      return addInsets(myComponent.getMaximumSize());
+    }
+
+    private Dimension addInsets(Dimension dimension) {
+      JBInsets.addTo(dimension, getInsets());
+      return dimension;
     }
   }
 }

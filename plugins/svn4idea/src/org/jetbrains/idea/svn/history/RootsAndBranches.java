@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,19 +25,18 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.MultiLineLabelUI;
 import com.intellij.openapi.util.Couple;
 import com.intellij.openapi.vcs.RepositoryLocation;
-import com.intellij.openapi.vcs.changes.BackgroundFromStartOption;
 import com.intellij.openapi.vcs.changes.committed.*;
 import com.intellij.openapi.vcs.versionBrowser.CommittedChangeList;
 import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.util.NotNullFunction;
 import com.intellij.util.messages.Topic;
+import com.intellij.util.ui.JBUI;
 import icons.SvnIcons;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.svn.SvnBundle;
 import org.jetbrains.idea.svn.SvnVcs;
 import org.jetbrains.idea.svn.actions.AbstractIntegrateChangesAction;
-import org.jetbrains.idea.svn.actions.ShowSvnMapAction;
 import org.jetbrains.idea.svn.dialogs.WCInfoWithBranches;
 import org.jetbrains.idea.svn.integrate.ChangeListsMergerFactory;
 import org.jetbrains.idea.svn.integrate.MergerFactory;
@@ -119,11 +118,11 @@ public class RootsAndBranches implements CommittedChangeListDecorator {
     myPanel = new JPanel(new GridBagLayout());
     createToolbar();
     final GridBagConstraints gb =
-      new GridBagConstraints(0, 0, 1, 1, 1, 0, GridBagConstraints.NORTH, GridBagConstraints.NONE, new Insets(1, 1, 1, 1), 0, 0);
-    gb.insets = new Insets(20, 1, 1, 1);
+      new GridBagConstraints(0, 0, 1, 1, 1, 0, GridBagConstraints.NORTH, GridBagConstraints.NONE, JBUI.insets(1), 0, 0);
+    gb.insets = JBUI.insets(20, 1, 1, 1);
     myPanel.add(new JLabel("Loading..."), gb);
     
-    myPanel.setPreferredSize(new Dimension(200, 60));
+    myPanel.setPreferredSize(JBUI.size(200, 60));
 
     myManager.install(this);
 
@@ -188,8 +187,7 @@ public class RootsAndBranches implements CommittedChangeListDecorator {
   }
   
   private void createPanels(final RepositoryLocation location, final Runnable afterRefresh) {
-    final Task.Backgroundable backgroundable = new Task.Backgroundable(myProject, "Subversion: loading working copies data..", false,
-                                                                        BackgroundFromStartOption.getInstance()) {
+    final Task.Backgroundable backgroundable = new Task.Backgroundable(myProject, "Subversion: loading working copies data..", false) {
       public void run(@NotNull final ProgressIndicator indicator) {
         indicator.setIndeterminate(true);
         final Map<String, SvnMergeInfoRootPanelManual> panels = new HashMap<String, SvnMergeInfoRootPanelManual>();
@@ -315,7 +313,7 @@ public class RootsAndBranches implements CommittedChangeListDecorator {
     svnGroup.add(myFilterMerged);
     svnGroup.add(myFilterNotMerged);
     svnGroup.add(myFilterAlien);
-    svnGroup.add(new ShowSvnMapAction());
+    svnGroup.add(ActionManager.getInstance().getAction("Svn.Show.Working.Copies"));
     svnGroup.add(new MyRefresh());
     return svnGroup;
   }

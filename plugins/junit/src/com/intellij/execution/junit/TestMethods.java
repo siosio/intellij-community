@@ -21,6 +21,7 @@ import com.intellij.execution.JavaExecutionUtil;
 import com.intellij.execution.Location;
 import com.intellij.execution.configurations.JavaParameters;
 import com.intellij.execution.configurations.RunConfigurationModule;
+import com.intellij.execution.junit2.PsiMemberParameterizedLocation;
 import com.intellij.execution.junit2.info.MethodLocation;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.testframework.AbstractTestProxy;
@@ -30,7 +31,6 @@ import com.intellij.idea.ActionsBundle;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiMethod;
@@ -62,12 +62,7 @@ public class TestMethods extends TestMethod {
     final Project project = module.getProject();
     final SourceScope scope = getSourceScope();
     final GlobalSearchScope searchScope = scope != null ? scope.getGlobalSearchScope() : GlobalSearchScope.allScope(project);
-    addClassesListToJavaParameters(myFailedTests, new Function<AbstractTestProxy, String>() {
-      @Override
-      public String fun(AbstractTestProxy testInfo) {
-        return testInfo != null ? getTestPresentation(testInfo, project, searchScope) : null;
-      }
-    }, data.getPackageName(), true, javaParameters);
+    addClassesListToJavaParameters(myFailedTests, testInfo -> testInfo != null ? getTestPresentation(testInfo, project, searchScope) : null, data.getPackageName(), true, javaParameters);
 
     return javaParameters;
   }
@@ -83,7 +78,8 @@ public class TestMethods extends TestMethod {
     final PsiElement element = location != null ? location.getPsiElement() : null;
     if (element instanceof PsiMethod) {
       final PsiClass containingClass = location instanceof MethodLocation ? ((MethodLocation)location).getContainingClass() 
-                                                                          : ((PsiMethod)element).getContainingClass();
+                                                                          : location instanceof PsiMemberParameterizedLocation ? ((PsiMemberParameterizedLocation)location).getContainingClass() 
+                                                                                                                               : ((PsiMethod)element).getContainingClass();
       if (containingClass != null) {
         final String proxyName = testInfo.getName();
         final String methodName = ((PsiMethod)element).getName();

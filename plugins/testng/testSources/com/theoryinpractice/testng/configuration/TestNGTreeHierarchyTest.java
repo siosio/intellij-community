@@ -21,6 +21,7 @@ import junit.framework.Assert;
 import org.jetbrains.annotations.NotNull;
 import org.junit.Test;
 import org.testng.IDEATestNGRemoteListener;
+import org.testng.IDEATestNGRemoteListenerEx;
 import org.testng.ISuite;
 import org.testng.xml.XmlClass;
 import org.testng.xml.XmlInclude;
@@ -32,7 +33,6 @@ import java.io.OutputStream;
 import java.io.PrintStream;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 
 public class TestNGTreeHierarchyTest {
@@ -46,7 +46,8 @@ public class TestNGTreeHierarchyTest {
     test.getClasses().add(xmlClass);
     suite.getTests().add(test);
     
-    doTest(suite, "\n" +
+    doTest(suite,"##teamcity[enteredTheMatrix]\n" +
+                 "\n" +
                   "##teamcity[testSuiteStarted name ='ATest' locationHint = 'java:suite://a.ATest']\n" +
                   "\n" +
                   "##teamcity[testStarted name='ATest.test1|[0|]' locationHint='java:test://a.ATest.test1|[0|]']\n" +
@@ -150,6 +151,7 @@ public class TestNGTreeHierarchyTest {
                                           "##teamcity[testSuiteStarted name ='ATest' locationHint = 'java:suite://ATest']\n" +
                                           "\n" +
                                           "##teamcity[testStarted name='ATest.testName' locationHint='java:test://ATest.testName|[0|]']\n" +
+                                          "\n" +
                                           "##teamcity[testFailed name='ATest.testName' details='java.lang.Exception|n' error='true' message='']\n" +
                                           "\n" +
                                           "##teamcity[testFinished name='ATest.testName']\n" +
@@ -187,7 +189,8 @@ public class TestNGTreeHierarchyTest {
     test.getClasses().add(xmlClass);
     suite.getTests().add(test);
 
-    doTest(suite, "\n" +
+    doTest(suite, "##teamcity[enteredTheMatrix]\n" +
+                  "\n" +
                   "##teamcity[testSuiteStarted name ='ATest' locationHint = 'java:suite://a.ATest']\n" +
                   "\n" +
                   "##teamcity[testStarted name='ATest.test1|[0|]' locationHint='java:test://a.ATest.test1|[0|]']\n" +
@@ -210,15 +213,20 @@ public class TestNGTreeHierarchyTest {
     final String className = "a.ATest";
     listener.onSuiteStart(className, true);
     for(String methodName : new String[] {"test1", "test2"}) {
-      listener.onConfigurationSuccess(new MockTestNGResult(className, "setUp"));
+      final MockTestNGResult setUp = new MockTestNGResult(className, "setUp");
+      listener.onConfigurationStart(setUp);
+      listener.onConfigurationSuccess(setUp);
       final MockTestNGResult result = new MockTestNGResult(className, methodName);
       listener.onTestStart(result);
       listener.onTestFinished(result);
-      listener.onConfigurationSuccess(new MockTestNGResult(className, "tearDown"));
+      final MockTestNGResult tearDown = new MockTestNGResult(className, "tearDown");
+      listener.onConfigurationStart(tearDown);
+      listener.onConfigurationSuccess(tearDown);
     }
     listener.onSuiteFinish(className);
 
-    Assert.assertEquals("output: " + buf, "\n" +
+    Assert.assertEquals("output: " + buf,"##teamcity[enteredTheMatrix]\n" +
+                                         "\n" +
                                           "##teamcity[testSuiteStarted name ='ATest' locationHint = 'java:suite://a.ATest']\n" +
                                           "\n" +
                                           "##teamcity[testStarted name='ATest.setUp' locationHint='java:test://a.ATest.setUp' config='true']\n" +
@@ -253,13 +261,17 @@ public class TestNGTreeHierarchyTest {
     final IDEATestNGRemoteListener listener = createListener(buf);
     final String className = "a.ATest";
     listener.onSuiteStart(className, true);
-    listener.onConfigurationFailure(new MockTestNGResult(className, "setUp", createExceptionWithoutTrace(), ArrayUtil.EMPTY_OBJECT_ARRAY));
+    final MockTestNGResult setUp = new MockTestNGResult(className, "setUp", createExceptionWithoutTrace(), ArrayUtil.EMPTY_OBJECT_ARRAY);
+    listener.onConfigurationStart(setUp);
+    listener.onConfigurationFailure(setUp);
     listener.onSuiteFinish(className);
 
-    Assert.assertEquals("output: " + buf, "\n" +
+    Assert.assertEquals("output: " + buf, "##teamcity[enteredTheMatrix]\n" +
+                                          "\n" +
                                           "##teamcity[testSuiteStarted name ='ATest' locationHint = 'java:suite://a.ATest']\n" +
                                           "\n" +
                                           "##teamcity[testStarted name='ATest.setUp' locationHint='java:test://a.ATest.setUp' config='true']\n" +
+                                          "\n" +
                                           "##teamcity[testFailed name='ATest.setUp' details='java.lang.Exception|n' error='true' message='']\n" +
                                           "\n" +
                                           "##teamcity[testFinished name='ATest.setUp']\n" +
@@ -273,7 +285,8 @@ public class TestNGTreeHierarchyTest {
     final MockTestNGResult result = new MockTestNGResult("ATest", "testMe", null, new Object[]{null, null});
     listener.onTestStart(result);
     listener.onTestFinished(result);
-    Assert.assertEquals("output: " + buf, "\n" +
+    Assert.assertEquals("output: " + buf, "##teamcity[enteredTheMatrix]\n" +
+                                          "\n" +
                                           "##teamcity[testSuiteStarted name ='ATest' locationHint = 'java:suite://ATest']\n" +
                                           "\n" +
                                           "##teamcity[testStarted name='ATest.testMe|[null, null|]' locationHint='java:test://ATest.testMe|[0|]']\n" +
@@ -308,7 +321,7 @@ public class TestNGTreeHierarchyTest {
 
   @NotNull
   private static IDEATestNGRemoteListener createListener(final StringBuffer buf) {
-    return new IDEATestNGRemoteListener(new PrintStream(new OutputStream() {
+    return new IDEATestNGRemoteListenerEx(new PrintStream(new OutputStream() {
         @Override
         public void write(int b) throws IOException {
           buf.append(new String(new byte[]{(byte)b}));
@@ -351,6 +364,11 @@ public class TestNGTreeHierarchyTest {
 
     @Override
     public String getMethodName() {
+      return myMethodName;
+    }
+
+    @Override
+    public String getDisplayMethodName() {
       return myMethodName;
     }
 

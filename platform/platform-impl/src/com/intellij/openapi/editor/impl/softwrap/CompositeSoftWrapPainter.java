@@ -16,13 +16,10 @@
 package com.intellij.openapi.editor.impl.softwrap;
 
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.editor.LogicalPosition;
-import com.intellij.openapi.editor.VisualPosition;
 import com.intellij.openapi.editor.colors.EditorColors;
 import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.editor.impl.ColorProvider;
 import com.intellij.openapi.editor.impl.TextDrawingCallback;
-import com.intellij.openapi.util.SystemInfo;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -77,13 +74,10 @@ public class CompositeSoftWrapPainter implements SoftWrapPainter {
       }
     }
 
-    if (!SystemInfo.isAppleJvm) {
-      // these characters are known to take a very long time to render when Apple's JDK is used (for the default color scheme)
-      SYMBOLS.add(asMap(
-                    asList(BEFORE_SOFT_WRAP_LINE_FEED, AFTER_SOFT_WRAP),
-                    asList('\u2926', '\u2925'))
-      );
-    }
+    SYMBOLS.add(asMap(
+      asList(BEFORE_SOFT_WRAP_LINE_FEED, AFTER_SOFT_WRAP),
+      asList('\u2926', '\u2925'))
+    );
     SYMBOLS.add(asMap(
       asList(BEFORE_SOFT_WRAP_LINE_FEED, AFTER_SOFT_WRAP),
       asList('\u21B2',                   '\u21B3'))
@@ -145,13 +139,6 @@ public class CompositeSoftWrapPainter implements SoftWrapPainter {
   @Override
   public int paint(@NotNull Graphics g, @NotNull SoftWrapDrawingType drawingType, int x, int y, int lineHeight) {
     initDelegateIfNecessary();
-    if (!myEditor.getSettings().isAllSoftWrapsShown()) {
-      int visualLine = y / lineHeight;
-      LogicalPosition position = myEditor.visualToLogicalPosition(new VisualPosition(visualLine, 0));
-      if (position.line != myEditor.getCaretModel().getLogicalPosition().line) {
-        return myDelegate.getDrawingHorizontalOffset(g, drawingType, x, y, lineHeight);
-      }
-    }
     return myDelegate.paint(g, drawingType, x, y, lineHeight);
   }
 

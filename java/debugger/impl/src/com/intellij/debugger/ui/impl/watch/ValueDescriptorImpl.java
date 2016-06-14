@@ -27,15 +27,19 @@ import com.intellij.debugger.jdi.VirtualMachineProxyImpl;
 import com.intellij.debugger.settings.NodeRendererSettings;
 import com.intellij.debugger.ui.tree.DebuggerTreeNode;
 import com.intellij.debugger.ui.tree.NodeDescriptor;
+import com.intellij.debugger.ui.tree.NodeDescriptorNameAdjuster;
 import com.intellij.debugger.ui.tree.ValueDescriptor;
 import com.intellij.debugger.ui.tree.render.*;
 import com.intellij.debugger.ui.tree.render.Renderer;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiExpression;
 import com.intellij.util.StringBuilderSpinAllocator;
 import com.intellij.util.concurrency.Semaphore;
+import com.intellij.xdebugger.frame.XValueModifier;
 import com.intellij.xdebugger.impl.ui.tree.ValueMarkup;
 import com.sun.jdi.*;
 import org.jetbrains.annotations.NotNull;
@@ -136,7 +140,7 @@ public abstract class ValueDescriptorImpl extends NodeDescriptorImpl implements 
   }
 
   public boolean isShowIdLabel() {
-    return myShowIdLabel;
+    return myShowIdLabel && Registry.is("debugger.showTypes");
   }
 
   public void setShowIdLabel(boolean showIdLabel) {
@@ -271,10 +275,12 @@ public abstract class ValueDescriptorImpl extends NodeDescriptorImpl implements 
   public void setAncestor(NodeDescriptor oldDescriptor) {
     super.setAncestor(oldDescriptor);
     myIsNew = false;
-    ValueDescriptorImpl other = (ValueDescriptorImpl)oldDescriptor;
-    if (other.myValueReady) {
-      myValue = other.getValue();
-      myValueReady = true;
+    if (!myValueReady) {
+      ValueDescriptorImpl other = (ValueDescriptorImpl)oldDescriptor;
+      if (other.myValueReady) {
+        myValue = other.getValue();
+        myValueReady = true;
+      }
     }
   }
 
@@ -317,22 +323,9 @@ public abstract class ValueDescriptorImpl extends NodeDescriptorImpl implements 
     return ""; // we have overridden getLabel
   }
 
-  private String calcIdLabel() {
-    //translate only strings in quotes
-    if(isShowIdLabel() && myValueReady) {
-      final Value value = getValue();
-      Renderer lastRenderer = getLastRenderer();
-      final EvaluationContextImpl evalContext = myStoredEvaluationContext;
-      return evalContext != null && lastRenderer != null && !evalContext.getSuspendContext().isResumed()?
-                             ((NodeRendererImpl)lastRenderer).getIdLabel(value, evalContext.getDebugProcess()) :
-                             null;
-    }
-    return null;
-  }
-
   @Override
   public String getLabel() {
-    return calcValueName() + " = " + getValueLabel();
+    return calcValueName() + getDeclaredTypeLabel() + " = " + getValueLabel();
   }
 
   public ValueDescriptorImpl getFullValueDescriptor() {
@@ -352,12 +345,17 @@ public abstract class ValueDescriptorImpl extends NodeDescriptorImpl implements 
   }
 
   @Override
-  public void setValueLabel(String label) {
-    if (!myFullValue) {
-      label = DebuggerUtilsEx.truncateString(label);
-    }
+  public void setValueLabel(@NotNull String label) {
+    label = myFullValue ? label : DebuggerUtilsEx.truncateString(label);
+
+    Value value = myValueReady ? getValue() : null;
+    NodeRendererImpl lastRenderer = (NodeRendererImpl)getLastRenderer();
+    EvaluationContextImpl evalContext = myStoredEvaluationContext;
+    String labelId = myValueReady && evalContext != null && lastRenderer != null &&
+                     !evalContext.getSuspendContext().isResumed() ?
+                     lastRenderer.getIdLabel(value, evalContext.getDebugProcess()) : null;
     myValueText = label;
-    myIdLabel = calcIdLabel();
+    myIdLabel = isShowIdLabel() ? labelId : null;
   }
 
   @Override
@@ -378,8 +376,18 @@ public abstract class ValueDescriptorImpl extends NodeDescriptorImpl implements 
   }
 
   public String calcValueName() {
-    return getName();
-  };
+    String name = getName();
+    NodeDescriptorNameAdjuster nameAdjuster = NodeDescriptorNameAdjuster.findFor(this);
+    if (nameAdjuster != null) {
+      return nameAdjuster.fixName(name, this);
+    }
+    return name;
+  }
+
+  @Nullable
+  public String getDeclaredType() {
+    return null;
+  }
 
   @Override
   public void displayAs(NodeDescriptor descriptor) {
@@ -392,12 +400,6 @@ public abstract class ValueDescriptorImpl extends NodeDescriptorImpl implements 
 
   public Renderer getLastRenderer() {
     return myRenderer != null ? myRenderer: myAutoRenderer;
-  }
-
-  @Nullable
-  public Type getType() {
-    Value value = getValue();
-    return value != null ? value.type() : null;
   }
 
   public NodeRenderer getRenderer (DebugProcessImpl debugProcess) {
@@ -419,19 +421,19 @@ public abstract class ValueDescriptorImpl extends NodeDescriptorImpl implements 
 
   //returns expression that evaluates tree to this descriptor
   @Nullable
-  public PsiExpression getTreeEvaluation(JavaValue value, DebuggerContextImpl context) throws EvaluateException {
-    if(value.getParent() != null) {
-      final NodeDescriptorImpl descriptor = value.getParent().getDescriptor();
-      final ValueDescriptorImpl vDescriptor = ((ValueDescriptorImpl)descriptor);
-      final PsiExpression parentEvaluation = vDescriptor.getTreeEvaluation(value.getParent(), context);
+  public PsiElement getTreeEvaluation(JavaValue value, DebuggerContextImpl context) throws EvaluateException {
+    JavaValue parent = value.getParent();
+    if (parent != null) {
+      ValueDescriptorImpl vDescriptor = parent.getDescriptor();
+      PsiElement parentEvaluation = vDescriptor.getTreeEvaluation(parent, context);
 
-      if (parentEvaluation == null) {
+      if (!(parentEvaluation instanceof PsiExpression)) {
         return null;
       }
 
       return DebuggerTreeNodeExpression.substituteThis(
         vDescriptor.getRenderer(context.getDebugProcess()).getChildValueExpression(new DebuggerTreeNodeMock(value), context),
-        parentEvaluation, vDescriptor.getValue()
+        ((PsiExpression)parentEvaluation), vDescriptor.getValue()
       );
     }
 
@@ -515,12 +517,19 @@ public abstract class ValueDescriptorImpl extends NodeDescriptorImpl implements 
   }
 
   private static boolean isEnumConstant(final ObjectReference objRef) {
-    final Type type = objRef.type();
-    return type instanceof ClassType && ((ClassType)type).isEnum();
+    try {
+      Type type = objRef.type();
+      return type instanceof ClassType && ((ClassType)type).isEnum();
+    } catch (ObjectCollectedException ignored) {}
+    return false;
   }
 
   public boolean canSetValue() {
     return myValueReady && !myIsSynthetic && isLvalue();
+  }
+
+  public XValueModifier getModifier(JavaValue value) {
+    return null;
   }
 
   @NotNull
@@ -591,15 +600,15 @@ public abstract class ValueDescriptorImpl extends NodeDescriptorImpl implements 
     return myProject;
   }
 
-  protected String addDeclaredType(String typeName) {
-    final ClassRenderer classRenderer = NodeRendererSettings.getInstance().getClassRenderer();
-    StringBuilder buf = StringBuilderSpinAllocator.alloc();
-    try {
-      buf.append(getName()).append(": ").append(classRenderer.renderTypeName(typeName));
-      return buf.toString();
+  @NotNull
+  public String getDeclaredTypeLabel() {
+    ClassRenderer classRenderer = NodeRendererSettings.getInstance().getClassRenderer();
+    if (classRenderer.SHOW_DECLARED_TYPE) {
+      String declaredType = getDeclaredType();
+      if (!StringUtil.isEmpty(declaredType)) {
+        return ": " + classRenderer.renderTypeName(declaredType);
+      }
     }
-    finally {
-      StringBuilderSpinAllocator.dispose(buf);
-    }
+    return "";
   }
 }

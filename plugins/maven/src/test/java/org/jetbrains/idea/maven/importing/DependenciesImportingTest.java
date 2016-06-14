@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,7 +26,9 @@ import com.intellij.openapi.roots.libraries.Library;
 import com.intellij.openapi.roots.libraries.LibraryTable;
 import com.intellij.openapi.roots.libraries.LibraryTablesRegistrar;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.idea.maven.MavenCustomRepositoryHelper;
 import org.jetbrains.idea.maven.MavenImportingTestCase;
 import org.jetbrains.idea.maven.model.MavenId;
@@ -1041,7 +1043,7 @@ public class DependenciesImportingTest extends MavenImportingTestCase {
 
   public void testDependencyWithEnvironmentENVProperty() throws Exception {
     String envDir = FileUtil.toSystemIndependentName(System.getenv(getEnvVar()));
-    if (envDir.endsWith("/")) envDir = envDir.substring(0, envDir.length() - 1);
+    envDir = StringUtil.trimEnd(envDir, "/");
 
     importProject("<groupId>test</groupId>" +
                   "<artifactId>project</artifactId>" +
@@ -2088,37 +2090,31 @@ public class DependenciesImportingTest extends MavenImportingTestCase {
   }
 
   private void createAndAddProjectLibrary(final String moduleName, final String libraryName) {
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      public void run() {
-        Library lib = createProjectLibrary(libraryName);
-        ModuleRootModificationUtil.addDependency(getModule(moduleName), lib);
-      }
+    ApplicationManager.getApplication().runWriteAction(() -> {
+      Library lib = createProjectLibrary(libraryName);
+      ModuleRootModificationUtil.addDependency(getModule(moduleName), lib);
     });
   }
 
   private void clearLibraryRoots(final String libraryName, final OrderRootType... types) {
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      public void run() {
-        Library lib = ProjectLibraryTable.getInstance(myProject).getLibraryByName(libraryName);
-        Library.ModifiableModel model = lib.getModifiableModel();
-        for (OrderRootType eachType : types) {
-          for (String each : model.getUrls(eachType)) {
-            model.removeRoot(each, eachType);
-          }
+    ApplicationManager.getApplication().runWriteAction(() -> {
+      Library lib = ProjectLibraryTable.getInstance(myProject).getLibraryByName(libraryName);
+      Library.ModifiableModel model = lib.getModifiableModel();
+      for (OrderRootType eachType : types) {
+        for (String each : model.getUrls(eachType)) {
+          model.removeRoot(each, eachType);
         }
-        model.commit();
       }
+      model.commit();
     });
   }
 
   private void addLibraryRoot(final String libraryName, final OrderRootType type, final String path) {
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      public void run() {
-        Library lib = ProjectLibraryTable.getInstance(myProject).getLibraryByName(libraryName);
-        Library.ModifiableModel model = lib.getModifiableModel();
-        model.addRoot(path, type);
-        model.commit();
-      }
+    ApplicationManager.getApplication().runWriteAction(() -> {
+      Library lib = ProjectLibraryTable.getInstance(myProject).getLibraryByName(libraryName);
+      Library.ModifiableModel model = lib.getModifiableModel();
+      model.addRoot(path, type);
+      model.commit();
     });
   }
 
@@ -2151,13 +2147,11 @@ public class DependenciesImportingTest extends MavenImportingTestCase {
                   "<artifactId>project</artifactId>" +
                   "<version>1</version>");
 
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      public void run() {
-        LibraryTable appTable = LibraryTablesRegistrar.getInstance().getLibraryTable();
-        Library lib = appTable.createLibrary("foo");
-        ModuleRootModificationUtil.addDependency(getModule("project"), lib);
-        appTable.removeLibrary(lib);
-      }
+    ApplicationManager.getApplication().runWriteAction(() -> {
+      LibraryTable appTable = LibraryTablesRegistrar.getInstance().getLibraryTable();
+      Library lib = appTable.createLibrary("foo");
+      ModuleRootModificationUtil.addDependency(getModule("project"), lib);
+      appTable.removeLibrary(lib);
     });
 
 
@@ -2385,7 +2379,7 @@ public class DependenciesImportingTest extends MavenImportingTestCase {
 
     new WriteAction() {
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         ModifiableRootModel rootModel = ModuleRootManager.getInstance(getModule("m1")).getModifiableModel();
         OrderEntry[] orderEntries = rootModel.getOrderEntries().clone();
         assert orderEntries.length == 4;
@@ -2435,7 +2429,7 @@ public class DependenciesImportingTest extends MavenImportingTestCase {
 
     new WriteAction() {
       @Override
-      protected void run(Result result) throws Throwable {
+      protected void run(@NotNull Result result) throws Throwable {
         ModifiableRootModel rootModel = ModuleRootManager.getInstance(getModule("m1")).getModifiableModel();
         OrderEntry[] orderEntries = rootModel.getOrderEntries().clone();
         assert orderEntries.length == 4;

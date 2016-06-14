@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -155,12 +155,7 @@ public class MavenUtil {
       r.run();
     }
     else {
-      if (ApplicationManager.getApplication().isDispatchThread()) {
-        r.run();
-      }
-      else {
-        ApplicationManager.getApplication().invokeAndWait(DisposeAwareRunnable.create(r, p), state);
-      }
+      ApplicationManager.getApplication().invokeAndWait(DisposeAwareRunnable.create(r, p), state);
     }
   }
   
@@ -171,15 +166,12 @@ public class MavenUtil {
     else {
       final Semaphore semaphore = new Semaphore();
       semaphore.down();
-      DumbService.getInstance(p).smartInvokeLater(new Runnable() {
-        @Override
-        public void run() {
-          try {
-            r.run();
-          }
-          finally {
-            semaphore.up();
-          }
+      DumbService.getInstance(p).smartInvokeLater(() -> {
+        try {
+          r.run();
+        }
+        finally {
+          semaphore.up();
         }
       }, state);
       semaphore.waitFor();
@@ -187,11 +179,7 @@ public class MavenUtil {
   }
 
   public static void invokeAndWaitWriteAction(Project p, final Runnable r) {
-    invokeAndWait(p, new Runnable() {
-      public void run() {
-        ApplicationManager.getApplication().runWriteAction(r);
-      }
-    });
+    invokeAndWait(p, () -> ApplicationManager.getApplication().runWriteAction(r));
   }
 
   public static void runDumbAware(final Project project, final Runnable r) {
@@ -264,19 +252,11 @@ public class MavenUtil {
   }
 
   public static List<String> collectPaths(List<VirtualFile> files) {
-    return ContainerUtil.map(files, new Function<VirtualFile, String>() {
-      public String fun(VirtualFile file) {
-        return file.getPath();
-      }
-    });
+    return ContainerUtil.map(files, file -> file.getPath());
   }
 
   public static List<VirtualFile> collectFiles(Collection<MavenProject> projects) {
-    return ContainerUtil.map(projects, new Function<MavenProject, VirtualFile>() {
-      public VirtualFile fun(MavenProject project) {
-        return project.getFile();
-      }
-    });
+    return ContainerUtil.map(projects, project -> project.getFile());
   }
 
   public static <T> boolean equalAsSets(final Collection<T> collection1, final Collection<T> collection2) {
@@ -288,11 +268,7 @@ public class MavenUtil {
   }
 
   public static <T, U> List<Pair<T, U>> mapToList(Map<T, U> map) {
-    return ContainerUtil.map2List(map.entrySet(), new Function<Map.Entry<T, U>, Pair<T, U>>() {
-      public Pair<T, U> fun(Map.Entry<T, U> tuEntry) {
-        return Pair.create(tuEntry.getKey(), tuEntry.getValue());
-      }
-    });
+    return ContainerUtil.map2List(map.entrySet(), tuEntry -> Pair.create(tuEntry.getKey(), tuEntry.getValue()));
   }
 
   public static String formatHtmlImage(URL url) {
@@ -330,7 +306,7 @@ public class MavenUtil {
         if (!Comparing.equal(modulePath.getParent(), parentModulePath)) {
           String relativePath = VfsUtil.getPath(file, parentModulePath, '/');
           if (relativePath != null) {
-            if (relativePath.endsWith("/")) relativePath = relativePath.substring(0, relativePath.length() - 1);
+            relativePath = StringUtil.trimEnd(relativePath, "/");
 
             conditions.setProperty("HAS_RELATIVE_PATH", "true");
             properties.setProperty("PARENT_RELATIVE_PATH", relativePath);
@@ -456,19 +432,17 @@ public class MavenUtil {
                                                  final MavenTask task) {
     final MavenProgressIndicator indicator = new MavenProgressIndicator();
 
-    Runnable runnable = new Runnable() {
-      public void run() {
-        if (project.isDisposed()) return;
+    Runnable runnable = () -> {
+      if (project.isDisposed()) return;
 
-        try {
-          task.run(indicator);
-        }
-        catch (MavenProcessCanceledException ignore) {
-          indicator.cancel();
-        }
-        catch (ProcessCanceledException ignore) {
-          indicator.cancel();
-        }
+      try {
+        task.run(indicator);
+      }
+      catch (MavenProcessCanceledException ignore) {
+        indicator.cancel();
+      }
+      catch (ProcessCanceledException ignore) {
+        indicator.cancel();
       }
     };
 
@@ -494,16 +468,14 @@ public class MavenUtil {
           }
         }
       };
-      invokeLater(project, new Runnable() {
-        public void run() {
-          if (future.isDone()) return;
-          new Task.Backgroundable(project, title, cancellable) {
-            public void run(@NotNull ProgressIndicator i) {
-              indicator.setIndicator(i);
-              handler.waitFor();
-            }
-          }.queue();
-        }
+      invokeLater(project, () -> {
+        if (future.isDone()) return;
+        new Task.Backgroundable(project, title, cancellable) {
+          public void run(@NotNull ProgressIndicator i) {
+            indicator.setIndicator(i);
+            handler.waitFor();
+          }
+        }.queue();
       });
       return handler;
     }
@@ -512,7 +484,7 @@ public class MavenUtil {
   @Nullable
   public static File resolveMavenHomeDirectory(@Nullable String overrideMavenHome) {
     if (!isEmptyOrSpaces(overrideMavenHome)) {
-      return MavenServerManager.getInstance().getMavenHomeFile(overrideMavenHome);
+      return MavenServerManager.getMavenHomeFile(overrideMavenHome);
     }
 
     String m2home = System.getenv(ENV_M2_HOME);
@@ -561,7 +533,7 @@ public class MavenUtil {
       }
     }
 
-    return MavenServerManager.getInstance().getMavenHomeFile(MavenServerManager.BUNDLED_MAVEN_3);
+    return MavenServerManager.getMavenHomeFile(MavenServerManager.BUNDLED_MAVEN_3);
   }
 
   @Nullable
@@ -607,12 +579,7 @@ public class MavenUtil {
     }
 
     if (list.length > 1) {
-      Arrays.sort(list, new Comparator<String>() {
-        @Override
-        public int compare(String o1, String o2) {
-          return StringUtil.compareVersionNumbers(o2, o1);
-        }
-      });
+      Arrays.sort(list, (o1, o2) -> StringUtil.compareVersionNumbers(o2, o1));
     }
 
     final File file = new File(brewDir, list[0] + "/libexec");

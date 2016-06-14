@@ -16,6 +16,8 @@
 package git4idea.repo;
 
   import com.intellij.ide.plugins.IdeaPluginDescriptor;
+import com.intellij.ide.plugins.PluginManager;
+import com.intellij.ide.plugins.PluginManagerCore;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Pair;
@@ -24,7 +26,6 @@ import com.intellij.util.ArrayUtil;
 import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
 import git4idea.GitLocalBranch;
-import git4idea.GitPlatformFacade;
 import git4idea.GitRemoteBranch;
 import git4idea.branch.GitBranchUtil;
 import org.ini4j.Ini;
@@ -119,7 +120,7 @@ public class GitConfig {
    * If some section is invalid, it is skipped, and a warning is reported.
    */
   @NotNull
-  static GitConfig read(@NotNull GitPlatformFacade platformFacade, @NotNull File configFile) {
+  static GitConfig read(@NotNull File configFile) {
     GitConfig emptyConfig = new GitConfig(Collections.<Remote>emptyList(), Collections.<Url>emptyList(),
                                           Collections.<BranchConfig>emptyList());
     if (!configFile.exists()) {
@@ -138,7 +139,7 @@ public class GitConfig {
       return emptyConfig;
     }
 
-    IdeaPluginDescriptor plugin = platformFacade.getPluginByClassName(GitConfig.class.getName());
+    IdeaPluginDescriptor plugin = PluginManager.getPlugin(PluginManagerCore.getPluginByClassName(GitConfig.class.getName()));
     ClassLoader classLoader = plugin == null ?
                               GitConfig.class.getClassLoader() :   // null e.g. if IDEA is started from IDEA
                               plugin.getPluginClassLoader();
@@ -246,13 +247,11 @@ public class GitConfig {
       String sectionName = stringSectionEntry.getKey();
       Profile.Section section = stringSectionEntry.getValue();
 
-      if (sectionName.startsWith("remote") || sectionName.startsWith("svn-remote")) {
-        Remote remote = parseRemoteSection(sectionName, section, classLoader);
-        if (remote != null) {
-          remotes.add(remote);
-        }
+      Remote remote = parseRemoteSection(sectionName, section, classLoader);
+      if (remote != null) {
+        remotes.add(remote);
       }
-      else if (sectionName.startsWith("url")) {
+      else {
         Url url = parseUrlSection(sectionName, section, classLoader);
         if (url != null) {
           urls.add(url);
@@ -372,23 +371,19 @@ public class GitConfig {
   private static Remote parseRemoteSection(@NotNull String sectionName,
                                            @NotNull Profile.Section section,
                                            @NotNull ClassLoader classLoader) {
-    RemoteBean remoteBean = section.as(RemoteBean.class, classLoader);
     Matcher matcher = REMOTE_SECTION.matcher(sectionName);
-    if (matcher.matches()) {
-      return new Remote(matcher.group(1), remoteBean);
+    if (matcher.matches() && matcher.groupCount() == 1) {
+      return new Remote(matcher.group(1), section.as(RemoteBean.class, classLoader));
     }
-    LOG.error(String.format("Invalid remote section format in .git/config. sectionName: %s section: %s", sectionName, section));
     return null;
   }
 
   @Nullable
   private static Url parseUrlSection(@NotNull String sectionName, @NotNull Profile.Section section, @NotNull ClassLoader classLoader) {
-    UrlBean urlBean = section.as(UrlBean.class, classLoader);
     Matcher matcher = URL_SECTION.matcher(sectionName);
-    if (matcher.matches()) {
-      return new Url(matcher.group(1), urlBean);
+    if (matcher.matches() && matcher.groupCount() == 1) {
+      return new Url(matcher.group(1), section.as(UrlBean.class, classLoader));
     }
-    LOG.error(String.format("Invalid url section format in .git/config. sectionName: %s section: %s", sectionName, section));
     return null;
   }
 

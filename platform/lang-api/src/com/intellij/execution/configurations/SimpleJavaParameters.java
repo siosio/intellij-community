@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.intellij.execution.configurations;
 
 import com.intellij.execution.ExecutionException;
@@ -25,6 +24,7 @@ import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.util.PathsList;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.nio.charset.Charset;
@@ -39,6 +39,7 @@ public class SimpleJavaParameters extends SimpleProgramParameters {
   private final ParametersList myVmParameters = new ParametersList();
   private Charset myCharset = CharsetToolkit.getDefaultSystemCharset();
   private boolean myUseDynamicClasspath;
+  private boolean myUseClasspathJar = false;
   private boolean myUseDynamicVMOptions;
   private String myJarPath;
 
@@ -100,17 +101,25 @@ public class SimpleJavaParameters extends SimpleProgramParameters {
     return myUseDynamicVMOptions;
   }
 
+  public boolean isUseClasspathJar() {
+    return myUseClasspathJar;
+  }
+
+  public void setUseClasspathJar(boolean useClasspathJar) {
+    myUseClasspathJar = useClasspathJar;
+  }
+
+  @NotNull
+  public GeneralCommandLine toCommandLine() {
+    Sdk jdk = getJdk();
+    if (jdk == null) throw new IllegalArgumentException("SDK should be defined");
+    String exePath = ((JavaSdkType)jdk.getSdkType()).getVMExecutablePath(jdk);
+    return JdkUtil.setupJVMCommandLine(exePath, this, myUseDynamicClasspath);
+  }
+
+  @NotNull
   public OSProcessHandler createOSProcessHandler() throws ExecutionException {
-    final Sdk sdk = getJdk();
-    assert sdk != null : "SDK should be defined";
-    final String exePath = ((JavaSdkType)sdk.getSdkType()).getVMExecutablePath(sdk);
-    final GeneralCommandLine commandLine = JdkUtil.setupJVMCommandLine(exePath, this, myUseDynamicClasspath);
-    final OSProcessHandler processHandler = new OSProcessHandler(commandLine.createProcess(), commandLine.getCommandLineString()) {
-      @Override
-      public Charset getCharset() {
-        return commandLine.getCharset();
-      }
-    };
+    OSProcessHandler processHandler = new OSProcessHandler(toCommandLine());
     ProcessTerminatedListener.attach(processHandler);
     return processHandler;
   }

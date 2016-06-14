@@ -277,14 +277,46 @@ public class SafeDeleteTest extends MultiFileTestCase {
     doSingleFileTest();
   }
 
+  public void testTypeParameterWithinMethodHierarchy() throws Exception {
+    doSingleFileTest();
+  }
+  
+  public void testTypeParameterNoMethodHierarchy() throws Exception {
+    doSingleFileTest();
+  }
+
   public void testClassWithInnerStaticImport() throws Exception {
     doTest("ClassWithInnerStaticImport");
   }
 
+  public void testInnerClassUsedInTheSameFile() throws Exception {
+    try {
+      doSingleFileTest();
+      fail("Side effect was ignored");
+    }
+    catch (BaseRefactoringProcessor.ConflictsInTestsException e) {
+      String message = e.getMessage();
+      assertEquals("class <b><code>Test.Foo</code></b> has 1 usage that is not safe to delete.", message);
+    }
+  }
+
+  public void testParameterInMethodUsedInMethodReference() throws Exception {
+    LanguageLevelProjectExtension.getInstance(getProject()).setLanguageLevel(LanguageLevel.JDK_1_8);
+    doSingleFileTest();
+  }
+
+  public void testShowConflictsButRemoveAnnotationsIfAnnotationTypeIsDeleted() throws Exception {
+    try {
+      BaseRefactoringProcessor.ConflictsInTestsException.setTestIgnore(true);
+      doSingleFileTest();
+    }
+    finally {
+      BaseRefactoringProcessor.ConflictsInTestsException.setTestIgnore(false);
+    }
+  }
+
   private void doTest(@NonNls final String qClassName) throws Exception {
-    doTest((rootDir, rootAfter) -> {
-      SafeDeleteTest.this.performAction(qClassName);
-    });
+    doTest((rootDir, rootAfter) -> SafeDeleteTest.this.performAction(qClassName));
   }
 
   @Override

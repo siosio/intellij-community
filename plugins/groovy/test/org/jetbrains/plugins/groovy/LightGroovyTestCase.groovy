@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ package org.jetbrains.plugins.groovy
 import com.intellij.psi.PsiIntersectionType
 import com.intellij.psi.PsiType
 import com.intellij.testFramework.LightProjectDescriptor
+import com.intellij.testFramework.fixtures.JavaCodeInsightTestFixture
 import com.intellij.testFramework.fixtures.LightCodeInsightFixtureTestCase
 import org.jetbrains.annotations.NonNls
 import org.jetbrains.annotations.NotNull
@@ -28,6 +29,20 @@ import org.jetbrains.annotations.Nullable
  * @author peter
  */
 public abstract class LightGroovyTestCase extends LightCodeInsightFixtureTestCase {
+
+  JavaCodeInsightTestFixture getFixture() {
+    myFixture
+  }
+
+  @Override
+  void setUp() throws Exception {
+    super.setUp()
+  }
+
+  @Override
+  void tearDown() throws Exception {
+    super.tearDown()
+  }
 
   @Override
   @NotNull
@@ -43,7 +58,7 @@ public abstract class LightGroovyTestCase extends LightCodeInsightFixtureTestCas
    */
   @Override
   @NonNls
-  protected abstract String getBasePath();
+  protected String getBasePath() { null }
 
 
   protected void addGroovyTransformField() {
@@ -100,19 +115,6 @@ public class HashSet<E>
     implements Set<E>, Cloneable, java.io.Serializable
 {}
 ''')
-  }
-
-  protected final void addLinkedHashMap() {
-    myFixture.addClass """\
-package java.util;
-
-public class LinkedHashMap<K,V> extends HashMap<K,V> implements Map<K,V> {
-    public LinkedHashMap(int initialCapacity, float loadFactor) {}
-    public LinkedHashMap(int initialCapacity) {}
-    public LinkedHashMap() {}
-    public LinkedHashMap(Map<? extends K, ? extends V> m) {}
-    public LinkedHashMap(int initialCapacity, float loadFactor, boolean accessOrder) {}
-}"""
   }
 
   protected final void addAnnotationCollector() {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,6 +37,7 @@ import com.intellij.openapi.components.impl.stores.StorageUtil;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.ExtensionPointName;
 import com.intellij.openapi.externalSystem.ExternalSystemManager;
+import com.intellij.openapi.externalSystem.model.ExternalSystemException;
 import com.intellij.openapi.externalSystem.model.ProjectSystemId;
 import com.intellij.openapi.externalSystem.model.task.ExternalSystemTaskNotificationListener;
 import com.intellij.openapi.externalSystem.service.notification.ExternalSystemProgressNotificationManager;
@@ -56,6 +57,7 @@ import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.projectRoots.SimpleJavaSdkType;
 import com.intellij.openapi.roots.DependencyScope;
 import com.intellij.openapi.util.ShutDownTracker;
+import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.PsiBundle;
 import com.intellij.ui.PlaceHolder;
 import com.intellij.util.Alarm;
@@ -63,11 +65,12 @@ import com.intellij.util.PathUtil;
 import com.intellij.util.SystemProperties;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.ContainerUtilRt;
+import kotlin.Unit;
+import kotlin.reflect.KotlinReflectionInternalError;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
-import java.nio.charset.Charset;
 import java.rmi.RemoteException;
 import java.rmi.server.UnicastRemoteObject;
 import java.util.List;
@@ -110,11 +113,7 @@ public class RemoteExternalSystemCommunicationManager implements ExternalSystemC
       }
     };
 
-    ShutDownTracker.getInstance().registerShutdownTask(new Runnable() {
-      public void run() {
-        shutdown(false);
-      }
-    });
+    ShutDownTracker.getInstance().registerShutdownTask(() -> shutdown(false));
   }
 
   public synchronized void shutdown(boolean wait) {
@@ -148,9 +147,16 @@ public class RemoteExternalSystemCommunicationManager implements ExternalSystemC
         ContainerUtil.addIfNotNull(PathUtil.getJarPathForClass(JavaModuleType.class), classPath);
         ContainerUtil.addIfNotNull(PathUtil.getJarPathForClass(ModuleType.class), classPath);
         ContainerUtil.addIfNotNull(PathUtil.getJarPathForClass(EmptyModuleType.class), classPath);
+        ContainerUtil.addIfNotNull(PathUtil.getJarPathForClass(LanguageLevel.class), classPath);
+
+        // add Kotlin runtime
+        ContainerUtil.addIfNotNull(PathUtil.getJarPathForClass(Unit.class), classPath);
+        ContainerUtil.addIfNotNull(PathUtil.getJarPathForClass(KotlinReflectionInternalError.class), classPath);
 
         // External system module jars
         ContainerUtil.addIfNotNull(PathUtil.getJarPathForClass(getClass()), classPath);
+        // external-system-rt.jar
+        ContainerUtil.addIfNotNull(PathUtil.getJarPathForClass(ExternalSystemException.class), classPath);
         ExternalSystemApiUtil.addBundle(params.getClassPath(), "messages.CommonBundle", CommonBundle.class);
         params.getClassPath().addAll(classPath);
 
@@ -197,17 +203,9 @@ public class RemoteExternalSystemCommunicationManager implements ExternalSystemC
           throw new ExecutionException("No sdk is defined. Params: " + params);
         }
 
-        final GeneralCommandLine commandLine = JdkUtil.setupJVMCommandLine(
-          ((JavaSdkType)sdk.getSdkType()).getVMExecutablePath(sdk),
-          params,
-          false
-        );
-        final OSProcessHandler processHandler = new OSProcessHandler(commandLine.createProcess(), commandLine.getCommandLineString()) {
-          @Override
-          public Charset getCharset() {
-            return commandLine.getCharset();
-          }
-        };
+        String executablePath = ((JavaSdkType)sdk.getSdkType()).getVMExecutablePath(sdk);
+        GeneralCommandLine commandLine = JdkUtil.setupJVMCommandLine(executablePath, params, false);
+        OSProcessHandler processHandler = new OSProcessHandler(commandLine);
         ProcessTerminatedListener.attach(processHandler);
         return processHandler;
       }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ import com.intellij.lang.java.parser.JavadocParser;
 import com.intellij.lexer.Lexer;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.LanguageLevelProjectExtension;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.impl.source.javadoc.*;
 import com.intellij.psi.tree.*;
@@ -33,24 +34,23 @@ import com.intellij.util.ReflectionUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import sun.reflect.ConstructorAccessor;
 
 import java.lang.reflect.Constructor;
 
 public interface JavaDocElementType {
+  @SuppressWarnings("deprecation")
   class JavaDocCompositeElementType extends IJavaDocElementType implements ICompositeElementType {
-    private final ConstructorAccessor myConstructor;
+    private final Constructor<? extends ASTNode> myConstructor;
 
     private JavaDocCompositeElementType(@NonNls final String debugName, final Class<? extends ASTNode> nodeClass) {
       super(debugName);
-      Constructor<? extends ASTNode> constructor = ReflectionUtil.getDefaultConstructor(nodeClass);
-      myConstructor = ReflectionUtil.getConstructorAccessor(constructor);
+      myConstructor = ReflectionUtil.getDefaultConstructor(nodeClass);
     }
 
     @NotNull
     @Override
     public ASTNode createCompositeNode() {
-      return ReflectionUtil.createInstanceViaConstructorAccessor(myConstructor);
+      return ReflectionUtil.createInstance(myConstructor);
     }
   }
 
@@ -122,6 +122,8 @@ public interface JavaDocElementType {
 
     @Override
     public boolean isParsable(final CharSequence buffer, Language fileLanguage, final Project project) {
+      if (!StringUtil.startsWith(buffer, "/**") || !StringUtil.endsWith(buffer, "*/")) return false;
+
       Lexer lexer = JavaParserDefinition.createLexer(LanguageLevelProjectExtension.getInstance(project).getLanguageLevel());
       lexer.start(buffer);
       if (lexer.getTokenType() == DOC_COMMENT) {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,9 +17,10 @@ package org.jetbrains.plugins.terminal;
 
 import com.intellij.execution.TaskExecutor;
 import com.intellij.execution.configurations.EncodingEnvironmentUtil;
-import com.intellij.execution.process.*;
-import com.intellij.openapi.application.Application;
-import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.execution.process.ProcessAdapter;
+import com.intellij.execution.process.ProcessEvent;
+import com.intellij.execution.process.ProcessHandler;
+import com.intellij.execution.process.ProcessWaitFor;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ProjectRootManager;
@@ -27,6 +28,7 @@ import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.Consumer;
+import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.containers.HashMap;
 import com.jediterm.pty.PtyProcessTtyConnector;
 import com.jediterm.terminal.TtyConnector;
@@ -88,7 +90,9 @@ public class LocalTerminalDirectRunner extends AbstractTerminalRunner<PtyProcess
   @Override
   protected PtyProcess createProcess(@Nullable String directory) throws ExecutionException {
     Map<String, String> envs = new HashMap<String, String>(System.getenv());
-    envs.put("TERM", "xterm-256color");
+    if (!SystemInfo.isWindows) {
+      envs.put("TERM", "xterm-256color");
+    }
     EncodingEnvironmentUtil.setLocaleEnvironmentIfMac(envs, myDefaultCharset);
     try {
       return PtyProcess.exec(getCommand(), envs, directory != null ? directory : currentProjectFolder());
@@ -111,7 +115,7 @@ public class LocalTerminalDirectRunner extends AbstractTerminalRunner<PtyProcess
 
   @Override
   protected ProcessHandler createProcessHandler(final PtyProcess process) {
-    return new PtyProcessHandler(process);
+    return new PtyProcessHandler(process, getCommand()[0]);
   }
 
   @Override
@@ -160,9 +164,9 @@ public class LocalTerminalDirectRunner extends AbstractTerminalRunner<PtyProcess
     private final PtyProcess myProcess;
     private final ProcessWaitFor myWaitFor;
 
-    public PtyProcessHandler(PtyProcess process) {
+    public PtyProcessHandler(PtyProcess process, @NotNull String presentableName) {
       myProcess = process;
-      myWaitFor = new ProcessWaitFor(process, this);
+      myWaitFor = new ProcessWaitFor(process, this, presentableName);
     }
 
     @Override
@@ -171,12 +175,7 @@ public class LocalTerminalDirectRunner extends AbstractTerminalRunner<PtyProcess
         @Override
         public void startNotified(ProcessEvent event) {
           try {
-            myWaitFor.setTerminationCallback(new Consumer<Integer>() {
-              @Override
-              public void consume(Integer integer) {
-                notifyProcessTerminated(integer);
-              }
-            });
+            myWaitFor.setTerminationCallback(integer -> notifyProcessTerminated(integer));
           }
           finally {
             removeProcessListener(this);
@@ -213,19 +212,10 @@ public class LocalTerminalDirectRunner extends AbstractTerminalRunner<PtyProcess
       return myProcess.getOutputStream();
     }
 
+    @NotNull
     @Override
-    public Future<?> executeTask(Runnable task) {
-      return executeOnPooledThread(task);
-    }
-
-    protected static Future<?> executeOnPooledThread(Runnable task) {
-      final Application application = ApplicationManager.getApplication();
-
-      if (application != null) {
-        return application.executeOnPooledThread(task);
-      }
-
-      return BaseOSProcessHandler.ExecutorServiceHolder.submit(task);
+    public Future<?> executeTask(@NotNull Runnable task) {
+      return AppExecutorUtil.getAppExecutorService().submit(task);
     }
   }
 }

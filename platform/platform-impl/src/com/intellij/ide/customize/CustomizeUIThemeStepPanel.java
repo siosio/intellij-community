@@ -19,6 +19,7 @@ import com.intellij.CommonBundle;
 import com.intellij.ide.WelcomeWizardUtil;
 import com.intellij.ide.ui.LafManager;
 import com.intellij.ide.ui.laf.IntelliJLaf;
+import com.intellij.ide.ui.laf.LafManagerImpl;
 import com.intellij.ide.ui.laf.darcula.DarculaLaf;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.options.OptionsBundle;
@@ -43,7 +44,7 @@ public class CustomizeUIThemeStepPanel extends AbstractCustomizeWizardStep {
 
     public ThemeInfo(String name, String previewFileName, String laf) {
       this.name = name;
-      this.previewFileName = previewFileName;
+      this.previewFileName = SystemInfo.isMac && "IntelliJ".equals(previewFileName) ? "Aqua" : previewFileName;
       this.laf = laf;
     }
 
@@ -87,21 +88,14 @@ public class CustomizeUIThemeStepPanel extends AbstractCustomizeWizardStep {
     myColumnMode = myThemes.size() > 2;
     JPanel buttonsPanel = new JPanel(new GridLayout(myColumnMode ? myThemes.size() : 1, myColumnMode ? 1 : myThemes.size(), 5, 5));
     ButtonGroup group = new ButtonGroup();
-    ThemeInfo myDefaultTheme = null;
+    final ThemeInfo myDefaultTheme = myThemes.iterator().next();
 
     for (final ThemeInfo theme: myThemes) {
-      final JRadioButton radioButton = new JRadioButton(theme.name, myDefaultTheme == null);
+      final JRadioButton radioButton = new JRadioButton(theme.name, myDefaultTheme == theme);
       radioButton.setOpaque(false);
-      if (myDefaultTheme == null) {
-        radioButton.setSelected(true);
-        myDefaultTheme = theme;
-      }
-      final JPanel panel = createBigButtonPanel(createSmallBorderLayout(), radioButton, new Runnable() {
-        @Override
-        public void run() {
-          applyLaf(theme, CustomizeUIThemeStepPanel.this);
-          theme.apply();
-        }
+      final JPanel panel = createBigButtonPanel(createSmallBorderLayout(), radioButton, () -> {
+        applyLaf(theme, CustomizeUIThemeStepPanel.this);
+        theme.apply();
       });
       panel.setBorder(createSmallEmptyBorder());
       panel.add(radioButton, myColumnMode ? BorderLayout.WEST : BorderLayout.NORTH);
@@ -124,13 +118,13 @@ public class CustomizeUIThemeStepPanel extends AbstractCustomizeWizardStep {
       wrapperPanel.add(myPreviewLabel);
       add(wrapperPanel, BorderLayout.CENTER);
     }
-    applyLaf(myDefaultTheme, this);
+    SwingUtilities.invokeLater(() -> applyLaf(myDefaultTheme, CustomizeUIThemeStepPanel.this));
     myInitial = false;
   }
 
   protected void initThemes(Collection<ThemeInfo> result) {
     if (SystemInfo.isMac) {
-      result.add(AQUA);
+      result.add(LafManagerImpl.useIntelliJInsteadOfAqua() ? INTELLIJ : AQUA);
       result.add(DARCULA);
     }
     else if (SystemInfo.isWindows) {

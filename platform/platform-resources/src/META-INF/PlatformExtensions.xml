@@ -2,9 +2,16 @@
   <extensions defaultExtensionNs="com.intellij">
     <errorHandler implementation="com.intellij.diagnostic.ITNReporter"/>
     <appStarter implementation="com.intellij.diff.applications.DiffApplication"/>
-    <appStarter implementation="com.intellij.openapi.diff.MergeApplication"/>
+    <appStarter implementation="com.intellij.diff.applications.MergeApplication"/>
     <appStarter implementation="com.intellij.ui.win.RecentProjectApplication"/>
     <appStarter implementation="com.intellij.help.impl.KeymapGenerator"/>
+
+    <applicationService serviceInterface="com.intellij.openapi.components.impl.stores.IComponentStore"
+                        serviceImplementation="com.intellij.configurationStore.ApplicationStoreImpl"/>
+    <applicationService serviceInterface="com.intellij.openapi.components.PathMacroManager"
+                        serviceImplementation="com.intellij.configurationStore.ApplicationPathMacroManager"/>
+
+    <applicationService serviceImplementation="com.intellij.configurationStore.DefaultProjectExportableAndSaveTrigger"/>
 
     <applicationService serviceImplementation="com.intellij.ide.GeneralSettings"/>
     <applicationService serviceInterface="com.intellij.ide.util.PropertiesComponent"
@@ -18,9 +25,6 @@
     <applicationService serviceInterface="com.intellij.openapi.vfs.tracker.VirtualFileTracker"
                         serviceImplementation="com.intellij.openapi.vfs.tracker.VirtualFileTrackerImpl"/>
 
-    <applicationService serviceInterface="com.intellij.concurrency.JobScheduler"
-                        serviceImplementation="com.intellij.concurrency.JobSchedulerImpl"/>
-
     <applicationService serviceInterface="com.intellij.openapi.options.ShowSettingsUtil"
                         serviceImplementation="com.intellij.ide.actions.ShowSettingsUtilImpl"/>
     <applicationService serviceInterface="com.intellij.openapi.help.HelpManager"
@@ -29,9 +33,10 @@
                         serviceImplementation="com.intellij.openapi.fileChooser.impl.FileChooserFactoryImpl"/>
     <applicationService serviceInterface="com.intellij.openapi.progress.ProgressManager"
                         serviceImplementation="com.intellij.openapi.progress.impl.ProgressManagerImpl"/>
+    <applicationService serviceInterface="com.intellij.openapi.application.TransactionGuard"
+                        serviceImplementation="com.intellij.openapi.application.TransactionGuardImpl"/>
 
     <applicationService serviceImplementation="com.intellij.ide.ui.customization.CustomActionsSchema"/>
-    <exportable serviceInterface="com.intellij.ide.ui.customization.CustomActionsSchema"/>
 
     <applicationService serviceInterface="com.intellij.openapi.project.DefaultProjectFactory"
                         serviceImplementation="com.intellij.openapi.project.DefaultProjectFactoryImpl"/>
@@ -58,8 +63,6 @@
 
     <applicationService serviceInterface="com.intellij.openapi.editor.EditorCopyPasteHelper"
                         serviceImplementation="com.intellij.openapi.editor.impl.EditorCopyPasteHelperImpl"/>
-
-    <applicationService serviceImplementation="com.intellij.openapi.options.ex.IdeConfigurablesGroup"/>
 
     <applicationService serviceInterface="com.intellij.diagnostic.ErrorReportConfigurable"
                         serviceImplementation="com.intellij.diagnostic.ErrorReportConfigurable"/>
@@ -95,11 +98,14 @@
                         serviceImplementation="com.intellij.diff.tools.util.base.TextDiffSettingsHolder"/>
     <applicationService serviceInterface="com.intellij.diff.tools.external.ExternalDiffSettings"
                         serviceImplementation="com.intellij.diff.tools.external.ExternalDiffSettings"/>
-    <applicationConfigurable groupId="tools" id="diff.base" displayName="Diff"
+    <applicationConfigurable groupId="tools" id="diff.base" displayName="Diff &amp; Merge"
                              instance="com.intellij.diff.settings.DiffSettingsConfigurable">
       <configurable id="diff.external" displayName="External Diff Tools"
                     instance="com.intellij.diff.settings.ExternalDiffSettingsConfigurable"/>
     </applicationConfigurable>
+    <statistics.usagesCollector implementation="com.intellij.diff.statistics.DiffUsagesCollector"/>
+    <colorAndFontPanelFactory implementation="com.intellij.openapi.diff.impl.settings.DiffColorsPageFactory"/>
+    <colorAndFontDescriptorProvider implementation="com.intellij.openapi.diff.impl.settings.DiffColorsPageFactory"/>
 
     <applicationService serviceInterface="com.intellij.ui.SystemNotifications"
                         serviceImplementation="com.intellij.ui.SystemNotificationsImpl"/>
@@ -125,10 +131,15 @@
                         serviceImplementation="com.intellij.codeInsight.hint.TooltipController"/>
     <applicationService serviceInterface="com.intellij.openapi.editor.actionSystem.EditorActionManager"
                         serviceImplementation="com.intellij.openapi.editor.impl.EditorActionManagerImpl"/>
+
     <applicationService serviceInterface="com.intellij.openapi.updateSettings.impl.UpdateSettings"
                         serviceImplementation="com.intellij.openapi.updateSettings.impl.UpdateSettings"/>
+    <applicationService serviceImplementation="com.intellij.openapi.updateSettings.UpdateStrategyCustomization"/>
     <applicationService serviceInterface="com.intellij.ide.plugins.InstalledPluginsState"
                         serviceImplementation="com.intellij.ide.plugins.InstalledPluginsState"/>
+    <applicationService serviceInterface="com.intellij.ide.externalComponents.ExternalComponentManager"
+                        serviceImplementation="com.intellij.ide.externalComponents.ExternalComponentManagerImpl"/>
+
     <applicationService serviceInterface="com.intellij.featureStatistics.FeatureUsageTracker"
                         serviceImplementation="com.intellij.featureStatistics.FeatureUsageTrackerImpl"/>
     <applicationService serviceInterface="com.intellij.featureStatistics.ProductivityFeaturesRegistry"
@@ -161,7 +172,9 @@
                         serviceImplementation="com.intellij.execution.process.impl.OSProcessManagerImpl"/>
 
     <applicationService serviceInterface="com.intellij.openapi.options.SchemesManagerFactory"
-                        serviceImplementation="com.intellij.openapi.options.SchemesManagerFactoryImpl"/>
+                        serviceImplementation="com.intellij.configurationStore.SchemeManagerFactoryBase$ApplicationSchemeManagerFactory"/>
+    <projectService serviceInterface="com.intellij.openapi.options.SchemesManagerFactory"
+                    serviceImplementation="com.intellij.configurationStore.SchemeManagerFactoryBase$ProjectSchemeManagerFactory"/>
 
     <applicationService serviceImplementation="com.intellij.openapi.editor.colors.ex.DefaultColorSchemesManager"/>
     <applicationService serviceInterface="com.intellij.openapi.editor.colors.TextAttributesKey$TextAttributeKeyDefaultsProvider"
@@ -194,6 +207,8 @@
 
     <applicationService serviceImplementation="com.intellij.ide.ui.UISettings"/>
 
+    <applicationService serviceInterface="com.intellij.ide.UiActivityMonitor" serviceImplementation="com.intellij.ide.UiActivityMonitorImpl"/>
+
     <projectService serviceInterface="com.intellij.openapi.vfs.ReadonlyStatusHandler"
                     serviceImplementation="com.intellij.openapi.vcs.readOnlyHandler.ReadonlyStatusHandlerImpl"/>
     <projectService serviceInterface="com.intellij.openapi.startup.StartupManager"
@@ -214,10 +229,10 @@
     <projectService serviceInterface="com.intellij.ui.content.MessageView"
                     serviceImplementation="com.intellij.ui.content.impl.MessageViewImpl"/>
 
-    <projectService serviceInterface="com.intellij.ui.tabs.FileColorSharedConfigurationManager"
-                    serviceImplementation="com.intellij.ui.tabs.FileColorSharedConfigurationManager"/>
+    <projectService serviceImplementation="com.intellij.ui.tabs.FileColorProjectLevelConfigurationManager"/>
 
     <projectService serviceInterface="com.intellij.openapi.project.DumbService" serviceImplementation="com.intellij.openapi.project.DumbServiceImpl"/>
+    <applicationService serviceInterface="com.intellij.openapi.project.DumbPermissionService" serviceImplementation="com.intellij.openapi.project.DumbPermissionServiceImpl"/>
 
     <projectService serviceInterface="com.intellij.psi.util.CachedValuesManager"
                     serviceImplementation="com.intellij.util.CachedValuesManagerImpl"/>
@@ -233,7 +248,7 @@
 
     <projectService serviceInterface="com.intellij.execution.testframework.autotest.AutoTestManager"
                     serviceImplementation="com.intellij.execution.testframework.autotest.AutoTestManager"/>
-    
+
     <projectService serviceInterface="com.intellij.execution.testframework.sm.TestHistoryConfiguration"
                     serviceImplementation="com.intellij.execution.testframework.sm.TestHistoryConfiguration"/>
     <projectService serviceInterface="com.intellij.openapi.vcs.VcsFileListenerContextHelper"
@@ -285,6 +300,7 @@
     <!--<applicationConfigurable instance="com.intellij.ui.switcher.QuickAccessConfigurable"/>-->
 
     <fileTypeFactory implementation="com.intellij.openapi.fileTypes.impl.PlatformFileTypeFactory"/>
+    <fileTypeFactory implementation="com.intellij.openapi.fileTypes.impl.InternalFileTypeFactory"/>
     <postStartupActivity implementation="com.intellij.openapi.fileTypes.impl.ApproveRemovedMappingsActivity"/>
     <applicationService serviceInterface="com.intellij.openapi.options.colors.ColorSettingsPages"
                         serviceImplementation="com.intellij.openapi.options.colors.pages.ColorSettingsPagesImpl"/>
@@ -308,8 +324,11 @@
     <scopeParserExtension implementation="com.intellij.psi.search.scope.packageSet.FilePackageSetParserExtension"/>
     <applicationService serviceInterface="com.intellij.openapi.ui.popup.StackingPopupDispatcher" serviceImplementation="com.intellij.ui.popup.StackingPopupDispatcherImpl"/>
 
+    <applicationService serviceImplementation="com.intellij.ide.RemoteDesktopDetector"/>
+
+    <projectService serviceImplementation="com.intellij.ui.switcher.SwitchManager"/>
+
     <fileEditorProvider implementation="com.intellij.openapi.fileEditor.impl.http.HttpFileEditorProvider"/>
-    <componentConfigurationMerger implementation="com.intellij.openapi.vcs.changes.shelf.ShelfManagerConfigurationMerger"/>
     <editorActionHandler action="EditorEscape" implementationClass="com.intellij.codeInsight.hint.EscapeHandler" id="hide-hints"/>
 
     <projectConfigurable groupId="language" groupWeight="110" instance="com.intellij.javaee.ExternalResourceConfigurable" key="display.name.edit.external.resource"
@@ -336,12 +355,14 @@
     <applicationConfigurable parentId="preferences.general" instance="com.intellij.internal.statistic.configurable.StatisticsConfigurable" id="usage.statistics"
                              displayName="Usage Statistics"/>
 
+    <vfs.local.pluggableFileWatcher implementation="com.intellij.openapi.vfs.impl.local.NativeFileWatcherImpl" />
+
     <virtualFileSystem key="dummy" implementationClass="com.intellij.openapi.vfs.ex.dummy.DummyFileSystem"/>
     <virtualFileSystem key="http" implementationClass="com.intellij.openapi.vfs.impl.http.HttpFileSystemImpl"/>
     <virtualFileSystem key="https" implementationClass="com.intellij.openapi.vfs.impl.http.HttpsFileSystem"/>
 
     <toolWindow id="Event Log" anchor="bottom" secondary="true"
-                icon="AllIcons.Ide.NoNotifications13"
+                icon="AllIcons.Ide.Notification.NoEvents"
                 factoryClass="com.intellij.notification.EventLogToolWindowFactory"/>
 
     <projectService serviceInterface="com.intellij.openapi.wm.impl.ProjectFrameBounds"
@@ -352,8 +373,11 @@
 
     <postStartupActivity implementation="com.intellij.ide.TipOfTheDayManager"/>
     <postStartupActivity implementation="com.intellij.ide.actions.PowerSaveModeNotifier"/>
-    <postStartupActivity implementation="com.intellij.openapi.actionSystem.impl.ActionPreloader"/>
     <postStartupActivity id="OpenFilesActivity" implementation="com.intellij.openapi.fileEditor.impl.OpenFilesActivity"/>
+    <postStartupActivity implementation="com.intellij.xml.breadcrumbs.BreadcrumbsInitializingActivity"/>
+
+    <preloadingActivity implementation="com.intellij.openapi.actionSystem.impl.ActionPreloader"/>
+    <preloadingActivity implementation="com.intellij.ide.ui.search.SearchableOptionPreloader"/>
 
     <writingAccessProvider implementation="com.intellij.openapi.fileEditor.impl.NonProjectFileWritingAccessProvider" order="first"/>
 
@@ -361,6 +385,8 @@
     <patch.extension implementation="com.intellij.openapi.diff.impl.patch.CharsetEP"/>
 
     <iconLayerProvider implementation="com.intellij.ide.LockedIconLayerProvider"/>
+
+    <enterHandlerDelegate implementation="com.intellij.psi.codeStyle.autodetect.DetectedIndentNotifier"/>
 
     <fileEditorProvider implementation="com.intellij.openapi.fileEditor.impl.text.LargeFileEditorProvider"/>
     <frameEditorComponentProvider implementation="com.intellij.openapi.wm.ex.DefaultFrameEditorComponentProvider"/>
@@ -393,5 +419,23 @@
 
     <ui.suitableFontProvider implementation="com.intellij.ui.SuitableFontProviderImpl"/>
 
+    <jbProtocolCommand implementation="com.intellij.openapi.project.impl.JBProtocolOpenProjectCommand"/>
+    <jbProtocolCommand implementation="com.intellij.openapi.application.JBProtocolShutdownCommand"/>
+
+    <intentionAction>
+      <className>com.intellij.openapi.editor.actions.FlipCommaIntention</className>
+    </intentionAction>
+
+
+    <projectService serviceImplementation="com.intellij.execution.startup.ProjectStartupLocalConfiguration"/>
+    <projectService serviceImplementation="com.intellij.execution.startup.ProjectStartupSharedConfiguration"/>
+    <projectService serviceImplementation="com.intellij.execution.startup.ProjectStartupTaskManager"/>
+    <projectConfigurable groupId="tools" instance="com.intellij.execution.startup.ProjectStartupConfigurable"
+                         displayName="Startup Tasks"
+                         id="preferences.startup.tasks" nonDefaultProject="true"/>
+    <postStartupActivity implementation="com.intellij.execution.startup.ProjectStartupRunner"/>
+
+    <applicationService serviceInterface="com.intellij.remote.ext.CredentialsManager"
+                        serviceImplementation="com.intellij.remote.ext.CredentialsManagerImpl"/>
   </extensions>
 </idea-plugin>

@@ -96,12 +96,12 @@ public class InspectionValidatorWrapper implements Validator {
 
   private class MyValidatorProcessingItem implements ProcessingItem {
     private final VirtualFile myVirtualFile;
-    private final PsiFile myPsiFile;
+    private final PsiManager myPsiManager;
     private PsiElementsValidityState myValidityState;
 
     public MyValidatorProcessingItem(@NotNull final PsiFile psiFile) {
-      myPsiFile = psiFile;
       myVirtualFile = psiFile.getVirtualFile();
+      myPsiManager = psiFile.getManager();
     }
 
     @Override
@@ -121,14 +121,18 @@ public class InspectionValidatorWrapper implements Validator {
 
     private PsiElementsValidityState computeValidityState() {
       final PsiElementsValidityState state = new PsiElementsValidityState();
-      for (PsiElement psiElement : myValidator.getDependencies(myPsiFile)) {
-        state.addDependency(psiElement);
+      final PsiFile psiFile = getPsiFile();
+      if (psiFile != null) {
+        for (PsiElement psiElement : myValidator.getDependencies(psiFile)) {
+          state.addDependency(psiElement);
+        }
       }
       return state;
     }
 
+    @Nullable 
     public PsiFile getPsiFile() {
-      return myPsiFile;
+      return myVirtualFile.isValid() ? myPsiManager.findFile(myVirtualFile) : null;
     }
   }
 
@@ -141,39 +145,33 @@ public class InspectionValidatorWrapper implements Validator {
     }
     final ExcludesConfiguration excludesConfiguration = ValidationConfiguration.getExcludedEntriesConfiguration(project);
     final List<ProcessingItem> items =
-      DumbService.getInstance(project).runReadActionInSmartMode(new Computable<List<ProcessingItem>>() {
-        @Override
-        public List<ProcessingItem> compute() {
-          final CompileScope compileScope = context.getCompileScope();
-          if (!myValidator.isAvailableOnScope(compileScope)) return null;
+      DumbService.getInstance(project).runReadActionInSmartMode((Computable<List<ProcessingItem>>)() -> {
+        final CompileScope compileScope = context.getCompileScope();
+        if (!myValidator.isAvailableOnScope(compileScope)) return null;
 
-          final ArrayList<ProcessingItem> items = new ArrayList<ProcessingItem>();
+        final ArrayList<ProcessingItem> items1 = new ArrayList<ProcessingItem>();
 
-          final Processor<VirtualFile> processor = new Processor<VirtualFile>() {
-            @Override
-            public boolean process(VirtualFile file) {
-              if (!file.isValid()) {
-                return true;
-              }
+        final Processor<VirtualFile> processor = file -> {
+          if (!file.isValid()) {
+            return true;
+          }
 
-              if (myCompilerManager.isExcludedFromCompilation(file) ||
-                  excludesConfiguration.isExcluded(file)) {
-                return true;
-              }
+          if (myCompilerManager.isExcludedFromCompilation(file) ||
+              excludesConfiguration.isExcluded(file)) {
+            return true;
+          }
 
-              final Module module = context.getModuleByFile(file);
-              if (module != null) {
-                final PsiFile psiFile = myPsiManager.findFile(file);
-                if (psiFile != null) {
-                  items.add(new MyValidatorProcessingItem(psiFile));
-                }
-              }
-              return true;
+          final Module module = context.getModuleByFile(file);
+          if (module != null) {
+            final PsiFile psiFile = myPsiManager.findFile(file);
+            if (psiFile != null) {
+              items1.add(new MyValidatorProcessingItem(psiFile));
             }
-          };
-          ContainerUtil.process(myValidator.getFilesToProcess(myPsiManager.getProject(), context), processor);
-          return items;
-        }
+          }
+          return true;
+        };
+        ContainerUtil.process(myValidator.getFilesToProcess(myPsiManager.getProject(), context), processor);
+        return items1;
       });
     if (items == null) return ProcessingItem.EMPTY_ARRAY;
 
@@ -205,7 +203,7 @@ public class InspectionValidatorWrapper implements Validator {
       try {
         ourCompilationThreads.set(Boolean.TRUE);
 
-        if (checkFile(inspections, item.getPsiFile(), context)) {
+        if (checkFile(inspections, item, context)) {
           processedItems.add(item);
         }
       }
@@ -217,25 +215,18 @@ public class InspectionValidatorWrapper implements Validator {
     return processedItems.toArray(new ProcessingItem[processedItems.size()]);
   }
 
-  private boolean checkFile(List<LocalInspectionTool> inspections, final PsiFile file, final CompileContext context) {
+  private boolean checkFile(List<LocalInspectionTool> inspections, final MyValidatorProcessingItem item, final CompileContext context) {
     boolean hasErrors = false;
-    if (!checkUnderReadAction(file, context, new Computable<Map<ProblemDescriptor, HighlightDisplayLevel>>() {
-      @Override
-      public Map<ProblemDescriptor, HighlightDisplayLevel> compute() {
-        return myValidator.checkAdditionally(file);
-      }
-    })) {
+    if (!checkUnderReadAction(item, context, () -> myValidator.checkAdditionally(item.getPsiFile()))) {
       hasErrors = true;
     }
 
-    if (!checkUnderReadAction(file, context, new Computable<Map<ProblemDescriptor, HighlightDisplayLevel>>() {
-      @Override
-      public Map<ProblemDescriptor, HighlightDisplayLevel> compute() {
-        if (file instanceof XmlFile) {
-          return runXmlFileSchemaValidation((XmlFile)file);
-        }
-        return Collections.emptyMap();
+    if (!checkUnderReadAction(item, context, () -> {
+      final PsiFile file = item.getPsiFile();
+      if (file instanceof XmlFile) {
+        return runXmlFileSchemaValidation((XmlFile)file);
       }
+      return Collections.emptyMap();
     })) {
       hasErrors = true;
     }
@@ -243,15 +234,13 @@ public class InspectionValidatorWrapper implements Validator {
 
     final InspectionProfile inspectionProfile = myProfileManager.getInspectionProfile();
     for (final LocalInspectionTool inspectionTool : inspections) {
-      if (!checkUnderReadAction(file, context, new Computable<Map<ProblemDescriptor, HighlightDisplayLevel>>() {
-        @Override
-        public Map<ProblemDescriptor, HighlightDisplayLevel> compute() {
-          if (getHighlightDisplayLevel(inspectionTool, inspectionProfile, file) != HighlightDisplayLevel.DO_NOT_SHOW) {
-            return runInspectionTool(file, inspectionTool, getHighlightDisplayLevel(inspectionTool, inspectionProfile, file)
-            );
-          }
-          return Collections.emptyMap();
+      if (!checkUnderReadAction(item, context, () -> {
+        final PsiFile file = item.getPsiFile();
+        if (file != null && getHighlightDisplayLevel(inspectionTool, inspectionProfile, file) != HighlightDisplayLevel.DO_NOT_SHOW) {
+          return runInspectionTool(file, inspectionTool, getHighlightDisplayLevel(inspectionTool, inspectionProfile, file)
+          );
         }
+        return Collections.emptyMap();
       })) {
         hasErrors = true;
       }
@@ -259,22 +248,20 @@ public class InspectionValidatorWrapper implements Validator {
     return !hasErrors;
   }
 
-  private boolean checkUnderReadAction(final PsiFile file, final CompileContext context, final Computable<Map<ProblemDescriptor, HighlightDisplayLevel>> runnable) {
-    return DumbService.getInstance(context.getProject()).runReadActionInSmartMode(new Computable<Boolean>() {
-      @Override
-      public Boolean compute() {
-        if (!file.isValid()) return false;
+  private boolean checkUnderReadAction(final MyValidatorProcessingItem item, final CompileContext context, final Computable<Map<ProblemDescriptor, HighlightDisplayLevel>> runnable) {
+    return DumbService.getInstance(context.getProject()).runReadActionInSmartMode(() -> {
+      final PsiFile file = item.getPsiFile();
+      if (file == null) return false;
 
-        final Document document = myPsiDocumentManager.getCachedDocument(file);
-        if (document != null && myPsiDocumentManager.isUncommited(document)) {
-          final String url = file.getViewProvider().getVirtualFile().getUrl();
-          context.addMessage(CompilerMessageCategory.WARNING, CompilerBundle.message("warning.text.file.has.been.changed"), url, -1, -1);
-          return false;
-        }
-
-        if (reportProblems(context, runnable.compute())) return false;
-        return true;
+      final Document document = myPsiDocumentManager.getCachedDocument(file);
+      if (document != null && myPsiDocumentManager.isUncommited(document)) {
+        final String url = file.getViewProvider().getVirtualFile().getUrl();
+        context.addMessage(CompilerMessageCategory.WARNING, CompilerBundle.message("warning.text.file.has.been.changed"), url, -1, -1);
+        return false;
       }
+
+      if (reportProblems(context, runnable.compute())) return false;
+      return true;
     });
   }
 
@@ -313,7 +300,19 @@ public class InspectionValidatorWrapper implements Validator {
                                                                                  final HighlightDisplayLevel level) {
     Map<ProblemDescriptor, HighlightDisplayLevel> problemsMap = new LinkedHashMap<ProblemDescriptor, HighlightDisplayLevel>();
     for (ProblemDescriptor descriptor : runInspectionOnFile(file, inspectionTool)) {
-      problemsMap.put(descriptor, level);
+      final ProblemHighlightType highlightType = descriptor.getHighlightType();
+
+      final HighlightDisplayLevel highlightDisplayLevel;
+      if (highlightType == ProblemHighlightType.WEAK_WARNING) {
+        highlightDisplayLevel = HighlightDisplayLevel.WEAK_WARNING;
+      }
+      else if (highlightType == ProblemHighlightType.INFORMATION) {
+        highlightDisplayLevel = HighlightDisplayLevel.DO_NOT_SHOW;
+      }
+      else {
+        highlightDisplayLevel = level;
+      }
+      problemsMap.put(descriptor, highlightDisplayLevel);
     }
     return problemsMap;
   }
@@ -328,14 +327,8 @@ public class InspectionValidatorWrapper implements Validator {
     final AnnotationHolderImpl holder = new AnnotationHolderImpl(new AnnotationSession(xmlFile));
 
     final List<ExternalAnnotator> annotators = ExternalLanguageAnnotators.allForFile(StdLanguages.XML, xmlFile);
-    for (ExternalAnnotator annotator : annotators) {
-      Object initial = annotator.collectInformation(xmlFile);
-      if (initial != null) {
-        Object result = annotator.doAnnotate(initial);
-        if (result != null) {
-          annotator.apply(xmlFile, result, holder);
-        }
-      }
+    for (ExternalAnnotator<?, ?> annotator : annotators) {
+      processAnnotator(xmlFile, holder, annotator);
     }
 
     if (!holder.hasAnnotations()) return Collections.emptyMap();
@@ -356,6 +349,16 @@ public class InspectionValidatorWrapper implements Validator {
       problemsMap.put(descriptor, level);
     }
     return problemsMap;
+  }
+
+  private static <X, Y> void processAnnotator(@NotNull XmlFile xmlFile, AnnotationHolderImpl holder, ExternalAnnotator<X, Y> annotator) {
+    X initial = annotator.collectInformation(xmlFile);
+    if (initial != null) {
+      Y result = annotator.doAnnotate(initial);
+      if (result != null) {
+        annotator.apply(xmlFile, result, holder);
+      }
+    }
   }
 
 

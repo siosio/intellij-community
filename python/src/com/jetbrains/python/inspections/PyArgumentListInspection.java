@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,10 +18,11 @@ package com.jetbrains.python.inspections;
 import com.google.common.collect.Lists;
 import com.intellij.codeInspection.LocalInspectionToolSession;
 import com.intellij.codeInspection.LocalQuickFix;
-import com.intellij.codeInspection.ProblemHighlightType;
 import com.intellij.codeInspection.ProblemsHolder;
 import com.intellij.lang.ASTNode;
 import com.intellij.psi.PsiElementVisitor;
+import com.intellij.psi.PsiPolyVariantReference;
+import com.intellij.psi.ResolveResult;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.jetbrains.python.PyBundle;
 import com.jetbrains.python.PyNames;
@@ -36,11 +37,12 @@ import com.jetbrains.python.psi.types.PyTypeChecker;
 import com.jetbrains.python.psi.types.TypeEvalContext;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
-import java.util.ArrayList;
-import java.util.EnumSet;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
+import java.util.Set;
 
 /**
  * Looks at argument lists.
@@ -108,17 +110,25 @@ public class PyArgumentListInspection extends PyInspection {
 
   public static void inspectPyArgumentList(PyArgumentList node, ProblemsHolder holder, final TypeEvalContext context, int implicitOffset) {
     if (node.getParent() instanceof PyClass) return; // class Foo(object) is also an arg list
-    CallArgumentsMapping result = node.analyzeCall(PyResolveContext.noImplicits().withTypeEvalContext(context), implicitOffset);
-    final PyCallExpression.PyMarkedCallee callee = result.getMarkedCallee();
+    final PyCallExpression callExpr = node.getCallExpression();
+    if (callExpr == null) {
+      return;
+    }
+    final PyResolveContext resolveContext = PyResolveContext.noImplicits().withTypeEvalContext(context);
+    final PyCallExpression.PyArgumentsMapping mapping = callExpr.mapArguments(resolveContext, implicitOffset);
+    final PyCallExpression.PyMarkedCallee callee = mapping.getMarkedCallee();
     if (callee != null) {
       final PyCallable callable = callee.getCallable();
-      // Decorate functions may have different parameter lists. We don't match arguments with parameters of decorators yet
-      if (callable instanceof PyFunction && PyUtil.hasCustomDecorators((PyFunction)callable)) {
-        return;
+      if (callable instanceof PyFunction) {
+        final PyFunction function = (PyFunction)callable;
+
+        // Decorate functions may have different parameter lists. We don't match arguments with parameters of decorators yet
+        if (PyUtil.hasCustomDecorators(function) || decoratedClassInitCall(callExpr.getCallee(), function)) {
+          return;
+        }
       }
     }
-    highlightIncorrectArguments(holder, result, context);
-    highlightMissingArguments(node, holder, result);
+    highlightParametersMismatch(node, holder, mapping);
     highlightStarArgumentTypeMismatch(node, holder, context);
   }
 
@@ -126,52 +136,17 @@ public class PyArgumentListInspection extends PyInspection {
     inspectPyArgumentList(node, holder, context, 0);
   }
 
-  private static void highlightIncorrectArguments(ProblemsHolder holder, CallArgumentsMapping result, @NotNull TypeEvalContext context) {
-    for (Map.Entry<PyExpression, EnumSet<CallArgumentsMapping.ArgFlag>> argEntry : result.getArgumentFlags().entrySet()) {
-      EnumSet<CallArgumentsMapping.ArgFlag> flags = argEntry.getValue();
-      if (!flags.isEmpty()) { // something's wrong
-        PyExpression arg = argEntry.getKey();
-        if (flags.contains(CallArgumentsMapping.ArgFlag.IS_DUP)) {
-          holder.registerProblem(arg, PyBundle.message("INSP.duplicate.argument"), new PyRemoveArgumentQuickFix());
-        }
-        if (flags.contains(CallArgumentsMapping.ArgFlag.IS_DUP_KWD)) {
-          holder.registerProblem(arg, PyBundle.message("INSP.duplicate.doublestar.arg"), new PyRemoveArgumentQuickFix());
-        }
-        if (flags.contains(CallArgumentsMapping.ArgFlag.IS_DUP_TUPLE)) {
-          holder.registerProblem(arg, PyBundle.message("INSP.duplicate.star.arg"), new PyRemoveArgumentQuickFix());
-        }
-        if (flags.contains(CallArgumentsMapping.ArgFlag.IS_POS_PAST_KWD)) {
-          holder.registerProblem(arg, PyBundle.message("INSP.cannot.appear.past.keyword.arg"), ProblemHighlightType.ERROR, new PyRemoveArgumentQuickFix());
-        }
-        if (flags.contains(CallArgumentsMapping.ArgFlag.IS_UNMAPPED)) {
-          ArrayList<LocalQuickFix> quickFixes = Lists.<LocalQuickFix>newArrayList(new PyRemoveArgumentQuickFix());
-          if (arg instanceof PyKeywordArgument) {
-            quickFixes.add(new PyRenameArgumentQuickFix());
-          }
-          holder.registerProblem(arg, PyBundle.message("INSP.unexpected.arg"), quickFixes.toArray(new LocalQuickFix[quickFixes.size()-1]));
-        }
-        if (flags.contains(CallArgumentsMapping.ArgFlag.IS_TOO_LONG)) {
-          final PyCallExpression.PyMarkedCallee markedCallee = result.getMarkedCallee();
-          String parameterName = null;
-          if (markedCallee != null) {
-            final List<PyParameter> parameters = PyUtil.getParameters(markedCallee.getCallable(), context);
-            for (int i = parameters.size() - 1; i >= 0; --i) {
-              final PyParameter param = parameters.get(i);
-              if (param instanceof PyNamedParameter) {
-                final List<PyNamedParameter> unmappedParams = result.getUnmappedParams();
-                if (!((PyNamedParameter)param).isPositionalContainer() && !((PyNamedParameter)param).isKeywordContainer() &&
-                    param.getDefaultValue() == null && !unmappedParams.contains(param)) {
-                  parameterName = param.getName();
-                  break;
-                }
-              }
-            }
-            holder.registerProblem(arg, parameterName != null ? PyBundle.message("INSP.multiple.values.resolve.to.positional.$0", parameterName)
-                                                              : PyBundle.message("INSP.more.args.that.pos.params"));
-          }
-        }
-      }
+  private static boolean decoratedClassInitCall(@Nullable PyExpression callee, @NotNull PyFunction function) {
+    if (callee instanceof PyReferenceExpression && PyUtil.isInit(function)) {
+      final PsiPolyVariantReference classReference = ((PyReferenceExpression)callee).getReference();
+
+      return Arrays
+        .stream(classReference.multiResolve(false))
+        .map(ResolveResult::getElement)
+        .anyMatch(element -> element instanceof PyClass && PyUtil.hasCustomDecorators((PyClass)element));
     }
+
+    return false;
   }
 
   private static void highlightStarArgumentTypeMismatch(PyArgumentList node, ProblemsHolder holder, TypeEvalContext context) {
@@ -197,13 +172,45 @@ public class PyArgumentListInspection extends PyInspection {
     }
   }
 
-  private static void highlightMissingArguments(PyArgumentList node, ProblemsHolder holder, CallArgumentsMapping result) {
+  private static Set<String> getDuplicateKeywordArguments(@NotNull PyArgumentList node) {
+    final Set<String> keywordArgumentNames = new HashSet<String>();
+    final Set<String> results = new HashSet<String>();
+    for (PyExpression argument : node.getArguments()) {
+      if (argument instanceof PyKeywordArgument) {
+        final String keyword = ((PyKeywordArgument)argument).getKeyword();
+        if (keywordArgumentNames.contains(keyword)) {
+          results.add(keyword);
+        }
+        keywordArgumentNames.add(keyword);
+      }
+    }
+    return results;
+  }
+
+  private static void highlightParametersMismatch(@NotNull PyArgumentList node, @NotNull ProblemsHolder holder,
+                                                  @NotNull PyCallExpression.PyArgumentsMapping mapping) {
+    final Set<String> duplicateKeywords = getDuplicateKeywordArguments(node);
+    for (PyExpression argument : mapping.getUnmappedArguments()) {
+      final List<LocalQuickFix> quickFixes = Lists.<LocalQuickFix>newArrayList(new PyRemoveArgumentQuickFix());
+      if (argument instanceof PyKeywordArgument) {
+        if (duplicateKeywords.contains(((PyKeywordArgument)argument).getKeyword())) {
+          continue;
+        }
+        quickFixes.add(new PyRenameArgumentQuickFix());
+      }
+      holder.registerProblem(argument, PyBundle.message("INSP.unexpected.arg"),
+                             quickFixes.toArray(new LocalQuickFix[quickFixes.size() - 1]));
+    }
+
     ASTNode our_node = node.getNode();
     if (our_node != null) {
       ASTNode close_paren = our_node.findChildByType(PyTokenTypes.RPAR);
       if (close_paren != null) {
-        for (PyNamedParameter param : result.getUnmappedParams()) {
-          holder.registerProblem(close_paren.getPsi(), PyBundle.message("INSP.parameter.$0.unfilled", param.getName()));
+        for (PyParameter parameter : mapping.getUnmappedParameters()) {
+          final String name = parameter.getName();
+          if (name != null) {
+            holder.registerProblem(close_paren.getPsi(), PyBundle.message("INSP.parameter.$0.unfilled", name));
+          }
         }
       }
     }

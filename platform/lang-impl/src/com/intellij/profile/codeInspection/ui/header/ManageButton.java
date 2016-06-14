@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,10 +18,8 @@ package com.intellij.profile.codeInspection.ui.header;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.DefaultActionGroup;
-import com.intellij.openapi.actionSystem.ex.CheckboxAction;
 import com.intellij.openapi.actionSystem.ex.ComboBoxAction;
 import com.intellij.openapi.project.DumbAware;
-import com.intellij.openapi.util.SystemInfo;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
@@ -48,7 +46,7 @@ public class ManageButton extends ComboBoxAction implements DumbAware {
   protected DefaultActionGroup createPopupActionGroup(JComponent button) {
     DefaultActionGroup group = new DefaultActionGroup();
 
-    group.add(new ShareToTeamCheckBoxAction());
+    group.add(new ShareWithTeamCheckBoxAction());
     group.addSeparator();
 
     group.add(new CopyAction());
@@ -63,19 +61,27 @@ public class ManageButton extends ComboBoxAction implements DumbAware {
     return group;
   }
 
-  private class ShareToTeamCheckBoxAction extends CheckboxAction implements DumbAware {
-    public ShareToTeamCheckBoxAction() {
-      super("Share to team members");
+  @Override
+  protected boolean shouldShowDisabledActions() {
+    return true;
+  }
+
+  private class ShareWithTeamCheckBoxAction extends AnAction implements DumbAware {
+    @Override
+    public void update(AnActionEvent e) {
+      final boolean isProjectLevel = myBuilder.isProjectLevel();
+      e.getPresentation().setText(isProjectLevel ? "Set as Global" : "Copy to Project");
+      e.getPresentation().setEnabled(myBuilder.canChangeProfileLevel());
     }
 
     @Override
-    public boolean isSelected(AnActionEvent e) {
-      return myBuilder.isSharedToTeamMembers();
-    }
-
-    @Override
-    public void setSelected(AnActionEvent e, boolean state) {
-      myBuilder.setShareToTeamMembers(state);
+    public void actionPerformed(AnActionEvent e) {
+      if (myBuilder.isProjectLevel()) {
+        myBuilder.setAsGlobal();
+      }
+      else {
+        myBuilder.moveToProject();
+      }
     }
   }
 

@@ -22,6 +22,7 @@ import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.Consumer;
+import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -44,7 +45,10 @@ public class BrowseFilesListener implements ActionListener {
   private final String myDescription;
   protected final FileChooserDescriptor myChooserDescriptor;
 
-  public BrowseFilesListener(JTextField textField, final String title, final String description, final FileChooserDescriptor chooserDescriptor) {
+  public BrowseFilesListener(JTextField textField,
+                             @Nls(capitalization = Nls.Capitalization.Title) String title,
+                             @Nls(capitalization = Nls.Capitalization.Sentence) String description,
+                             FileChooserDescriptor chooserDescriptor) {
     myTextField = textField;
     myTitle = title;
     myDescription = description;
@@ -74,11 +78,6 @@ public class BrowseFilesListener implements ActionListener {
     final VirtualFile fileToSelect = getFileToSelect();
     myChooserDescriptor.setTitle(myTitle); // important to set title and description here because a shared descriptor instance can be used
     myChooserDescriptor.setDescription(myDescription);
-    FileChooser.chooseFiles(myChooserDescriptor, null, fileToSelect, new Consumer<List<VirtualFile>>() {
-      @Override
-      public void consume(final List<VirtualFile> files) {
-        doSetText(FileUtil.toSystemDependentName(files.get(0).getPath()));
-      }
-    });
+    FileChooser.chooseFiles(myChooserDescriptor, null, fileToSelect, files -> doSetText(FileUtil.toSystemDependentName(files.get(0).getPath())));
   }
 }

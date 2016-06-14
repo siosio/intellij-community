@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -184,12 +184,10 @@ public class Mappings {
     }
   }
 
-  private void compensateRemovedContent(final Collection<File> compiled) {
-    if (compiled != null) {
-      for (final File file : compiled) {
-        if (!mySourceFileToClasses.containsKey(file)) {
-          mySourceFileToClasses.put(file, new HashSet<ClassRepr>());
-        }
+  private void compensateRemovedContent(final @NotNull Collection<File> compiled, final @NotNull Collection<File> compiledWithErrors) {
+    for (final File file : compiled) {
+      if (!compiledWithErrors.contains(file) && !mySourceFileToClasses.containsKey(file)) {
+        mySourceFileToClasses.put(file, new HashSet<ClassRepr>());
       }
     }
   }
@@ -716,6 +714,28 @@ public class Mappings {
       public abstract boolean checkResidence(final int residence);
     }
 
+    public class FileFilterConstraint extends UsageConstraint {
+      @NotNull
+      private final DependentFilesFilter myFilter;
+
+      public FileFilterConstraint(@NotNull DependentFilesFilter filter) {
+        myFilter = filter;
+      }
+
+      public boolean checkResidence(int residence) {
+        final Collection<File> fNames = myClassToSourceFile.get(residence);
+        if (fNames == null || fNames.isEmpty()) {
+          return true;
+        }
+        for (File fName : fNames) {
+          if (myFilter.accept(fName)) {
+            return true;
+          }
+        }
+        return false;
+      }
+    }
+
     public class PackageConstraint extends UsageConstraint {
       public final String packageName;
 
@@ -922,6 +942,7 @@ public class Mappings {
     final Mappings myDelta;
     final Collection<File> myFilesToCompile;
     final Collection<File> myCompiledFiles;
+    final Collection<File> myCompiledWithErrors;
     final Collection<File> myAffectedFiles;
     @Nullable
     final DependentFilesFilter myFilter;
@@ -1045,6 +1066,7 @@ public class Mappings {
       this.myDelta = delta;
       this.myFilesToCompile = null;
       this.myCompiledFiles = null;
+      this.myCompiledWithErrors = null;
       this.myAffectedFiles = null;
       this.myFilter = null;
       this.myConstantSearch = null;
@@ -1065,6 +1087,7 @@ public class Mappings {
       this.myDelta = delta;
       this.myFilesToCompile = filesToCompile;
       this.myCompiledFiles = null;
+      this.myCompiledWithErrors = null;
       this.myAffectedFiles = null;
       this.myFilter = null;
       this.myConstantSearch = null;
@@ -1079,6 +1102,7 @@ public class Mappings {
     private Differential(final Mappings delta,
                          final Collection<String> removed,
                          final Collection<File> filesToCompile,
+                         final Collection<File> compiledWithErrors,
                          final Collection<File> compiledFiles,
                          final Collection<File> affectedFiles,
                          @NotNull final DependentFilesFilter filter,
@@ -1088,6 +1112,7 @@ public class Mappings {
       this.myDelta = delta;
       this.myFilesToCompile = filesToCompile;
       this.myCompiledFiles = compiledFiles;
+      this.myCompiledWithErrors = compiledWithErrors;
       this.myAffectedFiles = affectedFiles;
       this.myFilter = filter;
       this.myConstantSearch = constantSearch;
@@ -1101,7 +1126,11 @@ public class Mappings {
     }
 
     private void processDisappearedClasses() {
-      myDelta.compensateRemovedContent(myFilesToCompile);
+      if (myFilesToCompile != null) {
+        myDelta.compensateRemovedContent(
+          myFilesToCompile, myCompiledWithErrors != null ? myCompiledWithErrors : Collections.<File>emptySet()
+        );
+      }
 
       if (!myEasyMode) {
         final Collection<String> removed = myDelta.myRemovedFiles;
@@ -1132,6 +1161,11 @@ public class Mappings {
         debug("Class is annotation, skipping method analysis");
         return;
       }
+
+      assert myFuture != null;
+      assert myPresent != null;
+      assert myAffectedFiles != null;
+
       Ref<ClassRepr> oldItRef = null;
       for (final MethodRepr m : added) {
         debug("Method: ", m.name);
@@ -1256,6 +1290,10 @@ public class Mappings {
       if (removed.isEmpty()) {
         return;
       }
+      assert myFuture != null;
+      assert myAffectedFiles != null;
+      assert myCompiledFiles != null;
+
       debug("Processing removed methods:");
       for (final MethodRepr m : removed) {
         debug("Method ", m.name);
@@ -1362,6 +1400,10 @@ public class Mappings {
         return;
       }
       debug("Processing changed methods:");
+
+      assert myFuture != null;
+      assert myAffectedFiles != null;
+
       for (final Pair<MethodRepr, Difference> mr : changed) {
         final MethodRepr m = mr.first;
         final MethodRepr.Diff d = (MethodRepr.Diff)mr.second;
@@ -1388,7 +1430,7 @@ public class Mappings {
           final Set<UsageRepr.Usage> usages = new HashSet<UsageRepr.Usage>();
 
           if (d.packageLocalOn()) {
-            debug("Method became package-local, affecting method usages outside the package");
+            debug("Method became package-private, affecting method usages outside the package");
             myFuture.affectMethodUsages(m, propagated, m.createUsage(myContext, it.name), usages, state.myDependants);
 
             for (final UsageRepr.Usage usage : usages) {
@@ -1448,7 +1490,7 @@ public class Mappings {
 
               if ((d.addedModifiers() & Opcodes.ACC_PROTECTED) > 0 && !((d.removedModifiers() & Opcodes.ACC_PRIVATE) > 0)) {
                 if (!constrained) {
-                  debug("Added public or package-local method became protected --- affect method usages with protected constraint");
+                  debug("Added public or package-private method became protected --- affect method usages with protected constraint");
                   if (!affected) {
                     myFuture.affectMethodUsages(m, propagated, m.createUsage(myContext, it.name), usages, state.myDependants);
                     state.myAffectedUsages.addAll(usages);
@@ -1472,6 +1514,11 @@ public class Mappings {
         return true;
       }
       debug("Processing added fields");
+
+      assert myFuture != null;
+      assert myPresent != null;
+      assert myCompiledFiles != null;
+      assert myAffectedFiles != null;
 
       for (final FieldRepr f : added) {
         debug("Field: ", f.name);
@@ -1535,23 +1582,23 @@ public class Mappings {
               // nothing
             }
             else {
-              Util.UsageConstraint constaint;
+              Util.UsageConstraint constraint;
 
               if ((ff.isProtected() && f.isPublic()) || (f.isProtected() && ff.isPublic()) || (ff.isPackageLocal() && f.isProtected())) {
-                constaint = myFuture.new NegationConstraint(myFuture.new InheritanceConstraint(cc.name));
+                constraint = myFuture.new NegationConstraint(myFuture.new InheritanceConstraint(cc.name));
               }
               else if (ff.isPublic() && ff.isPackageLocal()) {
-                constaint = myFuture.new NegationConstraint(myFuture.new PackageConstraint(cc.getPackageName()));
+                constraint = myFuture.new NegationConstraint(myFuture.new PackageConstraint(cc.getPackageName()));
               }
               else {
-                constaint =
+                constraint =
                   myFuture.new IntersectionConstraint(myFuture.new NegationConstraint(myFuture.new InheritanceConstraint(cc.name)),
                                                        myFuture.new NegationConstraint(
                                                          myFuture.new PackageConstraint(cc.getPackageName())));
               }
 
               for (final UsageRepr.Usage usage : localUsages) {
-                state.myUsageConstraints.put(usage, constaint);
+                state.myUsageConstraints.put(usage, constraint);
               }
             }
 
@@ -1569,6 +1616,8 @@ public class Mappings {
       if (removed.isEmpty()) {
         return true;
       }
+      assert myFuture != null;
+
       debug("Processing removed fields:");
 
       for (final FieldRepr f : removed) {
@@ -1577,6 +1626,7 @@ public class Mappings {
         if (!f.isPrivate() && (f.access & DESPERATE_MASK) == DESPERATE_MASK && f.hasValue()) {
           debug("Field had value and was (non-private) final static => a switch to non-incremental mode requested");
           if (myConstantSearch != null) {
+            assert myDelayedWorks != null;
             myDelayedWorks.addConstantWork(it.name, f, true, false);
           }
           else {
@@ -1601,6 +1651,7 @@ public class Mappings {
         return true;
       }
       debug("Processing changed fields:");
+      assert myFuture != null;
 
       for (final Pair<FieldRepr, Difference> f : changed) {
         final Difference d = f.second;
@@ -1619,6 +1670,7 @@ public class Mappings {
           if (harmful || valueChanged || becameLessAccessible) {
             debug("Inline field changed it's access or value => a switch to non-incremental mode requested");
             if (myConstantSearch != null) {
+              assert myDelayedWorks != null;
               myDelayedWorks.addConstantWork(it.name, field, false, accessChanged);
             }
             else {
@@ -1687,6 +1739,10 @@ public class Mappings {
       final Collection<Pair<ClassRepr, Difference>> changedClasses = state.myClassDiff.changed();
       if (!changedClasses.isEmpty()) {
         debug("Processing changed classes:");
+        assert myFuture != null;
+        assert myPresent != null;
+
+        final Util.FileFilterConstraint fileFilterConstraint = myFilter != null? myPresent.new FileFilterConstraint(myFilter) : null;
 
         for (final Pair<ClassRepr, Difference> changed : changedClasses) {
           final ClassRepr changedClass = changed.first;
@@ -1753,7 +1809,11 @@ public class Mappings {
                   @Override
                   public boolean execute(int className) {
                     debug("Affecting usages in generic type parameter bounds of class: ", className);
-                    state.myAffectedUsages.add(UsageRepr.createClassAsGenericBoundUsage(myContext, className));
+                    final UsageRepr.Usage usage = UsageRepr.createClassAsGenericBoundUsage(myContext, className);
+                    state.myAffectedUsages.add(usage);
+                    if (fileFilterConstraint != null) {
+                      state.myUsageConstraints.put(usage, fileFilterConstraint);
+                    }
 
                     final TIntHashSet depClasses = myClassToClassDependency.get(className);
                     if (depClasses != null) {
@@ -1788,7 +1848,7 @@ public class Mappings {
           }
 
           if (diff.packageLocalOn()) {
-            debug("Introduction of 'package local' access detected, adding class usage + package constraint to affected usages");
+            debug("Introduction of 'package-private' access detected, adding class usage + package constraint to affected usages");
             final UsageRepr.Usage usage = changedClass.createUsage();
 
             state.myAffectedUsages.add(usage);
@@ -1869,6 +1929,9 @@ public class Mappings {
       if (removed.isEmpty()) {
         return;
       }
+      assert myPresent != null;
+      assert myDelta.myChangedFiles != null;
+
       myDelta.myChangedFiles.add(fileName);
       
       debug("Processing removed classes:");
@@ -1896,6 +1959,9 @@ public class Mappings {
 
       if (!myEasyMode && myFilter != null) {
         // checking if this newly added class duplicates already existing one
+        assert myCompiledFiles != null;
+        assert myAffectedFiles != null;
+
         for (ClassRepr c : addedClasses) {
           if (!c.isLocal() && !c.isAnonymous() && isEmpty(c.getOuterClassName())) {
             final Set<File> candidates = new THashSet<File>(FileUtil.FILE_HASHING_STRATEGY);
@@ -1976,6 +2042,8 @@ public class Mappings {
     }
 
     private void affectCorrespondingSourceFiles(TIntHashSet toAffect) {
+      assert myAffectedFiles != null;
+
       toAffect.forEach(new TIntProcedure() {
         @Override
         public boolean execute(int depClass) {
@@ -1995,6 +2063,8 @@ public class Mappings {
 
     private void calculateAffectedFiles(final DiffState state) {
       debug("Checking dependent classes:");
+      assert myAffectedFiles != null;
+      assert myCompiledFiles != null;
 
       state.myDependants.forEach(new TIntProcedure() {
         @Override
@@ -2101,11 +2171,38 @@ public class Mappings {
             }
           }
 
+          // Now that the list of added classes is complete,
+          // check that super-classes of compiled classes are among newly added ones.
+          // Even if compiled class did not change, we should register 'added' superclass
+          // Consider situation for class B extends A:
+          // 1. file A is removed, make fails with error in file B
+          // 2. A is added back, B and A are compiled together in the second make session
+          // 3. Even if B did not change, A is considered as newly added and should be registered again in ClassToSubclasses dependencies
+          //    Without this code such registration will not happen because list of B's parents did not change
+          final Set<ClassRepr> addedClasses = myDelta.getAddedClasses();
+          if (!addedClasses.isEmpty()) {
+            final TIntHashSet addedNames = new TIntHashSet();
+            for (ClassRepr repr : addedClasses) {
+              addedNames.add(repr.name);
+            }
+            for (FileClasses compiledFile : newClasses) {
+              for (ClassRepr aClass : compiledFile.myFileClasses) {
+                for (int parent : aClass.getSupers()) {
+                  if (addedNames.contains(parent)) {
+                    myDelta.registerAddedSuperClass(aClass.name, parent);
+                  }
+                }
+              }
+            }
+          }
+
           debug("End of Differentiate.");
 
           if (myEasyMode) {
             return false;
           }
+          assert myAffectedFiles != null;
+          assert myDelayedWorks != null;
 
           final Collection<String> removed = myDelta.myRemovedFiles;
           if (removed != null) {
@@ -2117,6 +2214,7 @@ public class Mappings {
         }
         finally {
           if (myFilesToCompile != null) {
+            assert myDelta.myChangedFiles != null;
             // if some class is associated with several sources, 
             // some of them may not have been compiled in this round, so such files should be considered unchanged
             myDelta.myChangedFiles.retainAll(myFilesToCompile);
@@ -2140,11 +2238,12 @@ public class Mappings {
     (final Mappings delta,
      final Collection<String> removed,
      final Collection<File> filesToCompile,
+     final Collection<File> compiledWithErrors,
      final Collection<File> compiledFiles,
      final Collection<File> affectedFiles,
      @NotNull final DependentFilesFilter filter,
      @Nullable final Callbacks.ConstantAffectionResolver constantSearch) {
-    return new Differential(delta, removed, filesToCompile, compiledFiles, affectedFiles, filter, constantSearch).differentiate();
+    return new Differential(delta, removed, filesToCompile, compiledWithErrors, compiledFiles, affectedFiles, filter, constantSearch).differentiate();
   }
 
   private void cleanupBackDependency(final int className,
@@ -2463,7 +2562,9 @@ public class Mappings {
         }
         for (final String s : staticImports) {
           int i = s.length() - 1;
-          for (; s.charAt(i) != '.'; i--) ;
+          while (s.charAt(i) != '.') {
+            i--;
+          }
           final String anImport = s.substring(0, i);
           if (!anImport.endsWith("*")) {
             allImports.add(anImport); // filter out wildcard imports

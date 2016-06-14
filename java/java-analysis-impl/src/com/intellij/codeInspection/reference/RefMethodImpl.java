@@ -208,6 +208,9 @@ public class RefMethodImpl extends RefJavaElementImpl implements RefMethod {
     if (mySuperMethods.size() > 10) {
       LOG.info("method: " + getName() + " owner:" + getOwnerClass().getQualifiedName());
     }
+    if (getRefManager().isOfflineView()) {
+      LOG.debug("Should not traverse graph offline");
+    }
     return mySuperMethods;
   }
 
@@ -234,6 +237,7 @@ public class RefMethodImpl extends RefJavaElementImpl implements RefMethod {
   }
 
   private void initializeSuperMethods(PsiMethod method) {
+    if (getRefManager().isOfflineView()) return;
     for (PsiMethod psiSuperMethod : method.findSuperMethods()) {
       if (getRefManager().belongsToScope(psiSuperMethod)) {
         RefMethodImpl refSuperMethod = (RefMethodImpl)getRefManager().getReference(psiSuperMethod);
@@ -287,26 +291,7 @@ public class RefMethodImpl extends RefJavaElementImpl implements RefMethod {
 
     setBodyEmpty(isOnlyCallsSuper() || !isExternalOverride() && (body == null || body.getStatements().length == 0));
 
-    PsiType retType = method.getReturnType();
-    if (retType != null) {
-      PsiType psiType = retType;
-      RefClass ownerClass = refUtil.getOwnerClass(getRefManager(), method);
-
-      if (ownerClass != null) {
-        psiType = psiType.getDeepComponentType();
-
-        if (psiType instanceof PsiClassType) {
-          PsiClass psiClass = PsiUtil.resolveClassInType(psiType);
-          if (psiClass != null && getRefManager().belongsToScope(psiClass)) {
-              RefClassImpl refClass = (RefClassImpl) getRefManager().getReference(psiClass);
-            if (refClass != null) {
-              refClass.addTypeReference(ownerClass);
-              refClass.addClassExporter(this);
-            }
-          }
-        }
-      }
-    }
+    refUtil.addTypeReference(method, method.getReturnType(), getRefManager(), this);
 
     for (RefParameter parameter : getParameters()) {
       refUtil.setIsFinal(parameter, parameter.getElement().hasModifierProperty(PsiModifier.FINAL));
@@ -317,6 +302,7 @@ public class RefMethodImpl extends RefJavaElementImpl implements RefMethod {
 
   private void collectUncaughtExceptions(@NotNull PsiMethod method) {
     if (isExternalOverride()) return;
+    if (getRefManager().isOfflineView()) return;
     @NonNls final String name = method.getName();
     if (getOwnerClass().isTestCase() && name.startsWith("test")) return;
 
@@ -352,12 +338,7 @@ public class RefMethodImpl extends RefJavaElementImpl implements RefMethod {
   @Override
   public void accept(@NotNull final RefVisitor visitor) {
     if (visitor instanceof RefJavaVisitor) {
-      ApplicationManager.getApplication().runReadAction(new Runnable() {
-        @Override
-        public void run() {
-          ((RefJavaVisitor)visitor).visitMethod(RefMethodImpl.this);
-        }
-      });
+      ApplicationManager.getApplication().runReadAction(() -> ((RefJavaVisitor)visitor).visitMethod(RefMethodImpl.this));
     } else {
       super.accept(visitor);
     }
@@ -446,20 +427,17 @@ public class RefMethodImpl extends RefJavaElementImpl implements RefMethod {
   public String getName() {
     if (isValid()) {
       final String[] result = new String[1];
-      final Runnable runnable = new Runnable() {
-        @Override
-        public void run() {
-          PsiMethod psiMethod = (PsiMethod) getElement();
-          if (psiMethod instanceof SyntheticElement) {
-            result[0] = psiMethod.getName();
-          }
-          else {
-            result[0] = PsiFormatUtil.formatMethod(psiMethod,
-                                                   PsiSubstitutor.EMPTY,
-                                                   PsiFormatUtilBase.SHOW_NAME | PsiFormatUtilBase.SHOW_PARAMETERS,
-                                                   PsiFormatUtilBase.SHOW_TYPE
-            );
-          }
+      final Runnable runnable = () -> {
+        PsiMethod psiMethod = (PsiMethod) getElement();
+        if (psiMethod instanceof SyntheticElement) {
+          result[0] = psiMethod.getName();
+        }
+        else {
+          result[0] = PsiFormatUtil.formatMethod(psiMethod,
+                                                 PsiSubstitutor.EMPTY,
+                                                 PsiFormatUtilBase.SHOW_NAME | PsiFormatUtilBase.SHOW_PARAMETERS,
+                                                 PsiFormatUtilBase.SHOW_TYPE
+          );
         }
       };
 
@@ -474,13 +452,10 @@ public class RefMethodImpl extends RefJavaElementImpl implements RefMethod {
   @Override
   public String getExternalName() {
     final String[] result = new String[1];
-    final Runnable runnable = new Runnable() {
-      @Override
-      public void run() {
-        final PsiMethod psiMethod = (PsiMethod)getElement();
-        LOG.assertTrue(psiMethod != null);
-        result[0] = PsiFormatUtil.getExternalName(psiMethod);
-      }
+    final Runnable runnable = () -> {
+      final PsiMethod psiMethod = (PsiMethod)getElement();
+      LOG.assertTrue(psiMethod != null);
+      result[0] = PsiFormatUtil.getExternalName(psiMethod, true, Integer.MAX_VALUE);
     };
 
     ApplicationManager.getApplication().runReadAction(runnable);
@@ -648,6 +623,9 @@ public class RefMethodImpl extends RefJavaElementImpl implements RefMethod {
   @Override
   @Nullable
   public PsiClass[] getUnThrownExceptions() {
+    if (getRefManager().isOfflineView()) {
+      LOG.debug("Should not traverse graph offline");
+    }
     if (myUnThrownExceptions == null) return null;
     JavaPsiFacade facade = JavaPsiFacade.getInstance(myManager.getProject());
     List<PsiClass> result = new ArrayList<PsiClass>(myUnThrownExceptions.size());

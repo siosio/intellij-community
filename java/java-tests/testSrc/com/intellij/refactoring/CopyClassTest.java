@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ package com.intellij.refactoring;
 
 import com.intellij.JavaTestUtil;
 import com.intellij.codeInsight.CodeInsightTestCase;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.util.Computable;
@@ -34,6 +35,7 @@ import com.intellij.testFramework.PsiTestUtil;
 import com.intellij.util.IncorrectOperationException;
 
 import java.io.File;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 
@@ -52,6 +54,10 @@ public class CopyClassTest extends CodeInsightTestCase {
     doTest("Foo", "Bar");
   }
 
+  public void testRecursiveTypes() throws Exception {
+    doTest("Foo", "Bar");
+  }
+
   public void testLibraryClass() throws Exception {  // IDEADEV-28791
     JavaCodeStyleSettings javaSettings = getCurrentCodeStyleSettings().getCustomSettings(JavaCodeStyleSettings.class);
     javaSettings.CLASS_NAMES_IN_JAVADOC = JavaCodeStyleSettings.FULLY_QUALIFY_NAMES_ALWAYS;
@@ -64,7 +70,7 @@ public class CopyClassTest extends CodeInsightTestCase {
     PsiTestUtil.removeAllRoots(myModule, IdeaTestUtil.getMockJdk17("java 1.5"));
     myRootDir = PsiTestUtil.createTestProjectStructure(myProject, myModule, root, myFilesToDelete);
 
-    PsiElement element = performAction(oldName, copyName);
+    performAction(oldName, copyName);
 
     myProject.getComponent(PostprocessReformattingAspect.class).doPostponedFormatting();
     FileDocumentManager.getInstance().saveAllDocuments();
@@ -75,10 +81,10 @@ public class CopyClassTest extends CodeInsightTestCase {
     PlatformTestUtil.assertFilesEqual(fileExpected, fileAfter);
   }
 
-  private PsiElement performAction(final String oldName, final String copyName) throws IncorrectOperationException {
+  private void performAction(final String oldName, final String copyName) throws IncorrectOperationException {
     final PsiClass oldClass = JavaPsiFacade.getInstance(myProject).findClass(oldName, ProjectScope.getAllScope(myProject));
 
-    return WriteCommandAction.runWriteCommandAction(null, (Computable<PsiElement>)() -> CopyClassesHandler.doCopyClasses(
+    WriteCommandAction.runWriteCommandAction(null, (Computable<Collection<PsiFile>>)() -> CopyClassesHandler.doCopyClasses(
           Collections.singletonMap(oldClass.getNavigationElement().getContainingFile(), new PsiClass[]{oldClass}), copyName,
           myPsiManager.findDirectory(myRootDir),
           myProject));
@@ -89,6 +95,10 @@ public class CopyClassTest extends CodeInsightTestCase {
   }
 
   public void testPackageLocalMethods() throws Exception {
+    doMultifileTest();
+  }
+
+  public void testPackageLocalAndExtends() throws Exception {
     doMultifileTest();
   }
 
@@ -109,11 +119,15 @@ public class CopyClassTest extends CodeInsightTestCase {
     }
 
     final VirtualFile targetVDir = rootDir.findChild("p2");
-    CopyClassesHandler.doCopyClasses(map, null, myPsiManager.findDirectory(targetVDir), myProject);
+    ApplicationManager.getApplication().runWriteAction(() -> {
+      CopyClassesHandler.doCopyClasses(map, null, myPsiManager.findDirectory(targetVDir), myProject);
+    });
+
 
     String rootAfter = root + "/after";
     VirtualFile rootDir2 = LocalFileSystem.getInstance().findFileByPath(rootAfter.replace(File.separatorChar, '/'));
-    myProject.getComponent(PostprocessReformattingAspect.class).doPostponedFormatting();
+    ApplicationManager.getApplication().runWriteAction(() -> myProject.getComponent(PostprocessReformattingAspect.class).doPostponedFormatting());
+
     PlatformTestUtil.assertDirectoriesEqual(rootDir2, rootDir);
   }
 

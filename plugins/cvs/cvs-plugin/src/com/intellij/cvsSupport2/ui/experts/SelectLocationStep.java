@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.fileChooser.FileSystemTree;
 import com.intellij.openapi.fileChooser.FileSystemTreeFactory;
+import com.intellij.openapi.fileChooser.ex.FileChooserDialogImpl;
 import com.intellij.openapi.fileChooser.ex.FileDrop;
 import com.intellij.openapi.fileChooser.ex.FileTextFieldImpl;
 import com.intellij.openapi.fileChooser.ex.LocalFsFinder;
@@ -141,9 +142,7 @@ public abstract class SelectLocationStep extends WizardStep {
     myNorthPanel.add(toolbarPanel, BorderLayout.NORTH);
     panel.add(myNorthPanel, BorderLayout.NORTH);
     panel.add(ScrollPaneFactory.createScrollPane(myFileSystemTree.getTree()), BorderLayout.CENTER);
-    panel.add(new JLabel(
-      "<html><center><small><font color=gray>Drag and drop a file into the space above to quickly locate it in the tree.</font></small></center></html>",
-      SwingConstants.CENTER), BorderLayout.SOUTH);
+    panel.add(new JLabel(FileChooserDialogImpl.DRAG_N_DROP_HINT, SwingConstants.CENTER), BorderLayout.SOUTH);
     myUiUpdater = new MergingUpdateQueue("FileChooserUpdater", 200, false, panel);
     Disposer.register(myFileSystemTree, myUiUpdater);
     new UiNotifyConnector(panel, myUiUpdater);
@@ -195,17 +194,15 @@ public abstract class SelectLocationStep extends WizardStep {
 
     myUiUpdater.queue(new Update("treeFromPath.1") {
       public void run() {
-        ApplicationManager.getApplication().executeOnPooledThread(new Runnable() {
-          public void run() {
-            final LocalFsFinder.VfsFile toFind = (LocalFsFinder.VfsFile)myPathTextField.getFile();
-            if (toFind == null || !toFind.exists()) return;
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+          final LocalFsFinder.VfsFile toFind = (LocalFsFinder.VfsFile)myPathTextField.getFile();
+          if (toFind == null || !toFind.exists()) return;
 
-            myUiUpdater.queue(new Update("treeFromPath.2") {
-              public void run() {
-                selectInTree(toFind.getFile(), text);
-              }
-            });
-          }
+          myUiUpdater.queue(new Update("treeFromPath.2") {
+            public void run() {
+              selectInTree(toFind.getFile(), text);
+            }
+          });
         });
       }
     });
@@ -265,11 +262,7 @@ public abstract class SelectLocationStep extends WizardStep {
       }
     }
 
-    myPathTextField.setText(text, now, new Runnable() {
-      public void run() {
-        myPathTextField.getField().selectAll();
-      }
-    });
+    myPathTextField.setText(text, now, () -> myPathTextField.getField().selectAll());
   }
 
 

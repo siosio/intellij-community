@@ -31,7 +31,7 @@ public class DummyHolder extends PsiFileImpl {
   private final CharTable myTable;
   private final Boolean myExplicitlyValid;
   private final Language myLanguage;
-  private volatile FileElement myFileElement = null;
+  private volatile FileElement myFileElement;
   @SuppressWarnings("EmptyClass") private static class DummyHolderTreeLock {}
   private final DummyHolderTreeLock myTreeElementLock = new DummyHolderTreeLock();
 
@@ -93,13 +93,13 @@ public class DummyHolder extends PsiFileImpl {
 
   @Override
   public PsiElement getContext() {
-    return myContext;
+    return myContext != null && myContext.isValid() ? myContext : super.getContext();
   }
 
   @Override
   public boolean isValid() {
     if (myExplicitlyValid != null) return myExplicitlyValid.booleanValue();
-    return super.isValid() && !(myContext != null && !myContext.isValid());
+    return super.isValid();
   }
 
   @Override
@@ -115,8 +115,9 @@ public class DummyHolder extends PsiFileImpl {
   @Override
   @NotNull
   public FileType getFileType() {
-    if (myContext != null) {
-      PsiFile containingFile = myContext.getContainingFile();
+    PsiElement context = getContext();
+    if (context != null) {
+      PsiFile containingFile = context.getContainingFile();
       if (containingFile != null) return containingFile.getFileType();
     }
     final LanguageFileType fileType = myLanguage.getAssociatedFileType();
@@ -124,6 +125,7 @@ public class DummyHolder extends PsiFileImpl {
   }
 
   @Override
+  @NotNull
   public FileElement getTreeElement() {
     FileElement fileElement = myFileElement;
     if (fileElement != null) return fileElement;
@@ -161,12 +163,17 @@ public class DummyHolder extends PsiFileImpl {
     return psiClone;
   }
 
-  private FileViewProvider myViewProvider = null;
+  private FileViewProvider myViewProvider;
 
   @Override
   @NotNull
   public FileViewProvider getViewProvider() {
     if(myViewProvider != null) return myViewProvider;
     return super.getViewProvider();
+  }
+
+  @Override
+  public boolean useStrongRefs() {
+    return true;
   }
 }

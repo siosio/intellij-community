@@ -39,19 +39,17 @@ public class PythonToolWindowConsoleRunner extends PydevConsoleRunner {
   private ToolWindow myToolWindow;
 
   public PythonToolWindowConsoleRunner(@NotNull Project project,
-                                          @NotNull Sdk sdk,
-                                          @NotNull PyConsoleType consoleType,
-                                          @Nullable String workingDir, Map<String, String> environmentVariables,
-                                          String ... statementsToExecute) {
-    super(project, sdk, consoleType, workingDir, environmentVariables, statementsToExecute);
+                                       @NotNull Sdk sdk,
+                                       @NotNull PyConsoleType consoleType,
+                                       @Nullable String workingDir, Map<String, String> environmentVariables,
+                                       @NotNull PyConsoleOptions.PyConsoleSettings settingsProvider,
+                                       String... statementsToExecute) {
+    super(project, sdk, consoleType, workingDir, environmentVariables, settingsProvider, statementsToExecute);
   }
 
   @Override
   public void open() {
-    getToolWindow().activate(new Runnable() {
-      @Override
-      public void run() {
-      }
+    getToolWindow().activate(() -> {
     }, true);
   }
 

@@ -1,3 +1,18 @@
+/*
+ * Copyright 2000-2016 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.intellij.structuralsearch;
 
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer;
@@ -5,6 +20,7 @@ import com.intellij.codeInsight.template.JavaCodeContextType;
 import com.intellij.codeInsight.template.TemplateContextType;
 import com.intellij.codeInsight.template.TemplateManager;
 import com.intellij.dupLocator.iterators.NodeIterator;
+import com.intellij.ide.highlighter.JavaFileType;
 import com.intellij.lang.Language;
 import com.intellij.lang.java.JavaLanguage;
 import com.intellij.openapi.editor.Document;
@@ -32,6 +48,8 @@ import com.intellij.structuralsearch.plugin.replace.impl.Replacer;
 import com.intellij.structuralsearch.plugin.ui.Configuration;
 import com.intellij.structuralsearch.plugin.ui.SearchContext;
 import com.intellij.structuralsearch.plugin.ui.UIUtil;
+import com.intellij.util.ArrayUtil;
+import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -150,6 +168,24 @@ public class JavaStructuralSearchProfile extends StructuralSearchProfile {
     return file;
   }
 
+  @NotNull
+  @Override
+  public PsiElement getPresentableElement(PsiElement element) {
+    if (element instanceof PsiReferenceExpression) {
+      final PsiElement parent = element.getParent();
+      if (parent instanceof PsiMethodCallExpression) {
+        return parent;
+      }
+    }
+    else if (element instanceof PsiJavaCodeReferenceElement) {
+      final PsiElement parent = element.getParent();
+      if (parent instanceof PsiTypeElement || parent instanceof PsiNewExpression || parent instanceof PsiAnnotation) {
+        return parent;
+      }
+    }
+    return element;
+  }
+
   public void compile(PsiElement[] elements, @NotNull GlobalCompilingVisitor globalVisitor) {
     elements[0].getParent().accept(new JavaCompilingVisitor(globalVisitor));
   }
@@ -194,16 +230,32 @@ public class JavaStructuralSearchProfile extends StructuralSearchProfile {
     if (physical) {
       throw new UnsupportedOperationException(getClass() + " cannot create physical PSI");
     }
-    PsiElementFactory elementFactory = JavaPsiFacade.getInstance(project).getElementFactory();
+    final PsiElementFactory elementFactory = JavaPsiFacade.getInstance(project).getElementFactory();
     if (context == PatternTreeContext.Block) {
-      PsiElement element = elementFactory.createStatementFromText("{\n" + text + "\n}", null);
+      final PsiElement element = elementFactory.createStatementFromText("{\n" + text + "\n}", null);
       final PsiElement[] children = ((PsiBlockStatement)element).getCodeBlock().getChildren();
       final int extraChildCount = 4;
 
       if (children.length > extraChildCount) {
         PsiElement[] result = new PsiElement[children.length - extraChildCount];
-        final int extraChildStart = 2;
-        System.arraycopy(children, extraChildStart, result, 0, children.length - extraChildCount);
+        System.arraycopy(children, 2, result, 0, children.length - extraChildCount);
+
+        if (shouldTryExpressionPattern(result)) {
+          try {
+            final PsiElement[] expressionPattern =
+              createPatternTree(text, PatternTreeContext.Expression, fileType, language, contextName, extension, project, false);
+            if (expressionPattern.length == 1) {
+              result = expressionPattern;
+            }
+          } catch (IncorrectOperationException ignore) {}
+        }
+        else if (shouldTryClassPattern(result)) {
+          final PsiElement[] classPattern =
+            createPatternTree(text, PatternTreeContext.Class, fileType, language, contextName, extension, project, false);
+          if (classPattern.length == 1) {
+            result = classPattern;
+          }
+        }
         return result;
       }
       else {
@@ -211,8 +263,7 @@ public class JavaStructuralSearchProfile extends StructuralSearchProfile {
       }
     }
     else if (context == PatternTreeContext.Class) {
-      PsiElement element = elementFactory.createStatementFromText("class A {\n" + text + "\n}", null);
-      PsiClass clazz = (PsiClass)((PsiDeclarationStatement)element).getDeclaredElements()[0];
+      final PsiClass clazz = elementFactory.createClassFromText(text, null);
       PsiElement startChild = clazz.getLBrace();
       if (startChild != null) startChild = startChild.getNextSibling();
 
@@ -220,18 +271,69 @@ public class JavaStructuralSearchProfile extends StructuralSearchProfile {
       if (endChild != null) endChild = endChild.getPrevSibling();
       if (startChild == endChild) return PsiElement.EMPTY_ARRAY; // nothing produced
 
+      final PsiCodeBlock codeBlock = elementFactory.createCodeBlock();
       final List<PsiElement> result = new ArrayList<PsiElement>(3);
       assert startChild != null;
       for (PsiElement el = startChild.getNextSibling(); el != endChild && el != null; el = el.getNextSibling()) {
         if (el instanceof PsiErrorElement) continue;
-        result.add(el);
+        result.add(codeBlock.add(el));
       }
 
       return PsiUtilCore.toPsiElementArray(result);
     }
-    else {
-      return PsiFileFactory.getInstance(project).createFileFromText("__dummy.java", text).getChildren();
+    else if (context == PatternTreeContext.Expression) {
+      final PsiExpression expression = elementFactory.createExpressionFromText(text, null);
+      final PsiBlockStatement statement = (PsiBlockStatement)elementFactory.createStatementFromText("{\na\n}", null);
+      final PsiElement[] children = statement.getCodeBlock().getChildren();
+      if (children.length != 5) return PsiElement.EMPTY_ARRAY;
+      final PsiExpressionStatement childStatement = (PsiExpressionStatement)children[2];
+      childStatement.getExpression().replace(expression);
+      return new PsiElement[] { childStatement };
     }
+    else {
+      return PsiFileFactory.getInstance(project).createFileFromText("__dummy.java", JavaFileType.INSTANCE, text).getChildren();
+    }
+  }
+
+  private static boolean shouldTryExpressionPattern(PsiElement[] elements) {
+    if (elements.length >= 1 && elements.length <= 3) {
+      final PsiElement firstElement = elements[0];
+      if (firstElement instanceof PsiDeclarationStatement) {
+        final PsiElement lastChild = firstElement.getLastChild();
+        if (lastChild instanceof PsiErrorElement && PsiTreeUtil.prevLeaf(lastChild) instanceof PsiErrorElement) {
+          // Because an identifier followed by < (less than) is parsed as the start of a declaration
+          // in com.intellij.lang.java.parser.StatementParser.parseStatement() line 236
+          // but it could just be a comparison
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private static boolean shouldTryClassPattern(PsiElement[] elements) {
+    if (elements.length < 2) {
+      return false;
+    }
+    final PsiElement firstElement = elements[0];
+    final PsiElement secondElement = elements[1];
+
+    if (firstElement instanceof PsiDeclarationStatement && PsiTreeUtil.lastChild(firstElement) instanceof PsiErrorElement) {
+      // might be method
+      return true;
+    }
+    else if (firstElement instanceof PsiErrorElement &&
+             secondElement instanceof PsiExpressionStatement &&
+             PsiTreeUtil.lastChild(secondElement) instanceof PsiErrorElement) {
+      // might be generic method
+      return true;
+    }
+    else if (elements.length == 3 && PsiModifier.STATIC.equals(firstElement.getText()) && secondElement instanceof PsiWhiteSpace &&
+        elements[2] instanceof PsiBlockStatement) {
+      // looks like static initializer
+      return true;
+    }
+    return false;
   }
 
   @NotNull
@@ -315,7 +417,7 @@ public class JavaStructuralSearchProfile extends StructuralSearchProfile {
       private void checkModifier(final String name) {
         if (!MatchOptions.INSTANCE_MODIFIER_NAME.equals(name) &&
             !PsiModifier.PACKAGE_LOCAL.equals(name) &&
-            Arrays.binarySearch(JavaMatchingVisitor.MODIFIERS, name) < 0
+            ArrayUtil.find(JavaMatchingVisitor.MODIFIERS, name) < 0
           ) {
           throw new MalformedPatternException(SSRBundle.message("invalid.modifier.type",name));
         }
@@ -324,13 +426,35 @@ public class JavaStructuralSearchProfile extends StructuralSearchProfile {
       @Override
       public void visitErrorElement(PsiErrorElement element) {
         super.visitErrorElement(element);
-        //final PsiElement parent = element.getParent();
-        //if (parent != myCurrent || !"';' expected".equals(element.getErrorDescription())) {
-        //  throw new MalformedPatternException(element.getErrorDescription());
-        //}
+        final PsiElement parent = element.getParent();
+        final String errorDescription = element.getErrorDescription();
+        if (parent instanceof PsiClass && "Identifier expected".equals(errorDescription)) {
+          // other class content variable.
+          return;
+        }
+        if (parent instanceof PsiTryStatement && "'catch' or 'finally' expected".equals(errorDescription)) {
+          // searching for naked try allowed
+          return;
+        }
+        if (parent == myCurrent) {
+          // search for expression, type, annotation or symbol
+          if ("';' expected".equals(errorDescription)) {
+            // expression
+            return;
+          }
+          if ("Identifier or type expected".equals(errorDescription)) {
+            // annotation
+            return;
+          }
+          if ("Identifier expected".equals(errorDescription)) {
+            // type
+            return;
+          }
+        }
+        throw new MalformedPatternException(errorDescription);
       }
 
-      public void setCurrent(PsiElement current) {
+      void setCurrent(PsiElement current) {
         myCurrent = current;
       }
     }
@@ -340,7 +464,8 @@ public class JavaStructuralSearchProfile extends StructuralSearchProfile {
     final NodeIterator nodes = compiledPattern.getNodes();
     while (nodes.hasNext()) {
       final PsiElement current = nodes.current();
-      visitor.setCurrent(nodeCount == 1 && current instanceof PsiExpressionStatement ? current : null);
+      visitor.setCurrent((nodeCount == 1 && (current instanceof PsiExpressionStatement|| current instanceof PsiDeclarationStatement))
+                         ? current : null);
       current.accept(visitor);
       nodes.advance();
     }
@@ -370,7 +495,15 @@ public class JavaStructuralSearchProfile extends StructuralSearchProfile {
     if (searchIsExpression && statements[0].getFirstChild() instanceof PsiModifierList && statements2.length == 0) {
       return;
     }
-    if (searchIsExpression != replaceIsExpression) {
+    boolean targetFound = false;
+    for (final String name : matchOptions.getVariableConstraintNames()) {
+      final MatchVariableConstraint constraint = matchOptions.getVariableConstraint(name);
+      if (constraint.isPartOfSearchResults()) {
+        targetFound = true;
+        break;
+      }
+    }
+    if (!targetFound && searchIsExpression != replaceIsExpression) {
       throw new UnsupportedPatternException(
         searchIsExpression ? SSRBundle.message("replacement.template.is.not.expression.error.message") :
         SSRBundle.message("search.template.is.not.expression.error.message")
@@ -455,7 +588,7 @@ public class JavaStructuralSearchProfile extends StructuralSearchProfile {
         handleMethodParameter(buf, info, matchMap);
         replacementString = buf.toString();
       }
-      else if (match.getAllSons().size() > 0 && !match.isScopeMatch()) {
+      else if (match.hasSons() && !match.isScopeMatch()) {
         // compound matches
         StringBuilder buf = new StringBuilder();
         MatchResult r = null;
@@ -475,7 +608,7 @@ public class JavaStructuralSearchProfile extends StructuralSearchProfile {
               }
             }
             else if (info.isStatementContext()) {
-              final PsiElement previousElement = previous.getMatchRef().getElement();
+              final PsiElement previousElement = previous.getMatch();
 
               if (!(previousElement instanceof PsiComment) &&
                   ( buf.charAt(buf.length() - 1) != '}' ||
@@ -610,6 +743,7 @@ public class JavaStructuralSearchProfile extends StructuralSearchProfile {
     return element instanceof PsiIdentifier;
   }
 
+  @NotNull
   @Override
   public Collection<String> getReservedWords() {
     return Collections.singleton(PsiModifier.PACKAGE_LOCAL);
@@ -645,15 +779,15 @@ public class JavaStructuralSearchProfile extends StructuralSearchProfile {
     }
   }
 
-  private static void appendParameter(final StringBuilder buf, final MatchResult _matchResult) {
-    for(Iterator<MatchResult> j = _matchResult.getAllSons().iterator();j.hasNext();) {
-      buf.append(j.next().getMatchImage()).append(' ').append(j.next().getMatchImage());
-    }
+  private static void appendParameter(final StringBuilder buf, final MatchResult matchResult) {
+    final List<MatchResult> sons = matchResult.getAllSons();
+    assert sons.size() == 1;
+    buf.append(sons.get(0).getMatchImage()).append(' ').append(matchResult.getMatchImage());
   }
 
   private static void removeExtraSemicolonForSingleVarInstanceInMultipleMatch(final ParameterInfo info, MatchResult r, StringBuilder buf) {
     if (info.isStatementContext()) {
-      final PsiElement element = r.getMatchRef().getElement();
+      final PsiElement element = r.getMatch();
 
       // remove extra ;
       if (buf.charAt(buf.length()-1)==';' &&

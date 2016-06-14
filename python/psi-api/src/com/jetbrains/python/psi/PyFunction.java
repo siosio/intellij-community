@@ -33,20 +33,12 @@ import java.util.List;
  *
  * @author yole
  */
-public interface PyFunction
-extends
-  PsiNamedElement, StubBasedPsiElement<PyFunctionStub>,
-  PsiNameIdentifierOwner, PyStatement, PyCallable, NameDefiner, PyDocStringOwner, ScopeOwner, PyDecoratable, PyTypedElement,
-  PyStatementListContainer{
+public interface PyFunction extends PsiNamedElement, StubBasedPsiElement<PyFunctionStub>, PsiNameIdentifierOwner, PyStatement, PyCallable,
+                                    PyDocStringOwner, ScopeOwner, PyDecoratable, PyTypedElement, PyStatementListContainer,
+                                    PyPossibleClassMember, PyTypeCommentOwner {
 
   PyFunction[] EMPTY_ARRAY = new PyFunction[0];
-  ArrayFactory<PyFunction> ARRAY_FACTORY = new ArrayFactory<PyFunction>() {
-    @NotNull
-    @Override
-    public PyFunction[] create(int count) {
-      return new PyFunction[count];
-    }
-  };
+  ArrayFactory<PyFunction> ARRAY_FACTORY = count -> new PyFunction[count];
 
   /**
    * Returns the AST node for the function name identifier.
@@ -56,9 +48,6 @@ extends
    */
   @Nullable
   ASTNode getNameNode();
-
-  @Nullable
-  PyClass getContainingClass();
 
   @Nullable
   PyType getReturnTypeFromDocString();
@@ -78,6 +67,8 @@ extends
    */
   @Nullable
   Modifier getModifier();
+
+  boolean isAsync();
 
   /**
    * Flags that mark common alterations of a function: decoration by and wrapping in classmethod() and staticmethod().
@@ -103,7 +94,6 @@ extends
 
   @Nullable
   PyAnnotation getAnnotation();
-
 
   /**
    * Searches for function attributes.

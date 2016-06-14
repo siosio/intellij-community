@@ -13,11 +13,9 @@ import java.nio.file.attribute.BasicFileAttributes
  * Records a list of files in the root directory and deletes files that were not re-generated.
  */
 class FileSet(private val rootDir: Path) {
-  SuppressWarnings("MismatchedQueryAndUpdateOfCollection")
-  private val unusedFiles: THashSet<Path>
+  private val unusedFiles = THashSet<Path>()
 
   init {
-    unusedFiles = THashSet<Path>()
     Files.walkFileTree(rootDir, object : SimpleFileVisitor<Path>() {
       override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult {
         return if (Files.isHidden(dir)) FileVisitResult.SKIP_SUBTREE else FileVisitResult.CONTINUE
@@ -39,18 +37,16 @@ class FileSet(private val rootDir: Path) {
   }
 
   fun deleteOtherFiles() {
-    unusedFiles.forEach(object : TObjectProcedure<Path> {
-      override fun execute(path: Path): Boolean {
-        if (Files.deleteIfExists(path)) {
-          val parent = path.getParent()
-          Files.newDirectoryStream(parent).use { stream ->
-            if (!stream.iterator().hasNext()) {
-              Files.delete(parent)
-            }
+    unusedFiles.forEach(TObjectProcedure<Path> { it ->
+      if (Files.deleteIfExists(it)) {
+        val parent = it.parent
+        Files.newDirectoryStream(parent).use { stream ->
+          if (!stream.iterator().hasNext()) {
+            Files.delete(parent)
           }
         }
-        return true
       }
+      true
     })
   }
 }

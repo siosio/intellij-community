@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ import com.intellij.execution.ui.ConsoleViewContentType;
 import com.intellij.execution.ui.RunnerLayoutUi;
 import com.intellij.execution.ui.layout.PlaceInGrid;
 import com.intellij.icons.AllIcons;
+import com.intellij.notification.NotificationGroup;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.ActionPlaces;
 import com.intellij.openapi.actionSystem.AnAction;
@@ -65,17 +66,19 @@ import java.util.Queue;
 public class MvcConsole implements Disposable {
 
   private static final Key<Boolean> UPDATING_BY_CONSOLE_PROCESS = Key.create("UPDATING_BY_CONSOLE_PROCESS");
-
   private static final Logger LOG = Logger.getInstance("#org.jetbrains.plugins.groovy.mvc.MvcConsole");
+  @NonNls private static final String CONSOLE_ID = "Groovy MVC Console";
+
+  @NonNls public static final String TOOL_WINDOW_ID = "Console";
+  public static final NotificationGroup NOTIFICATION_GROUP = NotificationGroup.toolWindowGroup("Mvc notifications", TOOL_WINDOW_ID);
+
   private final ConsoleViewImpl myConsole;
   private final Project myProject;
   private final ToolWindow myToolWindow;
   private final JPanel myPanel = new JPanel(new BorderLayout());
   private final Queue<MyProcessInConsole> myProcessQueue = new LinkedList<MyProcessInConsole>();
 
-  @NonNls private static final String CONSOLE_ID = "Groovy MVC Console";
 
-  @NonNls public static final String TOOL_WINDOW_ID = "Console";
 
   private final MyKillProcessAction myKillAction = new MyKillProcessAction();
   private boolean myExecuting = false;
@@ -148,7 +151,7 @@ public class MvcConsole implements Disposable {
 
     public MyProcessInConsole(final Module module,
                               final GeneralCommandLine commandLine,
-                              final Runnable onDone,
+                              @Nullable final Runnable onDone,
                               final boolean showConsole,
                               final boolean closeOnDone,
                               final String[] input) {
@@ -252,11 +255,10 @@ public class MvcConsole implements Disposable {
     myConsole.print(commandLine.getCommandLineString(), ConsoleViewContentType.SYSTEM_OUTPUT);
     final OSProcessHandler handler;
     try {
-      Process process = commandLine.createProcess();
-      handler = new OSProcessHandler(process);
+      handler = new OSProcessHandler(commandLine);
 
       @SuppressWarnings("IOResourceOpenedButNotSafelyClosed")
-      OutputStreamWriter writer = new OutputStreamWriter(process.getOutputStream());
+      OutputStreamWriter writer = new OutputStreamWriter(handler.getProcess().getOutputStream());
       for (String s : input) {
         writer.write(s);
       }
@@ -274,29 +276,23 @@ public class MvcConsole implements Disposable {
         public void processTerminated(ProcessEvent event) {
           final int exitCode = event.getExitCode();
           if (exitCode == 0 && !gotError.get().booleanValue()) {
-            ApplicationManager.getApplication().invokeLater(new Runnable() {
-              @Override
-              public void run() {
-                if (myProject.isDisposed() || !closeOnDone) return;
-                myToolWindow.hide(null);
-              }
+            ApplicationManager.getApplication().invokeLater(() -> {
+              if (myProject.isDisposed() || !closeOnDone) return;
+              myToolWindow.hide(null);
             }, modalityState);
           }
         }
       });
     }
     catch (final Exception e) {
-      ApplicationManager.getApplication().invokeLater(new Runnable() {
-        @Override
-        public void run() {
-          Messages.showErrorDialog(e.getMessage(), "Cannot Start Process");
+      ApplicationManager.getApplication().invokeLater(() -> {
+        Messages.showErrorDialog(e.getMessage(), "Cannot Start Process");
 
-          try {
-            if (onDone != null && !module.isDisposed()) onDone.run();
-          }
-          catch (Exception e) {
-            LOG.error(e);
-          }
+        try {
+          if (onDone != null && !module.isDisposed()) onDone.run();
+        }
+        catch (Exception e1) {
+          LOG.error(e1);
         }
       }, modalityState);
       return;
@@ -311,40 +307,34 @@ public class MvcConsole implements Disposable {
     myContent.setDisplayName((framework == null ? "" : framework.getDisplayName() + ":") + "Executing...");
     myConsole.scrollToEnd();
     myConsole.attachToProcess(handler);
-    ApplicationManager.getApplication().executeOnPooledThread(new Runnable() {
-      @Override
-      public void run() {
-        handler.startNotify();
-        handler.waitFor();
+    ApplicationManager.getApplication().executeOnPooledThread(() -> {
+      handler.startNotify();
+      handler.waitFor();
 
-        ApplicationManager.getApplication().invokeLater(new Runnable() {
-          @Override
-          public void run() {
-            if (myProject.isDisposed()) return;
+      ApplicationManager.getApplication().invokeLater(() -> {
+        if (myProject.isDisposed()) return;
 
-            module.putUserData(UPDATING_BY_CONSOLE_PROCESS, true);
-            LocalFileSystem.getInstance().refresh(false);
-            module.putUserData(UPDATING_BY_CONSOLE_PROCESS, null);
+        module.putUserData(UPDATING_BY_CONSOLE_PROCESS, true);
+        LocalFileSystem.getInstance().refresh(false);
+        module.putUserData(UPDATING_BY_CONSOLE_PROCESS, null);
 
-            try {
-              if (onDone != null && !module.isDisposed()) onDone.run();
-            }
-            catch (Exception e) {
-              LOG.error(e);
-            }
-            myConsole.print("\n", ConsoleViewContentType.NORMAL_OUTPUT);
-            myKillAction.setHandler(null);
-            myContent.setDisplayName("");
+        try {
+          if (onDone != null && !module.isDisposed()) onDone.run();
+        }
+        catch (Exception e) {
+          LOG.error(e);
+        }
+        myConsole.print("\n", ConsoleViewContentType.NORMAL_OUTPUT);
+        myKillAction.setHandler(null);
+        myContent.setDisplayName("");
 
-            myExecuting = false;
+        myExecuting = false;
 
-            final MyProcessInConsole pic = myProcessQueue.poll();
-            if (pic != null) {
-              executeProcessImpl(pic, false);
-            }
-          }
-        }, modalityState);
-      }
+        final MyProcessInConsole pic1 = myProcessQueue.poll();
+        if (pic1 != null) {
+          executeProcessImpl(pic1, false);
+        }
+      }, modalityState);
     });
   }
 

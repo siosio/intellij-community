@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -93,6 +93,7 @@ public class PyNames {
   public static final String FAKE_FUNCTION = "__function";
   public static final String FAKE_METHOD = "__method";
   public static final String FAKE_NAMEDTUPLE = "__namedtuple";
+  public static final String FAKE_COROUTINE = "__coroutine";
 
   public static final String FUTURE_MODULE = "__future__";
   public static final String UNICODE_LITERALS = "unicode_literals";
@@ -138,6 +139,7 @@ public class PyNames {
   public static final String CALLABLE = "Callable";
   public static final String SEQUENCE = "Sequence";
   public static final String MAPPING = "Mapping";
+  public static final String ASYNC_ITERABLE = "AsyncIterable";
 
   public static final String ABC_NUMBER = "Number";
   public static final String ABC_COMPLEX = "Complex";
@@ -159,9 +161,11 @@ public class PyNames {
   public static final String NEG = "__neg__";
   public static final String DIV = "__div__";
   public static final String TRUEDIV = "__truediv__";
+  public static final String AITER = "__aiter__";
 
   public static final String NAME = "__name__";
   public static final String ENTER = "__enter__";
+  public static final String EXIT = "__exit__";
 
   public static final String CALLABLE_BUILTIN = "callable";
   public static final String NAMEDTUPLE = "namedtuple";
@@ -265,6 +269,7 @@ public class PyNames {
   private static final BuiltinDescription _self_other_descr = new BuiltinDescription("(self, other)");
   private static final BuiltinDescription _self_item_descr = new BuiltinDescription("(self, item)");
   private static final BuiltinDescription _self_key_descr = new BuiltinDescription("(self, key)");
+  private static final BuiltinDescription _exit_descr = new BuiltinDescription("(self, exc_type, exc_val, exc_tb)");
 
   private static final ImmutableMap<String, BuiltinDescription> BuiltinMethods = ImmutableMap.<String, BuiltinDescription>builder()
     .put("__abs__", _only_self_descr)
@@ -290,7 +295,7 @@ public class PyNames {
       //_BuiltinMethods.put("__doc__", _only_self_descr);
       //_BuiltinMethods.put("__docformat__", _only_self_descr);
     .put("__enter__", _only_self_descr)
-    .put("__exit__", new BuiltinDescription("(self, exc_type, exc_val, exc_tb)"))
+    .put("__exit__", _exit_descr)
     .put("__eq__", _self_other_descr)
       //_BuiltinMethods.put("__file__", _only_self_descr);
     .put("__float__", _only_self_descr)
@@ -355,7 +360,7 @@ public class PyNames {
     .put("__rmod__", _self_other_descr)
     .put("__rmul__", _self_other_descr)
     .put("__ror__", _self_other_descr)
-    .put("__rpow__", new BuiltinDescription("(self, power, modulo=None)"))
+    .put("__rpow__", _self_other_descr)
     .put("__rrshift__", _self_other_descr)
     .put("__rshift__", _self_other_descr)
     .put("__rsub__", _self_other_descr)
@@ -387,6 +392,7 @@ public class PyNames {
     .put("__bool__", _only_self_descr)
     .put("__bytes__", _only_self_descr)
     .put("__format__", new BuiltinDescription("(self, format_spec)"))
+    .put("__prepare__", new BuiltinDescription("(metacls, name, bases)"))
     .put("__round__", new BuiltinDescription("(self, n=None)"))
     .put(DUNDER_NEXT, _only_self_descr)
     .build();
@@ -396,6 +402,11 @@ public class PyNames {
     .put("__imatmul__", _self_other_descr)
     .put("__matmul__", _self_other_descr)
     .put("__rmatmul__", _self_other_descr)
+    .put("__await__", _only_self_descr)
+    .put("__aenter__", _only_self_descr)
+    .put("__aexit__", _exit_descr)
+    .put(AITER, _only_self_descr)
+    .put("__anext__", _only_self_descr)
     .build();
 
   public static ImmutableMap<String, BuiltinDescription> getBuiltinMethods(LanguageLevel level) {
@@ -450,6 +461,8 @@ public class PyNames {
   public static final String IN = "in";
   public static final String NOT = "not";
   public static final String LAMBDA = "lambda";
+  public static final String ASYNC = "async";
+  public static final String AWAIT = "await";
 
   /**
    * Contains keywords as of CPython 2.5.
@@ -474,7 +487,7 @@ public class PyNames {
     EXCEPT,
     IMPORT,
     PRINT,
-    __CLASS__,
+    CLASS,
     EXEC,
     IN,
     RAISE,

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -57,26 +57,21 @@ public class LookupActionsStep extends BaseListPopupStep<LookupElementAction> im
   public PopupStep onChosen(LookupElementAction selectedValue, boolean finalChoice) {
     final LookupElementAction.Result result = selectedValue.performLookupAction();
     if (result == LookupElementAction.Result.HIDE_LOOKUP) {
-      myLookup.hide();
+      myLookup.hideLookup(true);
     } else if (result == LookupElementAction.Result.REFRESH_ITEM) {
       myLookup.updateLookupWidth(myLookupElement);
       myLookup.requestResize();
       myLookup.refreshUi(false, true);
     } else if (result instanceof LookupElementAction.Result.ChooseItem) {
       myLookup.setCurrentItem(((LookupElementAction.Result.ChooseItem)result).item);
-      CommandProcessor.getInstance().executeCommand(myLookup.getEditor().getProject(), new Runnable() {
-        @Override
-        public void run() {
-          myLookup.finishLookup(Lookup.AUTO_INSERT_SELECT_CHAR);
-        }
-      }, null, null);
+      CommandProcessor.getInstance().executeCommand(myLookup.getProject(), () -> myLookup.finishLookup(Lookup.AUTO_INSERT_SELECT_CHAR), null, null);
     }
     return FINAL_CHOICE;
   }
 
   @Override
   public Icon getIconFor(LookupElementAction aValue) {
-    return LookupCellRenderer.augmentIcon(aValue.getIcon(), myEmptyIcon);
+    return LookupCellRenderer.augmentIcon(myLookup.getEditor(), aValue.getIcon(), myEmptyIcon);
   }
 
   @NotNull

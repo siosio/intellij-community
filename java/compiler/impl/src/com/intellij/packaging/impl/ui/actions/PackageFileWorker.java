@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -69,12 +69,8 @@ public class PackageFileWorker {
   }
 
   public static void startPackagingFiles(Project project, List<VirtualFile> files, Artifact[] artifacts, final @NotNull Runnable onFinishedInAwt) {
-    startPackagingFiles(project, files, artifacts, true).doWhenProcessed(new Runnable() {
-      @Override
-      public void run() {
-        ApplicationManager.getApplication().invokeLater(onFinishedInAwt);
-      }
-    });
+    startPackagingFiles(project, files, artifacts, true).doWhenProcessed(
+      () -> ApplicationManager.getApplication().invokeLater(onFinishedInAwt));
   }
 
   public static ActionCallback startPackagingFiles(final Project project, final List<VirtualFile> files,
@@ -88,7 +84,7 @@ public class PackageFileWorker {
             indicator.checkCanceled();
             new ReadAction() {
               @Override
-              protected void run(final Result result) {
+              protected void run(@NotNull final Result result) {
                 try {
                   packageFile(file, project, artifacts, packIntoArchives);
                 }

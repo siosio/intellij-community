@@ -58,13 +58,7 @@ public class JBTerminalSystemSettingsProvider extends DefaultTabbedSettingsProvi
     UISettings.getInstance().addUISettingsListener(new UISettingsListener() {
       @Override
       public void uiSettingsChanged(UISettings source) {
-        int size;
-        if (UISettings.getInstance().PRESENTATION_MODE) {
-          size = UISettings.getInstance().PRESENTATION_MODE_FONT_SIZE;
-        }
-        else {
-          size = myColorScheme.getGlobal().getConsoleFontSize();
-        }
+        int size = consoleFontSize(JBTerminalSystemSettingsProvider.this.myColorScheme);
 
         if (myColorScheme.getConsoleFontSize() != size) {
           myColorScheme.setConsoleFontSize(size);
@@ -80,6 +74,17 @@ public class JBTerminalSystemSettingsProvider extends DefaultTabbedSettingsProvi
         fireFontChanged();
       }
     }, this);
+  }
+
+  private static int consoleFontSize(MyColorSchemeDelegate colorScheme) {
+    int size;
+    if (UISettings.getInstance().PRESENTATION_MODE) {
+      size = UISettings.getInstance().PRESENTATION_MODE_FONT_SIZE;
+    }
+    else {
+      size = colorScheme.getGlobal().getConsoleFontSize();
+    }
+    return size;
   }
 
   @Override
@@ -100,6 +105,11 @@ public class JBTerminalSystemSettingsProvider extends DefaultTabbedSettingsProvi
   @Override
   public KeyStroke[] getPreviousTabKeyStrokes() {
     return getKeyStrokesByActionId("PreviousTab");
+  }
+
+  @Override
+  public KeyStroke[] getFindKeyStrokes() {
+    return getKeyStrokesByActionId("Find");
   }
 
   @Override
@@ -149,6 +159,12 @@ public class JBTerminalSystemSettingsProvider extends DefaultTabbedSettingsProvi
   public TextStyle getSelectionColor() {
     return new TextStyle(TerminalColor.awt(myColorScheme.getColor(EditorColors.SELECTION_FOREGROUND_COLOR)),
                          TerminalColor.awt(myColorScheme.getColor(EditorColors.SELECTION_BACKGROUND_COLOR)));
+  }
+
+  @Override
+  public TextStyle getFoundPatternColor() {
+    return new TextStyle(TerminalColor.awt(myColorScheme.getAttributes(EditorColors.TEXT_SEARCH_RESULT_ATTRIBUTES).getForegroundColor()),
+                         TerminalColor.awt(myColorScheme.getAttributes(EditorColors.TEXT_SEARCH_RESULT_ATTRIBUTES).getBackgroundColor()));
   }
 
   @Override
@@ -258,10 +274,11 @@ public class JBTerminalSystemSettingsProvider extends DefaultTabbedSettingsProvi
     private String myFaceName = null;
     private EditorColorsScheme myGlobalScheme;
 
-    private int myConsoleFontSize = -1;
+    private int myConsoleFontSize;
 
     private MyColorSchemeDelegate(@Nullable final EditorColorsScheme globalScheme) {
       updateGlobalScheme(globalScheme);
+      myConsoleFontSize = consoleFontSize(this);
       initFonts();
     }
 

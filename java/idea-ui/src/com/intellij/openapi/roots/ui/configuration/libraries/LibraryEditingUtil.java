@@ -182,17 +182,12 @@ public class LibraryEditingUtil {
 
           @Override
           public Icon getIconFor(LibraryType aValue) {
-            return aValue != null ? aValue.getIcon() : PlatformIcons.LIBRARY_ICON;
+            return aValue != null ? aValue.getIcon(null) : PlatformIcons.LIBRARY_ICON;
           }
 
           @Override
           public PopupStep onChosen(final LibraryType selectedValue, boolean finalChoice) {
-            return doFinalStep(new Runnable() {
-              @Override
-              public void run() {
-                action.run(selectedValue);
-              }
-            });
+            return doFinalStep(() -> action.run(selectedValue));
           }
         };
   }

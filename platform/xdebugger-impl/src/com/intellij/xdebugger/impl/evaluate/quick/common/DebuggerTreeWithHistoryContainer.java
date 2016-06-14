@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,7 +43,7 @@ import java.util.List;
 abstract class DebuggerTreeWithHistoryContainer<D> {
   private static final Logger LOG = Logger.getInstance(DebuggerTreeWithHistoryContainer.class);
   private static final int HISTORY_SIZE = 11;
-  private final List<D> myHistory = new ArrayList<D>();
+  private final List<D> myHistory = new ArrayList<>();
   private int myCurrentIndex = -1;
   protected final DebuggerTreeCreator<D> myTreeCreator;
   @NotNull protected final Project myProject;
@@ -138,7 +138,7 @@ abstract class DebuggerTreeWithHistoryContainer<D> {
   }
 
   private class SetAsRootAction extends AnAction {
-    private Tree myTree;
+    private final Tree myTree;
 
     public SetAsRootAction(Tree tree) {
       super(XDebuggerBundle.message("xdebugger.popup.value.tree.set.root.action.tooltip"),
@@ -161,12 +161,9 @@ abstract class DebuggerTreeWithHistoryContainer<D> {
           @Override
           public void onSuccess(final D value) {
             if (value != null) {
-              ApplicationManager.getApplication().invokeLater(new Runnable() {
-                @Override
-                public void run() {
-                  addToHistory(value);
-                  updateTree(value);
-                }
+              ApplicationManager.getApplication().invokeLater(() -> {
+                addToHistory(value);
+                updateTree(value);
               });
             }
           }

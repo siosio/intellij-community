@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,8 +14,7 @@
  * limitations under the License.
  */
 
-package org.jetbrains.plugins.groovy.lang.resolve;
-
+package org.jetbrains.plugins.groovy.lang.resolve
 
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.vfs.VfsUtil
@@ -23,13 +22,11 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiReference
-import org.intellij.lang.annotations.Language
 import org.jetbrains.annotations.NonNls
 import org.jetbrains.annotations.Nullable
 import org.jetbrains.plugins.groovy.LightGroovyTestCase
 import org.jetbrains.plugins.groovy.lang.psi.api.GroovyResolveResult
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.GrReferenceExpression
-
 /**
  * @author ven
  */
@@ -37,7 +34,7 @@ public abstract class GroovyResolveTestCase extends LightGroovyTestCase {
   @NonNls protected static final String MARKER = "<ref>";
 
   @Override
-  protected void setUp() {
+  void setUp() {
     super.setUp();
     if (new File("$myFixture.testDataPath/${getTestName(true)}").exists()) {
       myFixture.copyDirectoryToProject(getTestName(true), "");
@@ -76,7 +73,7 @@ public abstract class GroovyResolveTestCase extends LightGroovyTestCase {
     return ref;
   }
 
-  protected <T extends PsiReference> T configureByText(String fileName = '_a.groovy', @Language("Groovy") String text, Class<T> refType = PsiReference) {
+  protected <T extends PsiReference> T configureByText(String fileName = '_a.groovy', String text, Class<T> refType = PsiReference) {
     myFixture.configureByText fileName, text
     final ref = myFixture.file.findReferenceAt(myFixture.editor.caretModel.offset)
     assertInstanceOf(ref, refType)
@@ -93,7 +90,7 @@ public abstract class GroovyResolveTestCase extends LightGroovyTestCase {
   }
 
   @Nullable
-  protected <T extends PsiElement> T resolveByText(@Language("Groovy") String text, Class<T> type = null) {
+  protected <T extends PsiElement> T resolveByText(String text, Class<T> type = null) {
     final ref = configureByText(text)
     assertNotNull(ref)
     final resolved = ref.resolve()

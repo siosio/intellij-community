@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +28,6 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorFactory;
 import com.intellij.openapi.editor.EditorSettings;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowId;
 import com.intellij.openapi.wm.ToolWindowManager;
@@ -56,29 +55,26 @@ public class CvsTabbedWindow implements Disposable {
 
   public CvsTabbedWindow(Project project) {
     myProject = project;
-    Disposer.register(project, this);
-    ApplicationManager.getApplication().invokeLater(new Runnable() {
-      @Override
-      public void run() {
-        final ToolWindow toolWindow = getToolWindow();
-        final ContentManager contentManager = toolWindow.getContentManager();
-        contentManager.addContentManagerListener(new ContentManagerAdapter() {
-          public void contentRemoved(ContentManagerEvent event) {
-            final JComponent component = event.getContent().getComponent();
-            final JComponent removedComponent = component instanceof CvsTabbedWindowComponent ?
-                                                ((CvsTabbedWindowComponent)component).getComponent() : component;
-            if (removedComponent == myErrorsView) {
-              myErrorsView.dispose();
-              myErrorsView = null;
-            }
-            else if (myOutput != null && removedComponent == myOutput.getComponent()) {
-              EditorFactory.getInstance().releaseEditor(myOutput);
-              myOutput = null;
-            }
+    ApplicationManager.getApplication().invokeLater(() -> {
+      if (myProject.isDisposed()) return;
+      final ToolWindow toolWindow = getToolWindow();
+      final ContentManager contentManager = toolWindow.getContentManager();
+      contentManager.addContentManagerListener(new ContentManagerAdapter() {
+        public void contentRemoved(ContentManagerEvent event) {
+          final JComponent component = event.getContent().getComponent();
+          final JComponent removedComponent = component instanceof CvsTabbedWindowComponent ?
+                                              ((CvsTabbedWindowComponent)component).getComponent() : component;
+          if (removedComponent == myErrorsView) {
+            myErrorsView.dispose();
+            myErrorsView = null;
           }
-        });
-        toolWindow.installWatcher(contentManager);
-      }
+          else if (myOutput != null && removedComponent == myOutput.getComponent()) {
+            EditorFactory.getInstance().releaseEditor(myOutput);
+            myOutput = null;
+          }
+        }
+      });
+      toolWindow.installWatcher(contentManager);
     });
   }
 

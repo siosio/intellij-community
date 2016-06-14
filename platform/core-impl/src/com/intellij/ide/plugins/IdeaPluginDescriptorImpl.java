@@ -49,6 +49,8 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.URL;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * @author mike
@@ -93,6 +95,7 @@ public class IdeaPluginDescriptorImpl implements IdeaPluginDescriptor {
   private long myDate;
   private boolean myUseIdeaClassLoader;
   private boolean myUseCoreClassLoader;
+  private boolean myAllowBundledUpdate;
   private boolean myEnabled = true;
   private String mySinceBuild;
   private String myUntilBuild;
@@ -105,7 +108,7 @@ public class IdeaPluginDescriptorImpl implements IdeaPluginDescriptor {
 
   /**
    * @deprecated
-   * use {@link com.intellij.util.containers.StringInterner#intern(Object)} directly instead
+   * use {@link StringInterner#intern(Object)} directly instead
    */
   @NotNull
   @Deprecated
@@ -115,7 +118,7 @@ public class IdeaPluginDescriptorImpl implements IdeaPluginDescriptor {
 
   /**
    * @deprecated 
-   * use {@link com.intellij.openapi.util.JDOMUtil#internElement(org.jdom.Element, com.intellij.util.containers.StringInterner)}
+   * use {@link JDOMUtil#internElement(Element, StringInterner)}
    */
   @SuppressWarnings("unused")
   @Deprecated
@@ -213,9 +216,10 @@ public class IdeaPluginDescriptorImpl implements IdeaPluginDescriptor {
       }
     }
     myUseIdeaClassLoader = pluginBean.useIdeaClassLoader;
+    myAllowBundledUpdate = pluginBean.allowBundledUpdate;
     if (pluginBean.ideaVersion != null) {
       mySinceBuild = pluginBean.ideaVersion.sinceBuild;
-      myUntilBuild = pluginBean.ideaVersion.untilBuild;
+      myUntilBuild = convertExplicitBigNumberInUntilBuildToStar(pluginBean.ideaVersion.untilBuild);
     }
 
     myResourceBundleBaseName = pluginBean.resourceBundle;
@@ -223,6 +227,10 @@ public class IdeaPluginDescriptorImpl implements IdeaPluginDescriptor {
     myDescriptionChildText = pluginBean.description;
     myChangeNotes = pluginBean.changeNotes;
     myVersion = pluginBean.pluginVersion;
+    if (myVersion == null) {
+      myVersion = PluginManagerCore.getBuildNumber().asStringWithoutProductCode();
+    }
+
     myCategory = pluginBean.category;
 
 
@@ -298,6 +306,21 @@ public class IdeaPluginDescriptorImpl implements IdeaPluginDescriptor {
     if (pluginBean.modules != null && !pluginBean.modules.isEmpty()) {
       myModules = pluginBean.modules;
     }
+  }
+
+  public static final Pattern EXPLICIT_BIG_NUMBER_PATTERN = Pattern.compile("(.*)\\.(9{4,}+|10{4,}+)");
+
+  /**
+   * Convert build number like '146.9999' to '146.*' (like plugin repository does) to ensure that plugins which have such values in
+   * 'until-build' attribute will be compatible with 146.SNAPSHOT build.
+   */
+  public static String convertExplicitBigNumberInUntilBuildToStar(@Nullable String build) {
+    if (build == null) return null;
+    Matcher matcher = EXPLICIT_BIG_NUMBER_PATTERN.matcher(build);
+    if (matcher.matches()) {
+      return matcher.group(1) + ".*";
+    }
+    return build;
   }
 
   // made public for Upsource
@@ -680,13 +703,22 @@ public class IdeaPluginDescriptorImpl implements IdeaPluginDescriptor {
     } catch (IOException e) {
       path = getPath().getAbsolutePath();
     }
-    if (ApplicationManager.getApplication() != null && ApplicationManager.getApplication().isInternal()) {
+    Application app = ApplicationManager.getApplication();
+    if (app != null && app.isInternal()) {
       if (path.startsWith(PathManager.getHomePath() + File.separator + "out" + File.separator + "classes")) {
+        return true;
+      }
+      if (app.isUnitTestMode() && !path.startsWith(PathManager.getPluginsPath() + File.separatorChar)) {
         return true;
       }
     }
 
     return path.startsWith(PathManager.getPreInstalledPluginsPath());
+  }
+
+  @Override
+  public boolean allowBundledUpdate() {
+    return myAllowBundledUpdate;
   }
 
   @Nullable

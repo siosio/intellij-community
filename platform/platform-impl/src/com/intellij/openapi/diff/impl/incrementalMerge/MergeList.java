@@ -33,6 +33,7 @@ import com.intellij.openapi.diff.impl.util.ContextLogger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.ex.DocumentEx;
+import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.*;
 import com.intellij.util.containers.ContainerUtil;
@@ -41,6 +42,7 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.swing.*;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
@@ -53,12 +55,7 @@ public class MergeList implements UserDataHolder {
   public static final FragmentSide BASE_SIDE = FragmentSide.SIDE1;
 
   public static final DataKey<MergeList> DATA_KEY = DataKey.create("mergeList");
-  public static final Condition<Change> NOT_CONFLICTS = new Condition<Change>() {
-    @Override
-    public boolean value(Change change) {
-      return !(change instanceof ConflictChange);
-    }
-  };
+  public static final Condition<Change> NOT_CONFLICTS = change -> !(change instanceof ConflictChange);
 
   @NotNull private final UserDataHolderBase myDataHolder = new UserDataHolderBase();
   @NotNull private final ChangeList myBaseToLeftChangeList;
@@ -236,13 +233,14 @@ public class MergeList implements UserDataHolder {
     for (int i = 0; i < changeList.getCount(); i++) {
       final Change change = changeList.getChange(i);
       if (!change.canHasActions(originalSide)) continue;
-      AnAction applyAction = new AnAction(DiffBundle.message("merge.dialog.apply.change.action.name"), null, AllIcons.Diff.Arrow) {
+      Icon arrowIcon = side == FragmentSide.SIDE1 ? AllIcons.Diff.ArrowRight : AllIcons.Diff.Arrow;
+      AnAction applyAction = new DumbAwareAction(DiffBundle.message("merge.dialog.apply.change.action.name"), null, arrowIcon) {
         @Override
         public void actionPerformed(@Nullable AnActionEvent e) {
           apply(change);
         }
       };
-      AnAction ignoreAction = new AnAction(DiffBundle.message("merge.dialog.ignore.change.action.name"), null, AllIcons.Diff.Remove) {
+      AnAction ignoreAction = new DumbAwareAction(DiffBundle.message("merge.dialog.ignore.change.action.name"), null, AllIcons.Diff.Remove) {
         @Override
         public void actionPerformed(@Nullable AnActionEvent e) {
           change.removeFromList();

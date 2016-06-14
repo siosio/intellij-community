@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,6 +41,7 @@ import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiReference;
 import com.intellij.psi.impl.source.tree.injected.InjectedLanguageUtil;
+import com.intellij.util.BitUtil;
 import com.intellij.util.containers.HashMap;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -68,7 +69,7 @@ public class HighlightManagerImpl extends HighlightManager {
           for (RangeHighlighter highlighter : map.keySet()) {
             HighlightInfo info = map.get(highlighter);
             if (!info.editor.getDocument().equals(document)) continue;
-            if ((info.flags & HIDE_BY_TEXT_CHANGE) != 0) {
+            if (BitUtil.isSet(info.flags, HIDE_BY_TEXT_CHANGE)) {
               highlightersToRemove.add(highlighter);
             }
           }
@@ -239,8 +240,17 @@ public class HighlightManagerImpl extends HighlightManager {
     for (PsiElement element : elements) {
       TextRange range = element.getTextRange();
       range = InjectedLanguageManager.getInstance(myProject).injectedToHost(element, range);
-      addOccurrenceHighlight(editor, range.getStartOffset(), range.getEndOffset(), attributes, flags, outHighlighters, scrollmarkColor);
+      addOccurrenceHighlight(editor,
+                             trimOffsetToDocumentSize(editor, range.getStartOffset()), 
+                             trimOffsetToDocumentSize(editor, range.getEndOffset()), 
+                             attributes, flags, outHighlighters, scrollmarkColor);
     }
+  }
+
+  private static int trimOffsetToDocumentSize(@NotNull Editor editor, int offset) {
+    if (offset < 0) return 0;
+    int textLength = editor.getDocument().getTextLength();
+    return offset < textLength ? offset : textLength; 
   }
 
   @Nullable

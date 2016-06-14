@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,13 +18,11 @@ package com.intellij.codeInsight.daemon.impl;
 
 import com.intellij.codeHighlighting.HighlightDisplayLevel;
 import com.intellij.lang.annotation.HighlightSeverity;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.InvalidDataException;
-import com.intellij.openapi.util.JDOMExternalizable;
 import com.intellij.openapi.util.JDOMExternalizableStringList;
-import com.intellij.openapi.util.WriteExternalException;
 import com.intellij.profile.codeInspection.InspectionProfileManager;
 import com.intellij.profile.codeInspection.InspectionProjectProfileManager;
 import com.intellij.util.IncorrectOperationException;
@@ -49,7 +47,9 @@ import java.util.List;
  * User: anna
  * Date: 24-Feb-2006
  */
-public class SeverityRegistrar implements JDOMExternalizable, Comparator<HighlightSeverity> {
+public class SeverityRegistrar implements Comparator<HighlightSeverity> {
+  private final static Logger LOG = Logger.getInstance(SeverityRegistrar.class);
+
   @NonNls private static final String INFO_TAG = "info";
   @NonNls private static final String COLOR_ATTRIBUTE = "color";
   private final Map<String, SeverityBasedTextAttributes> myMap = ContainerUtil.newConcurrentMap();
@@ -134,13 +134,13 @@ public class SeverityRegistrar implements JDOMExternalizable, Comparator<Highlig
   }
 
 
-  @Override
-  public void readExternal(Element element) throws InvalidDataException {
+  public void readExternal(Element element) {
     myMap.clear();
     myRendererColors.clear();
     for (Element infoElement : element.getChildren(INFO_TAG)) {
       SeverityBasedTextAttributes highlightInfo = new SeverityBasedTextAttributes(infoElement);
       String colorStr = infoElement.getAttributeValue(COLOR_ATTRIBUTE);
+      @SuppressWarnings("UseJBColor")
       Color color = colorStr == null ? null : new Color(Integer.parseInt(colorStr, 16));
       registerSeverity(highlightInfo, color);
     }
@@ -180,8 +180,7 @@ public class SeverityRegistrar implements JDOMExternalizable, Comparator<Highlig
     severitiesChanged();
   }
 
-  @Override
-  public void writeExternal(Element element) throws WriteExternalException {
+  public void writeExternal(Element element) {
     List<HighlightSeverity> list = getOrderAsList(getOrderMap());
     for (HighlightSeverity severity : list) {
       Element info = new Element(INFO_TAG);
@@ -219,12 +218,7 @@ public class SeverityRegistrar implements JDOMExternalizable, Comparator<Highlig
     for (Object o : orderMap.keys()) {
       list.add((HighlightSeverity)o);
     }
-    Collections.sort(list, new Comparator<HighlightSeverity>() {
-      @Override
-      public int compare(HighlightSeverity o1, HighlightSeverity o2) {
-        return SeverityRegistrar.compare(o1, o2, orderMap);
-      }
-    });
+    Collections.sort(list, (o1, o2) -> compare(o1, o2, orderMap));
     return list;
   }
 
@@ -288,11 +282,11 @@ public class SeverityRegistrar implements JDOMExternalizable, Comparator<Highlig
   }
 
   @Override
-  public int compare(final HighlightSeverity s1, final HighlightSeverity s2) {
+  public int compare(@NotNull HighlightSeverity s1, @NotNull HighlightSeverity s2) {
     return compare(s1, s2, getOrderMap());
   }
 
-  private static int compare(HighlightSeverity s1, HighlightSeverity s2, OrderMap orderMap) {
+  private static int compare(@NotNull HighlightSeverity s1, @NotNull HighlightSeverity s2, @NotNull OrderMap orderMap) {
     int o1 = orderMap.getOrder(s1, -1);
     int o2 = orderMap.getOrder(s2, -1);
     return o1 - o2;
@@ -320,6 +314,9 @@ public class SeverityRegistrar implements JDOMExternalizable, Comparator<Highlig
 
   @NotNull
   private static OrderMap fromList(@NotNull List<HighlightSeverity> orderList) {
+    if (orderList.size() != new HashSet<HighlightSeverity>(orderList).size()) {
+      LOG.error("Severities order list MUST contain only unique severities: " + orderList);
+    }
     TObjectIntHashMap<HighlightSeverity> map = new TObjectIntHashMap<HighlightSeverity>();
     for (int i = 0; i < orderList.size(); i++) {
       HighlightSeverity severity = orderList.get(i);
@@ -437,7 +434,7 @@ public class SeverityRegistrar implements JDOMExternalizable, Comparator<Highlig
       return myType;
     }
 
-    private void writeExternal(@NotNull Element element) throws WriteExternalException {
+    private void writeExternal(@NotNull Element element) {
       myAttributes.writeExternal(element);
       myType.writeExternal(element);
     }

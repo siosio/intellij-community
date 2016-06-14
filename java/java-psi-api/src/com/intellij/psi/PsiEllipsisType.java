@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,11 +23,6 @@ import org.jetbrains.annotations.NotNull;
  * @author ven
  */
 public class PsiEllipsisType extends PsiArrayType {
-  /**
-   * Creates an ellipsis type instance with the specified component type.
-   *
-   * @param componentType the type of the varargs array component.
-   */
   public PsiEllipsisType(@NotNull PsiType componentType) {
     super(componentType);
   }
@@ -36,7 +31,12 @@ public class PsiEllipsisType extends PsiArrayType {
     super(componentType, annotations);
   }
 
-  @NotNull
+  public PsiEllipsisType(@NotNull PsiType componentType, @NotNull TypeAnnotationProvider provider) {
+    super(componentType, provider);
+  }
+
+  /** @deprecated use {@link #annotate(TypeAnnotationProvider)} (to be removed in IDEA 18) */
+  @SuppressWarnings("unused")
   public static PsiType createEllipsis(@NotNull PsiType componentType, @NotNull PsiAnnotation[] annotations) {
     return new PsiEllipsisType(componentType, annotations);
   }
@@ -71,7 +71,7 @@ public class PsiEllipsisType extends PsiArrayType {
    * @return the array type instance.
    */
   public PsiType toArrayType() {
-    return getComponentType().createArrayType(getAnnotations());
+    return new PsiArrayType(getComponentType(), getAnnotationProvider());
   }
 
   @Override
@@ -79,10 +79,7 @@ public class PsiEllipsisType extends PsiArrayType {
     return visitor.visitEllipsisType(this);
   }
 
-  public boolean equals(Object obj) {
-    return obj instanceof PsiEllipsisType && super.equals(obj);
-  }
-
+  @Override
   public int hashCode() {
     return super.hashCode() * 5;
   }

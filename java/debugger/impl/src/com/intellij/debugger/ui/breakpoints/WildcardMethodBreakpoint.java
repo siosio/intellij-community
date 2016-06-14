@@ -20,11 +20,13 @@ import com.intellij.debugger.DebuggerManagerEx;
 import com.intellij.debugger.engine.DebugProcess;
 import com.intellij.debugger.engine.DebugProcessImpl;
 import com.intellij.debugger.engine.DebuggerManagerThreadImpl;
+import com.intellij.debugger.engine.DebuggerUtils;
 import com.intellij.debugger.engine.evaluation.EvaluateException;
 import com.intellij.debugger.engine.evaluation.EvaluationContextImpl;
 import com.intellij.debugger.engine.requests.RequestManagerImpl;
 import com.intellij.debugger.impl.DebuggerUtilsEx;
 import com.intellij.icons.AllIcons;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Computable;
@@ -32,7 +34,6 @@ import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.JDOMExternalizerUtil;
 import com.intellij.openapi.util.Key;
 import com.intellij.psi.PsiClass;
-import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.util.StringBuilderSpinAllocator;
@@ -44,7 +45,6 @@ import com.sun.jdi.ReferenceType;
 import com.sun.jdi.event.LocatableEvent;
 import com.sun.jdi.event.MethodEntryEvent;
 import com.sun.jdi.event.MethodExitEvent;
-import com.sun.jdi.request.EventRequest;
 import com.sun.jdi.request.MethodEntryRequest;
 import com.sun.jdi.request.MethodExitRequest;
 import org.jdom.Element;
@@ -53,15 +53,13 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.java.debugger.breakpoints.properties.JavaMethodBreakpointProperties;
 
 import javax.swing.*;
-import java.util.Iterator;
-import java.util.Set;
 
 public class WildcardMethodBreakpoint extends Breakpoint<JavaMethodBreakpointProperties> {
   private static final Logger LOG = Logger.getInstance("#com.intellij.debugger.ui.breakpoints.ExceptionBreakpoint");
 
   public static final String JDOM_LABEL = "wildcard_breakpoint";
 
-  public WildcardMethodBreakpoint(Project project, XBreakpoint breakpoint) {
+  public WildcardMethodBreakpoint(Project project, XBreakpoint<JavaMethodBreakpointProperties> breakpoint) {
     super(project, breakpoint);
   }
 
@@ -69,7 +67,7 @@ public class WildcardMethodBreakpoint extends Breakpoint<JavaMethodBreakpointPro
     return MethodBreakpoint.CATEGORY;
   }
 
-  protected WildcardMethodBreakpoint(Project project, @NotNull String classPattern, @NotNull String methodName, XBreakpoint breakpoint) {
+  protected WildcardMethodBreakpoint(Project project, @NotNull String classPattern, @NotNull String methodName, XBreakpoint<JavaMethodBreakpointProperties> breakpoint) {
     super(project, breakpoint);
     setClassPattern(classPattern);
     setMethodName(methodName);
@@ -88,11 +86,8 @@ public class WildcardMethodBreakpoint extends Breakpoint<JavaMethodBreakpointPro
   }
 
   public PsiClass getPsiClass() {
-    return PsiDocumentManager.getInstance(myProject).commitAndRunReadAction(new Computable<PsiClass>() {
-      public PsiClass compute() {
-        return getClassName() != null ? DebuggerUtilsEx.findClass(getClassName(), myProject, GlobalSearchScope.allScope(myProject)) : null;
-      }
-    });
+    return ApplicationManager.getApplication().runReadAction(
+      (Computable<PsiClass>)() -> getClassName() != null ? DebuggerUtils.findClass(getClassName(), myProject, GlobalSearchScope.allScope(myProject)) : null);
   }
 
   public String getDisplayName() {
@@ -236,11 +231,11 @@ public class WildcardMethodBreakpoint extends Breakpoint<JavaMethodBreakpointPro
 
     try {
       getProperties().WATCH_ENTRY = Boolean.valueOf(JDOMExternalizerUtil.readField(parentNode, "WATCH_ENTRY"));
-    } catch (Exception e) {
+    } catch (Exception ignored) {
     }
     try {
       getProperties().WATCH_EXIT = Boolean.valueOf(JDOMExternalizerUtil.readField(parentNode, "WATCH_EXIT"));
-    } catch (Exception e) {
+    } catch (Exception ignored) {
     }
 
     if(className == null || methodName == null) {
@@ -253,7 +248,10 @@ public class WildcardMethodBreakpoint extends Breakpoint<JavaMethodBreakpointPro
     return method != null && getMethodName().equals(method.name());
   }
 
-  public static WildcardMethodBreakpoint create(Project project, final String classPattern, final String methodName, XBreakpoint xBreakpoint) {
+  public static WildcardMethodBreakpoint create(Project project,
+                                                final String classPattern,
+                                                final String methodName,
+                                                XBreakpoint<JavaMethodBreakpointProperties> xBreakpoint) {
     return new WildcardMethodBreakpoint(project, classPattern, methodName, xBreakpoint);
   }
 

@@ -20,24 +20,27 @@ import com.intellij.openapi.application.PluginPathManager;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.roots.ContentEntry;
 import com.intellij.openapi.roots.ModifiableRootModel;
-import com.intellij.openapi.util.SystemInfo;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.codeStyle.CodeStyleSettings;
+import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
 import com.intellij.psi.xml.XmlFile;
 import com.intellij.testFramework.LightProjectDescriptor;
+import com.intellij.testFramework.PlatformTestUtil;
 import com.intellij.testFramework.PsiTestUtil;
 import com.intellij.testFramework.fixtures.DefaultLightProjectDescriptor;
 import com.intellij.testFramework.fixtures.LightCodeInsightFixtureTestCase;
+import com.intellij.util.VisibilityUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.plugins.javaFX.fxml.codeInsight.inspections.JavaFxUnresolvedFxIdReferenceInspection;
 import org.jetbrains.plugins.javaFX.fxml.codeInsight.intentions.JavaFxInjectPageLanguageIntention;
-import org.junit.Assume;
 
 import java.util.Set;
 
 public class JavaFXQuickfixTest extends LightCodeInsightFixtureTestCase {
   public static final DefaultLightProjectDescriptor JAVA_FX_WITH_GROOVY_DESCRIPTOR = new DefaultLightProjectDescriptor() {
     @Override
-       public void configureModule(Module module, ModifiableRootModel model, ContentEntry contentEntry) {
-       PsiTestUtil.addLibrary(module, model, "javafx", PluginPathManager.getPluginHomePath("javaFX") + "/testData", "jfxrt.jar");
+       public void configureModule(@NotNull Module module, @NotNull ModifiableRootModel model, @NotNull ContentEntry contentEntry) {
+      AbstractJavaFXTestCase.addJavaFxJarAsLibrary(module, model);
        PsiTestUtil.addLibrary(module, model, "javafx", PluginPathManager.getPluginHomePath("javaFX") + "/testData", "groovy-1.8.0.jar");
        super.configureModule(module, model, contentEntry);
      }
@@ -57,8 +60,52 @@ public class JavaFXQuickfixTest extends LightCodeInsightFixtureTestCase {
     doTest("Create method 'void bar(ActionEvent)'", ".groovy");
   }
 
-  public void testCreateField() throws Exception {
-    doTest("Create field 'btn'", ".java");
+  public void testCreateControllerMethodGeneric() throws Exception {
+    doTest("Create method 'void onSort(SortEvent)'", ".java");
+  }
+
+  public void testCreateControllerMethodHalfRaw() throws Exception {
+    doTest("Create method 'void onSort(SortEvent)'", ".java");
+  }
+
+  public void testCreateFieldPublicVisibility() throws Exception {
+    doTestWithDefaultVisibility("Create field 'btn'", "CreateField", PsiModifier.PUBLIC, ".java");
+  }
+
+  public void testCreateFieldProtectedVisibility() throws Exception {
+    doTestWithDefaultVisibility("Create field 'btn'", "CreateField", PsiModifier.PROTECTED, ".java");
+  }
+
+  public void testCreateFieldPrivateVisibility() throws Exception {
+    doTestWithDefaultVisibility("Create field 'btn'", "CreateField", PsiModifier.PRIVATE, ".java");
+  }
+
+  public void testCreateFieldPackageLocalVisibility() throws Exception {
+    doTestWithDefaultVisibility("Create field 'btn'", "CreateField", PsiModifier.PACKAGE_LOCAL, ".java");
+  }
+
+  public void testCreateFieldEscalateVisibility() throws Exception {
+    doTestWithDefaultVisibility("Create field 'btn'", "CreateField", VisibilityUtil.ESCALATE_VISIBILITY, ".java");
+  }
+
+  public void testCreateMethodPublicVisibility() throws Exception {
+    doTestWithDefaultVisibility("Create method 'void onAction(ActionEvent)'", "CreateMethod", PsiModifier.PUBLIC, ".java");
+  }
+
+  public void testCreateMethodProtectedVisibility() throws Exception {
+    doTestWithDefaultVisibility("Create method 'void onAction(ActionEvent)'", "CreateMethod", PsiModifier.PROTECTED, ".java");
+  }
+
+  public void testCreateMethodPrivateVisibility() throws Exception {
+    doTestWithDefaultVisibility("Create method 'void onAction(ActionEvent)'", "CreateMethod", PsiModifier.PRIVATE, ".java");
+  }
+
+  public void testCreateMethodPackageLocalVisibility() throws Exception {
+    doTestWithDefaultVisibility("Create method 'void onAction(ActionEvent)'", "CreateMethod", PsiModifier.PACKAGE_LOCAL, ".java");
+  }
+
+  public void testCreateMethodEscalateVisibility() throws Exception {
+    doTestWithDefaultVisibility("Create method 'void onAction(ActionEvent)'", "CreateMethod", VisibilityUtil.ESCALATE_VISIBILITY, ".java");
   }
 
   public void testCreateFieldEmptyName() throws Exception {
@@ -87,13 +134,32 @@ public class JavaFXQuickfixTest extends LightCodeInsightFixtureTestCase {
     myFixture.checkResultByFile(getTestName(true) + "_after.fxml");
   }
 
+  private void doTestWithDefaultVisibility(final String actionName,
+                                           final String inputName,
+                                           final String defaultVisibility,
+                                           final String extension) throws Exception {
+    CodeStyleSettings settings = CodeStyleSettingsManager.getSettings(getProject());
+    String savedVisibility = settings.VISIBILITY;
+    try {
+      settings.VISIBILITY = defaultVisibility;
+      doTest(actionName, inputName, getTestName(false), extension);
+    }
+    finally {
+      settings.VISIBILITY = savedVisibility;
+    }
+  }
+
   private void doTest(final String actionName, final String extension) throws Exception {
-    String path = getTestName(true) + ".fxml";
+    doTest(actionName, getTestName(false), getTestName(false), extension);
+  }
+
+  private void doTest(final String actionName, final String inputName, final String outputName, final String extension) throws Exception {
+    String path = PlatformTestUtil.lowercaseFirstLetter(inputName, true) + ".fxml";
     final IntentionAction intention =
-      myFixture.getAvailableIntention(actionName, path, getTestName(false) + extension);
+      myFixture.getAvailableIntention(actionName, path, inputName + extension);
     assertNotNull(intention);
     myFixture.launchAction(intention);
-    myFixture.checkResultByFile(getTestName(false) + extension, getTestName(false) + "_after" + extension, true);
+    myFixture.checkResultByFile(inputName + extension, outputName + "_after" + extension, true);
   }
 
   @Override

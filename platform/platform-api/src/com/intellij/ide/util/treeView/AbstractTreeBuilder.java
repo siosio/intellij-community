@@ -47,18 +47,10 @@ public class AbstractTreeBuilder implements Disposable {
   @NonNls private static final String TREE_BUILDER = "TreeBuilder";
   public static final boolean DEFAULT_UPDATE_INACTIVE = true;
   private final TransferToEDTQueue<Runnable>
-    myLaterInvocator = new TransferToEDTQueue<Runnable>("Tree later invocator", new Processor<Runnable>() {
-    @Override
-    public boolean process(Runnable runnable) {
+    myLaterInvocator = new TransferToEDTQueue<Runnable>("Tree later invocator", runnable -> {
       runnable.run();
       return true;
-    }
-  }, new Condition<Object>() {
-    @Override
-    public boolean value(Object o) {
-      return isDisposed();
-    }
-  }, 200);
+    }, o -> isDisposed(), 200);
 
 
   public AbstractTreeBuilder(@NotNull JTree tree,
@@ -298,7 +290,7 @@ public class AbstractTreeBuilder implements Disposable {
 
   @NotNull
   public ActionCallback queueUpdateFrom(final Object element, final boolean forceResort, final boolean updateStructure) {
-    if (getUi() == null) return new ActionCallback.Rejected();
+    if (getUi() == null) return ActionCallback.REJECTED;
 
     final ActionCallback result = new ActionCallback();
 
@@ -487,14 +479,14 @@ public class AbstractTreeBuilder implements Disposable {
   @NotNull
   public final ActionCallback getInitialized() {
     if (isDisposed()) {
-      return new ActionCallback.Rejected();
+      return ActionCallback.REJECTED;
     }
     return myUi.getInitialized();
   }
 
   @NotNull
   public final ActionCallback getReady(Object requestor) {
-    if (isDisposed()) return new ActionCallback.Rejected();
+    if (isDisposed()) return ActionCallback.REJECTED;
 
     return myUi.getReady(requestor);
   }
@@ -517,24 +509,24 @@ public class AbstractTreeBuilder implements Disposable {
 
   @NotNull
   public ActionCallback cancelUpdate() {
-    if (isDisposed()) return new ActionCallback.Rejected();
+    if (isDisposed()) return ActionCallback.REJECTED;
 
     return getUi().cancelUpdate();
   }
 
   @NotNull
   public ActionCallback batch(@NotNull Progressive progressive) {
-    if (isDisposed()) return new ActionCallback.Rejected();
+    if (isDisposed()) return ActionCallback.REJECTED;
 
     return getUi().batch(progressive);
   }
 
   @NotNull
   public AsyncResult<Object> revalidateElement(Object element) {
-    if (isDisposed()) return new AsyncResult.Rejected<Object>();
+    if (isDisposed()) return AsyncResult.rejected();
 
     AbstractTreeStructure structure = getTreeStructure();
-    if (structure == null) return new AsyncResult.Rejected<Object>();
+    if (structure == null) return AsyncResult.rejected();
 
     return structure.revalidateElement(element);
   }

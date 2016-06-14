@@ -25,6 +25,7 @@ import java.io.File;
 import java.util.Collection;
 import java.util.List;
 
+@SuppressWarnings("UnusedParameters")
 public abstract class SchemesManager<T extends Scheme, E extends ExternalizableScheme> {
   @NotNull
   public abstract Collection<E> loadSchemes();
@@ -40,16 +41,38 @@ public abstract class SchemesManager<T extends Scheme, E extends ExternalizableS
    */
   public abstract void clearAllSchemes();
 
+  @SuppressWarnings("NullableProblems")
   @NotNull
   public abstract List<T> getAllSchemes();
 
   @Nullable
   public abstract T findSchemeByName(@NotNull String schemeName);
 
-  public abstract void setCurrentSchemeName(@Nullable String schemeName);
+  /**
+   * If schemes are lazy loaded, you can use this method to postpone scheme selection (scheme will be found by name on first use)
+   */
+  public final void setCurrentSchemeName(@Nullable String schemeName) {
+    setCurrentSchemeName(schemeName, true);
+  }
+
+  public abstract void setCurrentSchemeName(@Nullable String schemeName, boolean notify);
+
+  public final void setCurrent(@Nullable T scheme) {
+    setCurrent(scheme, true);
+  }
+
+  public void setCurrent(@Nullable T scheme, boolean notify) {
+    setCurrentSchemeName(scheme == null ? null : scheme.getName());
+  }
 
   @Nullable
   public abstract T getCurrentScheme();
+
+  @Nullable
+  public String getCurrentSchemeName() {
+    T scheme = getCurrentScheme();
+    return scheme == null ? null : scheme.getName();
+  }
 
   public abstract void removeScheme(@NotNull T scheme);
 
@@ -64,11 +87,15 @@ public abstract class SchemesManager<T extends Scheme, E extends ExternalizableS
   public void loadBundledScheme(@NotNull String resourceName, @NotNull Object requestor, @NotNull ThrowableConvertor<Element, T, Throwable> convertor) {
   }
 
-  public void setSchemes(@NotNull List<T> schemes) {
-    setSchemes(schemes, null);
+  public final void setSchemes(@NotNull List<T> newSchemes) {
+    setSchemes(newSchemes, null, null);
   }
 
-  public void setSchemes(@NotNull List<T> schemes, @Nullable Condition<T> removeCondition) {
+  public final void setSchemes(@NotNull List<T> newSchemes, @Nullable T newCurrentScheme) {
+    setSchemes(newSchemes, newCurrentScheme, null);
+  }
+
+  public void setSchemes(@NotNull List<T> newSchemes, @Nullable T newCurrentScheme, @Nullable Condition<T> removeCondition) {
   }
 
   /**

@@ -20,14 +20,19 @@ import com.intellij.openapi.compiler.CompilerPaths;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.roots.CompilerModuleExtension;
+import com.intellij.openapi.roots.ModuleRootManager;
+import com.intellij.openapi.roots.OrderEnumerationHandler;
+import com.intellij.openapi.roots.OrderRootType;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.util.ArrayUtil;
+import com.intellij.util.SmartList;
 import com.intellij.util.StringBuilderSpinAllocator;
 import com.intellij.util.containers.OrderedSet;
 
 import java.io.File;
 import java.util.Collection;
+import java.util.List;
 import java.util.Set;
 
 public class CompilerPathsEx extends CompilerPaths {
@@ -66,11 +71,9 @@ public class CompilerPathsEx extends CompilerPaths {
 
   public static void visitFiles(final Collection<VirtualFile> directories, final FileVisitor visitor) {
     for (final VirtualFile outputDir : directories) {
-      ApplicationManager.getApplication().runReadAction(new Runnable() {
-        public void run() {
-          final String path = outputDir.getPath();
-          visitor.accept(outputDir, path, path);
-        }
+      ApplicationManager.getApplication().runReadAction(() -> {
+        final String path = outputDir.getPath();
+        visitor.accept(outputDir, path, path);
       });
     }
   }
@@ -90,6 +93,18 @@ public class CompilerPathsEx extends CompilerPaths {
       String outputPathForTestsUrl = compilerModuleExtension.getCompilerOutputUrlForTests();
       if (outputPathForTestsUrl != null) {
         outputPaths.add(VirtualFileManager.extractPath(outputPathForTestsUrl).replace('/', File.separatorChar));
+      }
+
+      final ModuleRootManager moduleRootManager = ModuleRootManager.getInstance(module);
+      for (OrderEnumerationHandler.Factory handlerFactory : OrderEnumerationHandler.EP_NAME.getExtensions()) {
+        if (handlerFactory.isApplicable(module)) {
+          OrderEnumerationHandler handler = handlerFactory.createHandler(module);
+          final List<String> outputUrls = new SmartList<>();
+          handler.addCustomModuleRoots(OrderRootType.CLASSES, moduleRootManager, outputUrls, true, true);
+          for (String outputUrl : outputUrls) {
+            outputPaths.add(VirtualFileManager.extractPath(outputUrl).replace('/', File.separatorChar));
+          }
+        }
       }
     }
     return ArrayUtil.toStringArray(outputPaths);

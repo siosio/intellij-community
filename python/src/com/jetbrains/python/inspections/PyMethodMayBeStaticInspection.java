@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,10 +27,12 @@ import com.jetbrains.python.inspections.quickfix.PyMakeMethodStaticQuickFix;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.search.PyOverridingMethodsSearch;
 import com.jetbrains.python.psi.search.PySuperMethodsSearch;
-import com.jetbrains.python.testing.PythonUnitTestUtil;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.List;
+import java.util.Locale;
 
 /**
  * User: ktisha
@@ -63,8 +65,7 @@ public class PyMethodMayBeStaticInspection extends PyInspection {
       if (PyNames.getBuiltinMethods(LanguageLevel.forElement(node)).containsKey(node.getName())) return;
       final PyClass containingClass = node.getContainingClass();
       if (containingClass == null) return;
-      if (PythonUnitTestUtil.isUnitTestCaseClass(containingClass)) return;
-      final PsiElement firstSuper = PySuperMethodsSearch.search(node).findFirst();
+      final PsiElement firstSuper = PySuperMethodsSearch.search(node, myTypeEvalContext).findFirst();
       if (firstSuper != null) return;
       final PyFunction firstOverride = PyOverridingMethodsSearch.search(node, true).findFirst();
       if (firstOverride != null) return;
@@ -73,6 +74,9 @@ public class PyMethodMayBeStaticInspection extends PyInspection {
       if (node.getModifier() != null) return;
       final Property property = containingClass.findPropertyByCallable(node);
       if (property != null) return;
+      final List<PyAssignmentStatement> attributes = node.findAttributes();
+      if (!attributes.isEmpty()) return;
+      if (isTestElement(node)) return;
 
       final PyStatementList statementList = node.getStatementList();
       final PyStatement[] statements = statementList.getStatements();
@@ -115,9 +119,15 @@ public class PyMethodMayBeStaticInspection extends PyInspection {
           if (selfName.equals(node.getName())) {
             mayBeStatic[0] = false;
           }
-
         }
 
+        @Override
+        public void visitPyCallExpression(PyCallExpression node) {
+          super.visitPyCallExpression(node);
+          if (LanguageLevel.forElement(node).isAtLeast(LanguageLevel.PYTHON30) && node.isCalleeText(PyNames.SUPER)) {
+            mayBeStatic[0] = false;
+          }
+        }
       };
       node.accept(visitor);
       final PsiElement identifier = node.getNameIdentifier();
@@ -126,5 +136,15 @@ public class PyMethodMayBeStaticInspection extends PyInspection {
                         null, new PyMakeMethodStaticQuickFix(), new PyMakeFunctionFromMethodQuickFix());
       }
     }
+  }
+
+  private static boolean isTestElement(@NotNull PyFunction node) {
+    final String methodName = node.getName();
+    final PyClass pyClass = node.getContainingClass();
+    final String className = pyClass == null ? null : pyClass.getName();
+
+    return methodName != null && className != null
+           && methodName.toLowerCase(Locale.getDefault()).startsWith("test")
+           && className.toLowerCase(Locale.getDefault()).startsWith("test");
   }
 }

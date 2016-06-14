@@ -23,7 +23,6 @@ import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.options.SearchableConfigurable;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.registry.Registry;
 import com.intellij.psi.codeStyle.CodeStyleScheme;
 import com.intellij.psi.codeStyle.CodeStyleSettings;
 import com.intellij.psi.codeStyle.CodeStyleSettingsProvider;
@@ -35,7 +34,7 @@ import javax.swing.*;
 import java.util.*;
 
 public class CodeStyleSchemesConfigurable extends SearchableConfigurable.Parent.Abstract
-  implements OptionsContainingConfigurable, Configurable.NoMargin, Configurable.NoScroll {
+  implements OptionsContainingConfigurable, Configurable.NoMargin, Configurable.NoScroll, Configurable.VariableProjectAppLevel {
 
   private CodeStyleSchemesPanel myRootSchemesPanel;
   private CodeStyleSchemesModel myModel;
@@ -55,10 +54,7 @@ public class CodeStyleSchemesConfigurable extends SearchableConfigurable.Parent.
   public JComponent createComponent() {
     myModel = ensureModel();
 
-    if (Registry.is("ide.new.settings.dialog")) {
-      return myPanels == null || myPanels.isEmpty() ? null : myPanels.get(0).createComponent();
-    }
-    return myRootSchemesPanel.getPanel();
+    return myPanels == null || myPanels.isEmpty() ? null : myPanels.get(0).createComponent();
   }
 
   @Override
@@ -210,18 +206,15 @@ public class CodeStyleSchemesConfigurable extends SearchableConfigurable.Parent.
 
     final List<CodeStyleSettingsProvider> providers =
       Arrays.asList(Extensions.getExtensions(CodeStyleSettingsProvider.EXTENSION_POINT_NAME));
-    Collections.sort(providers, new Comparator<CodeStyleSettingsProvider>() {
-      @Override
-      public int compare(CodeStyleSettingsProvider p1, CodeStyleSettingsProvider p2) {
-        if (!p1.getPriority().equals(p2.getPriority())) {
-          return p1.getPriority().compareTo(p2.getPriority());
-        }
-        String name1 = p1.getConfigurableDisplayName();
-        if (name1 == null) name1 = "";
-        String name2 = p2.getConfigurableDisplayName();
-        if (name2 == null) name2 = "";
-        return name1.compareToIgnoreCase(name2);
+    Collections.sort(providers, (p1, p2) -> {
+      if (!p1.getPriority().equals(p2.getPriority())) {
+        return p1.getPriority().compareTo(p2.getPriority());
       }
+      String name1 = p1.getConfigurableDisplayName();
+      if (name1 == null) name1 = "";
+      String name2 = p2.getConfigurableDisplayName();
+      if (name2 == null) name2 = "";
+      return name1.compareToIgnoreCase(name2);
     });
 
     for (final CodeStyleSettingsProvider provider : providers) {
@@ -235,15 +228,12 @@ public class CodeStyleSchemesConfigurable extends SearchableConfigurable.Parent.
       }
     }
 
-    if (Registry.is("ide.new.settings.dialog")) {
-      int size = myPanels.size();
-      Configurable[] result = new Configurable[size > 0 ? size - 1 : 0];
-      for (int i = 0; i < result.length; i++) {
-        result[i] = myPanels.get(i + 1);
-      }
-      return result;
+    int size = myPanels.size();
+    Configurable[] result = new Configurable[size > 0 ? size - 1 : 0];
+    for (int i = 0; i < result.length; i++) {
+      result[i] = myPanels.get(i + 1);
     }
-    return myPanels.toArray(new Configurable[myPanels.size()]);
+    return result;
   }
 
   private CodeStyleSchemesModel ensureModel() {
@@ -276,7 +266,7 @@ public class CodeStyleSchemesConfigurable extends SearchableConfigurable.Parent.
 
         @Override
         public void schemeChanged(final CodeStyleScheme scheme) {
-          //do nothing
+          if (scheme == myModel.getSelectedScheme()) myRootSchemesPanel.onSelectedSchemeChanged();
         }
       });
     }
@@ -301,10 +291,8 @@ public class CodeStyleSchemesConfigurable extends SearchableConfigurable.Parent.
   @Override
   public boolean isModified() {
     if (myModel != null) {
-      if (Registry.is("ide.new.settings.dialog")) {
-        if (myPanels != null && myPanels.size() > 0 && myPanels.get(0).isModified()) {
-          return true;
-        }
+      if (myPanels != null && myPanels.size() > 0 && myPanels.get(0).isModified()) {
+        return true;
       }
       boolean schemeListModified = myModel.isSchemeListModified();
       if (schemeListModified) {
@@ -330,6 +318,11 @@ public class CodeStyleSchemesConfigurable extends SearchableConfigurable.Parent.
       result.addAll(panel.processListOptions());
     }
     return result;
+  }
+
+  @Override
+  public boolean isProjectLevel() {
+    return myModel != null && myModel.isUsePerProjectSettings();
   }
 
   private class CodeStyleConfigurableWrapper implements SearchableConfigurable, NoMargin, NoScroll, OptionsContainingConfigurable {

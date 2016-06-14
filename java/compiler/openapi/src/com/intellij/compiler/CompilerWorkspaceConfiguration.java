@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,13 +25,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.util.xmlb.XmlSerializerUtil;
 
-@State(
-  name = "CompilerWorkspaceConfiguration",
-  storages = {
-    @Storage(
-      file = StoragePathMacros.WORKSPACE_FILE
-    )}
-)
+@State(name = "CompilerWorkspaceConfiguration", storages = @Storage(StoragePathMacros.WORKSPACE_FILE))
 public class CompilerWorkspaceConfiguration implements PersistentStateComponent<CompilerWorkspaceConfiguration> {
   private static final Logger LOG = Logger.getInstance("#com.intellij.compiler.CompilerWorkspaceConfiguration");
   
@@ -45,6 +39,11 @@ public class CompilerWorkspaceConfiguration implements PersistentStateComponent<
   public boolean CLEAR_OUTPUT_DIRECTORY = true;
   public boolean MAKE_PROJECT_ON_SAVE = false; // until we fix problems with several open projects (IDEA-104064), daemon slowness (IDEA-104666)
   public boolean PARALLEL_COMPILATION = false;
+  /**
+   * @Deprecated. Use corresponding value from CompilerConfiguration
+   * This field is left here for compatibility with older projects
+   */
+  public int COMPILER_PROCESS_HEAP_SIZE = 700;
   public String COMPILER_PROCESS_ADDITIONAL_VM_OPTIONS = "";
   public boolean REBUILD_ON_DEPENDENCY_CHANGE = true;
 

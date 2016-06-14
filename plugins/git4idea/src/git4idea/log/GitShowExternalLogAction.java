@@ -19,7 +19,6 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.components.ServiceManager;
-import com.intellij.openapi.diff.impl.dir.FrameDialogWrapper;
 import com.intellij.openapi.fileChooser.FileChooser;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.progress.ProgressIndicator;
@@ -27,12 +26,14 @@ import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.WindowWrapper;
+import com.intellij.openapi.ui.WindowWrapperBuilder;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.ProjectLevelVcsManager;
 import com.intellij.openapi.vcs.VcsRoot;
-import com.intellij.openapi.vcs.changes.BackgroundFromStartOption;
 import com.intellij.openapi.vcs.changes.ui.ChangesViewContentManager;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.ToolWindow;
@@ -43,11 +44,9 @@ import com.intellij.ui.content.ContentManager;
 import com.intellij.util.Function;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.vcs.log.VcsLogSettings;
-import com.intellij.vcs.log.data.VcsLogUiProperties;
+import com.intellij.vcs.log.data.VcsLogTabsProperties;
 import com.intellij.vcs.log.impl.VcsLogContentProvider;
 import com.intellij.vcs.log.impl.VcsLogManager;
-import git4idea.GitPlatformFacade;
 import git4idea.GitUtil;
 import git4idea.GitVcs;
 import git4idea.config.GitVersion;
@@ -125,19 +124,17 @@ public class GitShowExternalLogAction extends DumbAwareAction {
                                                             @NotNull final List<VirtualFile> roots,
                                                             @Nullable String tabName) {
     final GitRepositoryManager repositoryManager = ServiceManager.getService(project, GitRepositoryManager.class);
-    GitPlatformFacade facade = ServiceManager.getService(GitPlatformFacade.class);
     for (VirtualFile root : roots) {
-      repositoryManager.addExternalRepository(root, GitRepositoryImpl.getFullInstance(root, project, facade, project));
+      repositoryManager.addExternalRepository(root, GitRepositoryImpl.getInstance(root, project, true));
     }
-    VcsLogManager manager = new VcsLogManager(project, ServiceManager.getService(project, VcsLogSettings.class),
-                                              ServiceManager.getService(project, VcsLogUiProperties.class));
-    Collection<VcsRoot> vcsRoots = ContainerUtil.map(roots, new Function<VirtualFile, VcsRoot>() {
-      @Override
-      public VcsRoot fun(VirtualFile root) {
-        return new VcsRoot(vcs, root);
-      }
-    });
-    return new MyContentComponent(manager.initContent(vcsRoots, tabName), roots, new Disposable() {
+    VcsLogManager manager = new VcsLogManager(project, ServiceManager.getService(project, VcsLogTabsProperties.class),
+                                              ContainerUtil.map(roots, new Function<VirtualFile, VcsRoot>() {
+                                                @Override
+                                                public VcsRoot fun(VirtualFile root) {
+                                                  return new VcsRoot(vcs, root);
+                                                }
+                                              }));
+    return new MyContentComponent(manager.createLogPanel(tabName), roots, new Disposable() {
       @Override
       public void dispose() {
         for (VirtualFile root : roots) {
@@ -239,7 +236,7 @@ public class GitShowExternalLogAction extends DumbAwareAction {
     private GitVersion myVersion;
 
     private ShowLogInDialogTask(@NotNull Project project, @NotNull List<VirtualFile> roots, @NotNull GitVcs vcs) {
-      super(project, "Loading Git Log...", true, BackgroundFromStartOption.getInstance());
+      super(project, "Loading Git Log...", true);
       myProject = project;
       myRoots = roots;
       myVcs = vcs;
@@ -257,54 +254,15 @@ public class GitShowExternalLogAction extends DumbAwareAction {
     @Override
     public void onSuccess() {
       if (!myVersion.isNull() && !myProject.isDisposed()) {
-        new MyDialog(myProject, myVcs, myRoots).show();
+        MyContentComponent content = createManagerAndContent(myProject, myVcs, myRoots, null);
+        WindowWrapper window = new WindowWrapperBuilder(WindowWrapper.Mode.FRAME, content)
+          .setProject(myProject)
+          .setTitle("Git Log")
+          .setPreferredFocusedComponent(content)
+          .build();
+        Disposer.register(window, content.myDisposable);
+        window.show();
       }
-    }
-  }
-
-  private static class MyDialog extends FrameDialogWrapper {
-    @NotNull private final MyContentComponent myContent;
-    @NotNull private final Project myProject;
-
-    private MyDialog(@NotNull Project project, @NotNull GitVcs vcs, @NotNull final List<VirtualFile> roots) {
-      myProject = project;
-      myContent = createManagerAndContent(project, vcs, roots, null);
-    }
-
-    @NotNull
-    @Override
-    protected Mode getMode() {
-      return Mode.FRAME;
-    }
-
-    @NotNull
-    @Override
-    public Project getProject() {
-      return myProject;
-    }
-
-    @Nullable
-    @Override
-    protected String getTitle() {
-      return "Git Log";
-    }
-
-    @NotNull
-    @Override
-    protected JComponent getPanel() {
-      return myContent;
-    }
-
-    @Nullable
-    @Override
-    protected JComponent getPreferredFocusedComponent() {
-      return myContent;
-    }
-
-    @Nullable
-    @Override
-    protected Disposable getDisposable() {
-      return myContent.myDisposable;
     }
   }
 }

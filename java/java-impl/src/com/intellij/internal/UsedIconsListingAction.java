@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.roots.ProjectRootManager;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.JavaCodeStyleManager;
@@ -86,13 +87,7 @@ public class UsedIconsListingAction extends AnAction {
 
       private void processValue(Object value, PsiCallExpression call, PsiFile file) {
         if (value instanceof String) {
-          String str = (String)value;
-          if (str.startsWith("\"")) {
-            str = str.substring(0);
-            if (str.endsWith("\"")) {
-              str = str.substring(0, str.length() - 1);
-            }
-          }
+          String str = StringUtil.unquoteString((String)value, '\"');
 
           if (!str.startsWith("/")) {
 
@@ -160,21 +155,18 @@ public class UsedIconsListingAction extends AnAction {
     PsiClass presentation = psiFacade.findClass("com.intellij.ide.presentation.Presentation",
                                                 allScope);
     final MultiMap<String, PsiAnnotation> annotations = new MultiMap<String, PsiAnnotation>();
-    AnnotationTargetsSearch.search(presentation).forEach(new Processor<PsiModifierListOwner>() {
-      @Override
-      public boolean process(PsiModifierListOwner owner) {
-        PsiAnnotation annotation = owner.getModifierList().findAnnotation("com.intellij.ide.presentation.Presentation");
+    AnnotationTargetsSearch.search(presentation).forEach(owner -> {
+      PsiAnnotation annotation = owner.getModifierList().findAnnotation("com.intellij.ide.presentation.Presentation");
 
-        PsiAnnotationMemberValue icon = annotation.findAttributeValue("icon");
-        if (icon instanceof PsiLiteralExpression) {
-          Object value = ((PsiLiteralExpression)icon).getValue();
-          if (value instanceof String) {
-            annotations.putValue((String)value, annotation);
-          }
+      PsiAnnotationMemberValue icon = annotation.findAttributeValue("icon");
+      if (icon instanceof PsiLiteralExpression) {
+        Object value = ((PsiLiteralExpression)icon).getValue();
+        if (value instanceof String) {
+          annotations.putValue((String)value, annotation);
         }
-
-        return true;
       }
+
+      return true;
     });
 
     doReplacements(project, calls, xmlAttributes, annotations, psiFacade.findClass("com.intellij.icons.AllIcons", allScope));
@@ -206,7 +198,7 @@ public class UsedIconsListingAction extends AnAction {
         if (useScope.contains(file.getVirtualFile())) {
           new WriteCommandAction<Void>(project, file) {
             @Override
-            protected void run(Result<Void> result) throws Throwable {
+            protected void run(@NotNull Result<Void> result) throws Throwable {
               att.setValue(replacement);
             }
           }.execute();
@@ -226,7 +218,7 @@ public class UsedIconsListingAction extends AnAction {
           if (useScope.contains(file.getVirtualFile())) {
             new WriteCommandAction(project, file) {
               @Override
-              protected void run(Result result) throws Throwable {
+              protected void run(@NotNull Result result) throws Throwable {
                 if (call instanceof PsiLiteralExpression) {
                   call.replace(factory.createExpressionFromText("\"" + replacement + "\"", call));
                 }
@@ -255,7 +247,7 @@ public class UsedIconsListingAction extends AnAction {
           if (useScope.contains(file.getVirtualFile())) {
             new WriteCommandAction(project, file) {
               @Override
-              protected void run(Result result) throws Throwable {
+              protected void run(@NotNull Result result) throws Throwable {
                 annotation.getNode();
                 annotation.setDeclaredAttributeValue(
                   "icon",

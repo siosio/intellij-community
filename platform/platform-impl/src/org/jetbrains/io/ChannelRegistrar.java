@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,16 +15,22 @@
  */
 package org.jetbrains.io;
 
+import com.intellij.openapi.diagnostic.Logger;
 import io.netty.channel.*;
 import io.netty.channel.group.ChannelGroup;
+import io.netty.channel.group.ChannelGroupFuture;
 import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.util.concurrent.ImmediateEventExecutor;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.Arrays;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 @ChannelHandler.Sharable
 public final class ChannelRegistrar extends ChannelInboundHandlerAdapter {
+  private static final Logger LOG = Logger.getInstance(ChannelRegistrar.class);
+
   private final ChannelGroup openChannels = new DefaultChannelGroup(ImmediateEventExecutor.INSTANCE);
 
   public boolean isEmpty() {
@@ -48,7 +54,8 @@ public final class ChannelRegistrar extends ChannelInboundHandlerAdapter {
     close(true);
   }
 
-  public void close(boolean shutdownEventLoopGroup) {
+  @NotNull
+  public Future<?> close(boolean shutdownEventLoopGroup) {
     EventLoopGroup eventLoopGroup = null;
     if (shutdownEventLoopGroup) {
       for (Channel channel : openChannels) {
@@ -59,13 +66,21 @@ public final class ChannelRegistrar extends ChannelInboundHandlerAdapter {
       }
     }
 
+    Future<?> result;
     try {
-      openChannels.close().awaitUninterruptibly(30, TimeUnit.SECONDS);
+      Object[] channels = openChannels.toArray(new Channel[]{});
+      ChannelGroupFuture groupFuture = openChannels.close();
+      // server channels are closed in first turn, so, small timeout is relatively ok
+      if (!groupFuture.awaitUninterruptibly(10, TimeUnit.SECONDS)) {
+        LOG.warn("Cannot close all channels for 10 seconds, channels: " + Arrays.toString(channels));
+      }
+      result = groupFuture;
     }
     finally {
       if (eventLoopGroup != null) {
-        eventLoopGroup.shutdownGracefully(1, 2, TimeUnit.NANOSECONDS);
+        result = eventLoopGroup.shutdownGracefully(1, 2, TimeUnit.NANOSECONDS);
       }
     }
+    return result;
   }
 }

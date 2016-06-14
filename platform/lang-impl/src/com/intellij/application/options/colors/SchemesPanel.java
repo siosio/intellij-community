@@ -16,11 +16,22 @@
 
 package com.intellij.application.options.colors;
 
+import com.intellij.application.options.ImportSourceChooserDialog;
 import com.intellij.application.options.SaveSchemeDialog;
 import com.intellij.application.options.SkipSelfSearchComponent;
 import com.intellij.openapi.application.ApplicationBundle;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
+import com.intellij.openapi.editor.colors.impl.AbstractColorsScheme;
+import com.intellij.openapi.editor.colors.impl.EditorColorsSchemeImpl;
+import com.intellij.openapi.editor.colors.impl.EmptyColorScheme;
 import com.intellij.openapi.extensions.Extensions;
+import com.intellij.openapi.options.SchemeImportException;
+import com.intellij.openapi.options.SchemeImportUtil;
+import com.intellij.openapi.options.SchemeImporter;
+import com.intellij.openapi.options.SchemeImporterEP;
+import com.intellij.openapi.project.DefaultProjectFactory;
+import com.intellij.openapi.ui.MessageType;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.Consumer;
 import com.intellij.util.EventDispatcher;
 import com.intellij.util.containers.ContainerUtil;
@@ -39,6 +50,8 @@ public class SchemesPanel extends JPanel implements SkipSelfSearchComponent {
   private JComboBox mySchemeComboBox;
 
   private JButton myDeleteButton;
+  private JButton myImportButton;
+  private JLabel myHintLabel;
 
   private final EventDispatcher<ColorAndFontSettingsListener> myDispatcher = EventDispatcher.create(ColorAndFontSettingsListener.class);
 
@@ -59,7 +72,9 @@ public class SchemesPanel extends JPanel implements SkipSelfSearchComponent {
       public void actionPerformed(@NotNull ActionEvent e) {
         if (mySchemeComboBox.getSelectedIndex() != -1) {
           EditorColorsScheme selected = myOptions.selectScheme((String)mySchemeComboBox.getSelectedItem());
-          myDeleteButton.setEnabled(!ColorAndFontOptions.isReadOnly(selected));
+          final boolean readOnly = ColorAndFontOptions.isReadOnly(selected);
+          myDeleteButton.setEnabled(!readOnly);
+          myHintLabel.setVisible(readOnly);
           if (areSchemesLoaded()) {
             myDispatcher.getMulticaster().schemeChanged(SchemesPanel.this);
           }
@@ -80,12 +95,12 @@ public class SchemesPanel extends JPanel implements SkipSelfSearchComponent {
     int gridx = 0;
 
     panel.add(new JLabel(ApplicationBundle.message("editbox.scheme.name")),
-              new GridBagConstraints(gridx++, 0, 1, 1, 0, 0, GridBagConstraints.WEST, GridBagConstraints.HORIZONTAL, new JBInsets(0, 0, 5, 5),
+              new GridBagConstraints(gridx++, 0, 1, 1, 0, 0, GridBagConstraints.WEST, GridBagConstraints.NONE, new JBInsets(0, 0, 5, 5),
                                      0, 0));
 
     mySchemeComboBox = new JComboBox();
     panel.add(mySchemeComboBox,
-              new GridBagConstraints(gridx++, 0, 1, 1, 0, 0, GridBagConstraints.WEST, GridBagConstraints.HORIZONTAL, new JBInsets(0, 0, 5, 10),
+              new GridBagConstraints(gridx++, 0, 1, 1, 0, 0, GridBagConstraints.WEST, GridBagConstraints.NONE, new JBInsets(0, 0, 5, 10),
                                      0, 0));
 
     JButton saveAsButton = new JButton(ApplicationBundle.message("button.save.as"));
@@ -96,7 +111,7 @@ public class SchemesPanel extends JPanel implements SkipSelfSearchComponent {
       }
     });
     panel.add(saveAsButton,
-              new GridBagConstraints(gridx++, 0, 1, 1, 0, 0, GridBagConstraints.WEST, GridBagConstraints.HORIZONTAL, new JBInsets(0, 0, 5, 5),
+              new GridBagConstraints(gridx++, 0, 1, 1, 0, 0, GridBagConstraints.WEST, GridBagConstraints.NONE, new JBInsets(0, 0, 5, 5),
                                      0, 0));
 
     myDeleteButton = new JButton(ApplicationBundle.message("button.delete"));
@@ -109,7 +124,22 @@ public class SchemesPanel extends JPanel implements SkipSelfSearchComponent {
       }
     });
     panel.add(myDeleteButton,
-              new GridBagConstraints(gridx++, 0, 1, 1, 1, 0, GridBagConstraints.WEST, GridBagConstraints.NONE, new JBInsets(0, 0, 5, 5), 0,
+              new GridBagConstraints(gridx++, 0, 1, 1, 0, 0, GridBagConstraints.WEST, GridBagConstraints.NONE, new JBInsets(0, 0, 5, 5), 0,
+                                     0));
+    myImportButton = new JButton("Import...");
+    myImportButton.addActionListener(new ActionListener() {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        chooseAndImport();
+      }
+    });
+    panel.add(myImportButton,
+              new GridBagConstraints(gridx++, 0, 1, 1, 0, 0, GridBagConstraints.WEST, GridBagConstraints.NONE, new JBInsets(0, 0, 5, 5), 0,
+                                     0));
+    myHintLabel = new JLabel(ApplicationBundle.message("hint.readonly.scheme.cannot.be.modified"));
+    myHintLabel.setEnabled(false);
+    panel.add(myHintLabel,
+              new GridBagConstraints(gridx++, 0, 1, 1, 0, 0, GridBagConstraints.WEST, GridBagConstraints.NONE, new JBInsets(0, 0, 5, 5), 0,
                                      0));
 
     for (final ImportHandler importHandler : Extensions.getExtensions(ImportHandler.EP_NAME)) {
@@ -117,11 +147,8 @@ public class SchemesPanel extends JPanel implements SkipSelfSearchComponent {
       button.addActionListener(new ActionListener() {
         @Override
         public void actionPerformed(@NotNull ActionEvent e) {
-          importHandler.performImport(button, new Consumer<EditorColorsScheme>() {
-            @Override
-            public void consume(EditorColorsScheme scheme) {
-              if (scheme != null) myOptions.addImportedScheme(scheme);
-            }
+          importHandler.performImport(button, scheme -> {
+            if (scheme != null) myOptions.addImportedScheme(scheme);
           });
         }
       });
@@ -129,6 +156,9 @@ public class SchemesPanel extends JPanel implements SkipSelfSearchComponent {
                 new GridBagConstraints(gridx++, 0, 1, 1, 0, 0, GridBagConstraints.WEST, GridBagConstraints.NONE, new JBInsets(0, 0, 5, 5), 0,
                                        0));
     }
+    panel.add(Box.createHorizontalGlue(),
+              new GridBagConstraints(gridx+1, 0, 1, 1, 1, 0, GridBagConstraints.WEST, GridBagConstraints.HORIZONTAL, new JBInsets(0, 0, 0, 0), 0,
+                                     0));
 
     return panel;
   }
@@ -185,4 +215,39 @@ public class SchemesPanel extends JPanel implements SkipSelfSearchComponent {
   public void addListener(ColorAndFontSettingsListener listener) {
     myDispatcher.addListener(listener);
   }
+  
+  private void chooseAndImport() {
+    ImportSourceChooserDialog<EditorColorsScheme> importSourceChooserDialog =
+      new ImportSourceChooserDialog<EditorColorsScheme>(this, EditorColorsScheme.class);
+    if (importSourceChooserDialog.showAndGet()) {
+      final String selectedImporterName = importSourceChooserDialog.getSelectedSourceName();
+      if (selectedImporterName != null) {
+        final SchemeImporter<EditorColorsScheme> importer = SchemeImporterEP.getImporter(selectedImporterName, EditorColorsScheme.class);
+        if (importer != null) {
+          VirtualFile importSource = SchemeImportUtil.selectImportSource(importer.getSourceExtensions(), this, null);
+          if (importSource != null) {
+            try {
+              EditorColorsScheme imported =
+                importer.importScheme(DefaultProjectFactory.getInstance().getDefaultProject(), importSource, myOptions.getSelectedScheme(),
+                                      name -> {
+                                        String newName = myOptions.getUniqueName(name);
+                                        AbstractColorsScheme newScheme = new EditorColorsSchemeImpl(EmptyColorScheme.INSTANCE);
+                                        newScheme.setName(newName);
+                                        newScheme.setDefaultMetaInfo(EmptyColorScheme.INSTANCE);
+                                        return newScheme;
+                                      });
+              if (imported != null) {
+                myOptions.addImportedScheme(imported);
+              }
+              
+            }
+            catch (SchemeImportException e) {
+              SchemeImportUtil.showStatus(myImportButton, "Import failed: " + e.getMessage(), MessageType.ERROR);
+            }
+          }
+        }
+      }
+    }
+  }
+  
 }

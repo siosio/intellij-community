@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,8 @@ package org.jetbrains.plugins.groovy.editor;
 import com.intellij.lang.ImportOptimizer;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.EmptyRunnable;
+import com.intellij.openapi.util.NotNullComputable;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
@@ -42,29 +44,26 @@ import java.util.*;
 public class GroovyImportOptimizer implements ImportOptimizer {
 
   public static Comparator<GrImportStatement> getComparator(final GroovyCodeStyleSettings settings) {
-    return new Comparator<GrImportStatement>() {
-      @Override
-      public int compare(GrImportStatement statement1, GrImportStatement statement2) {
-        if (settings.LAYOUT_STATIC_IMPORTS_SEPARATELY) {
-          if (statement1.isStatic() && !statement2.isStatic()) return 1;
-          if (statement2.isStatic() && !statement1.isStatic()) return -1;
-        }
-
-        final GrCodeReferenceElement ref1 = statement1.getImportReference();
-        final GrCodeReferenceElement ref2 = statement2.getImportReference();
-        String name1 = ref1 != null ? PsiUtil.getQualifiedReferenceText(ref1) : null;
-        String name2 = ref2 != null ? PsiUtil.getQualifiedReferenceText(ref2) : null;
-        if (name1 == null) return name2 == null ? 0 : -1;
-        if (name2 == null) return 1;
-        return name1.compareTo(name2);
+    return (statement1, statement2) -> {
+      if (settings.LAYOUT_STATIC_IMPORTS_SEPARATELY) {
+        if (statement1.isStatic() && !statement2.isStatic()) return 1;
+        if (statement2.isStatic() && !statement1.isStatic()) return -1;
       }
+
+      final GrCodeReferenceElement ref1 = statement1.getImportReference();
+      final GrCodeReferenceElement ref2 = statement2.getImportReference();
+      String name1 = ref1 != null ? PsiUtil.getQualifiedReferenceText(ref1) : null;
+      String name2 = ref2 != null ? PsiUtil.getQualifiedReferenceText(ref2) : null;
+      if (name1 == null) return name2 == null ? 0 : -1;
+      if (name2 == null) return 1;
+      return name1.compareTo(name2);
     };
   }
 
   @Override
   @NotNull
   public Runnable processFile(PsiFile file) {
-    return new MyProcessor(file, false);
+    return new MyProcessor(file).compute();
   }
 
   @Override
@@ -72,25 +71,18 @@ public class GroovyImportOptimizer implements ImportOptimizer {
     return file instanceof GroovyFile;
   }
 
-  private class MyProcessor implements Runnable {
+  private static class MyProcessor implements NotNullComputable<Runnable> {
     private final PsiFile myFile;
-    private final boolean myRemoveUnusedOnly;
 
-    private MyProcessor(PsiFile file, boolean removeUnusedOnly) {
+    private MyProcessor(PsiFile file) {
       myFile = file;
-      myRemoveUnusedOnly = removeUnusedOnly;
     }
 
+    @NotNull
     @Override
-    public void run() {
-      if (!(myFile instanceof GroovyFile)) return;
-
-      GroovyFile file = ((GroovyFile)myFile);
-      final PsiDocumentManager documentManager = PsiDocumentManager.getInstance(file.getProject());
-      final Document document = documentManager.getDocument(file);
-      if (document != null) {
-        documentManager.commitDocument(document);
-      }
+    public Runnable compute() {
+      if (!(myFile instanceof GroovyFile)) return EmptyRunnable.getInstance();
+      final GroovyFile file = ((GroovyFile)myFile);
       final Set<String> simplyImportedClasses = new LinkedHashSet<String>();
       final Set<String> staticallyImportedMembers = new LinkedHashSet<String>();
       final Set<GrImportStatement> usedImports = new HashSet<GrImportStatement>();
@@ -104,26 +96,16 @@ public class GroovyImportOptimizer implements ImportOptimizer {
                                    implicitlyImportedClasses, innerClasses,
                                    aliasImported, annotatedImports);
       final List<GrImportStatement> oldImports = PsiUtil.getValidImportStatements(file);
-      if (myRemoveUnusedOnly) {
-        for (GrImportStatement oldImport : oldImports) {
-          if (!usedImports.contains(oldImport)) {
-            file.removeImport(oldImport);
-          }
-        }
-        return;
-      }
 
       // Add new import statements
       GrImportStatement[] newImports =
         prepare(usedImports, simplyImportedClasses, staticallyImportedMembers, implicitlyImportedClasses, innerClasses, aliasImported,
                 annotatedImports, unresolvedOnDemandImports);
-      if (oldImports.isEmpty() && newImports.length == 0 && aliasImported.isEmpty()) {
-        return;
-      }
+      if (oldImports.isEmpty() && newImports.length == 0 && aliasImported.isEmpty()) return EmptyRunnable.getInstance();
 
       GroovyPsiElementFactory factory = GroovyPsiElementFactory.getInstance(file.getProject());
 
-      GroovyFile tempFile = factory.createGroovyFile("", false, null);
+      final GroovyFile tempFile = factory.createGroovyFile("", false, null);
 
       for (GrImportStatement newImport : newImports) {
         tempFile.addImport(newImport);
@@ -133,18 +115,23 @@ public class GroovyImportOptimizer implements ImportOptimizer {
         final int startOffset = oldImports.get(0).getTextRange().getStartOffset();
         final int endOffset = oldImports.get(oldImports.size() - 1).getTextRange().getEndOffset();
         String oldText = oldImports.isEmpty() ? "" : myFile.getText().substring(startOffset, endOffset);
-        if (tempFile.getText().trim().equals(oldText)) {
-          return;
+        if (tempFile.getText().trim().equals(oldText)) return EmptyRunnable.getInstance();
+      }
+      return () -> {
+        final PsiDocumentManager documentManager = PsiDocumentManager.getInstance(file.getProject());
+        final Document document = documentManager.getDocument(file);
+        if (document != null) documentManager.commitDocument(document);
+
+        List<GrImportStatement> existingImports = PsiUtil.getValidImportStatements(file);
+
+        for (GrImportStatement statement : tempFile.getImportStatements()) {
+          file.addImport(statement);
         }
-      }
 
-      for (GrImportStatement statement : tempFile.getImportStatements()) {
-        file.addImport(statement);
-      }
-
-      for (GrImportStatement importStatement : oldImports) {
-        file.removeImport(importStatement);
-      }
+        for (GrImportStatement importStatement : existingImports) {
+          file.removeImport(importStatement);
+        }
+      };
     }
 
     private GrImportStatement[] prepare(final Set<GrImportStatement> usedImports,

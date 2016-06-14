@@ -53,12 +53,9 @@ public class JBEditorTabs extends JBTabsImpl {
 
       @Override
       public void afterValueChanged(RegistryValue value) {
-        ApplicationManager.getApplication().invokeLater(new Runnable() {
-          @Override
-          public void run() {
-            resetTabsCache();
-            relayout(true, false);
-          }
+        ApplicationManager.getApplication().invokeLater(() -> {
+          resetTabsCache();
+          relayout(true, false);
         });
       }
     }, parent);
@@ -226,11 +223,9 @@ public class JBEditorTabs extends JBTabsImpl {
     }
 
     getPainter().doPaintBackground(g2d, clip, vertical, afterTabs);
-    if (isSingleRow()) {
-      g2d.setPaint(getEmptySpaceColor());
-      g2d.fill(beforeTabs);
-      g2d.fill(afterTabs);
-    }
+    g2d.setPaint(getEmptySpaceColor());
+    g2d.fill(beforeTabs);
+    g2d.fill(afterTabs);
   }
 
   protected Color getEmptySpaceColor() {

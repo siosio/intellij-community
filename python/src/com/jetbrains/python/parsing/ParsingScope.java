@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,22 +23,26 @@ public class ParsingScope {
   private boolean myClass = false;
   private boolean mySuite = false;
   private boolean myAfterSemicolon = false;
+  private boolean myAsync = false;
 
-  public ParsingScope withFunction(boolean flag) {
+  protected ParsingScope() {}
+
+  public ParsingScope withFunction(boolean async) {
     final ParsingScope result = copy();
-    result.myFunction = flag;
+    result.myFunction = true;
+    result.myAsync = async;
     return result;
   }
 
-  public ParsingScope withClass(boolean flag) {
+  public ParsingScope withClass() {
     final ParsingScope result = copy();
-    result.myClass = flag;
+    result.myClass = true;
     return result;
   }
 
-  public ParsingScope withSuite(boolean flag) {
+  public ParsingScope withSuite() {
     final ParsingScope result = copy();
-    result.mySuite = flag;
+    result.mySuite = true;
     return result;
   }
 
@@ -52,6 +56,10 @@ public class ParsingScope {
 
   public boolean isSuite() {
     return mySuite;
+  }
+
+  public boolean isAsync() {
+    return myAsync;
   }
 
   public boolean isAfterSemicolon() {

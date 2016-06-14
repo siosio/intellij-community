@@ -21,6 +21,7 @@ import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.actionSystem.ex.ComboBoxAction;
 import com.intellij.openapi.actionSystem.impl.SimpleDataContext;
 import com.intellij.openapi.fileTypes.FileType;
+import com.intellij.openapi.keymap.KeymapManager;
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.options.SearchableConfigurable;
@@ -32,16 +33,20 @@ import com.intellij.ui.ColoredTableCellRenderer;
 import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.ui.table.JBTable;
+import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import javax.swing.table.TableCellEditor;
 import javax.swing.tree.DefaultMutableTreeNode;
 import java.awt.*;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author peter
@@ -224,6 +229,21 @@ public abstract class LanguagePerFileConfigurable<T> implements SearchableConfig
           }
         }
       });
+      CustomShortcutSet shortcutSet = new CustomShortcutSet(KeymapManager.getInstance().getActiveKeymap().getShortcuts(IdeActions.ACTION_SHOW_INTENTION_ACTIONS));
+      new AnAction() {
+        @Override
+        public void actionPerformed(AnActionEvent e) {
+          if (editCellAt(getSelectedRow(), 1)) {
+            TableCellEditor editor = getCellEditor(editingRow, editingColumn);
+            Component component = ((DefaultCellEditor)editor).getComponent();
+            JButton button = UIUtil.uiTraverser(component).bfsTraversal().filter(JButton.class).first();
+            if (button != null) {
+              button.doClick();
+            }
+          }
+          
+        }
+      }.registerCustomShortcutSet(shortcutSet, this);
     }
 
     @Override
@@ -276,12 +296,7 @@ public abstract class LanguagePerFileConfigurable<T> implements SearchableConfig
         group.add(createChooseAction(myVirtualFile, null));
       }
       final List<T> values = new ArrayList<T>(myMappings.getAvailableValues(myVirtualFile));
-      Collections.sort(values, new Comparator<T>() {
-        @Override
-        public int compare(final T o1, final T o2) {
-          return visualize(o1).compareTo(visualize(o2));
-        }
-      });
+      Collections.sort(values, (o1, o2) -> visualize(o1).compareTo(visualize(o2)));
       for (T t : values) {
         if (myMappings.isSelectable(t)) {
           group.add(createChooseAction(myVirtualFile, t));

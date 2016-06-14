@@ -19,6 +19,7 @@ import com.intellij.execution.ExecutionException;
 import com.intellij.facet.ui.ValidationResult;
 import com.intellij.lang.Language;
 import com.intellij.openapi.projectRoots.Sdk;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.FileViewProvider;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.templateLanguages.TemplateLanguageFileViewProvider;
@@ -38,8 +39,14 @@ public class PyTemplatesUtil {
     String templateBinding = null;
     @NonNls String language = templatesPanel.getTemplateLanguage();
     if (language != null) {
-      if (language.equals(TemplatesService.JINJA2)) language = "jinja";
-      templateBinding = prefix + language.toLowerCase();
+      String framework = StringUtil.trimEnd(prefix, '_');
+      framework = StringUtil.trimEnd(framework, '-');
+      String postfix = language.toLowerCase();
+      if (framework.equals(postfix)) return ValidationResult.OK;
+      if (language.equals(TemplatesService.JINJA2)) {
+        postfix = "jinja";
+      }
+      templateBinding = prefix + postfix;
     }
     final PyPackageManager packageManager = PyPackageManager.getInstance(sdk);
     if (templateBinding != null) {
@@ -47,7 +54,7 @@ public class PyTemplatesUtil {
         try {
           final PyPackage installedPackage = packageManager.findPackage(templateBinding, false);
           if (installedPackage == null) {
-            return new ValidationResult(templateBinding + " will be installed on selected interpreter");
+            return new ValidationResult(templateBinding + " will be installed on the selected interpreter");
           }
         }
         catch (ExecutionException ignored) {
@@ -58,7 +65,7 @@ public class PyTemplatesUtil {
       try {
         final PyPackage installedPackage = packageManager.findPackage(language, false);
         if (installedPackage == null) {
-          return new ValidationResult(language + " will be installed on selected interpreter");
+          return new ValidationResult(language + " will be installed on the selected interpreter");
         }
       }
       catch (ExecutionException ignored) {

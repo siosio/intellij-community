@@ -18,9 +18,7 @@ package com.intellij.ide.fileTemplates;
 
 import com.intellij.ide.IdeBundle;
 import com.intellij.ide.fileTemplates.impl.CustomFileTemplate;
-import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.Extensions;
@@ -35,38 +33,31 @@ import com.intellij.openapi.project.ex.ProjectManagerEx;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.ClassLoaderUtil;
 import com.intellij.openapi.util.Condition;
-import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiDirectory;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
 import com.intellij.util.ArrayUtil;
+import com.intellij.util.Consumer;
 import com.intellij.util.containers.ContainerUtil;
-import org.apache.commons.collections.ExtendedProperties;
+import gnu.trove.TIntObjectHashMap;
 import org.apache.velocity.VelocityContext;
-import org.apache.velocity.app.Velocity;
-import org.apache.velocity.exception.ResourceNotFoundException;
 import org.apache.velocity.exception.VelocityException;
-import org.apache.velocity.runtime.RuntimeConstants;
-import org.apache.velocity.runtime.RuntimeServices;
-import org.apache.velocity.runtime.RuntimeSingleton;
-import org.apache.velocity.runtime.log.LogSystem;
 import org.apache.velocity.runtime.parser.ParseException;
 import org.apache.velocity.runtime.parser.Token;
 import org.apache.velocity.runtime.parser.node.*;
-import org.apache.velocity.runtime.resource.Resource;
-import org.apache.velocity.runtime.resource.ResourceManager;
-import org.apache.velocity.runtime.resource.ResourceManagerImpl;
-import org.apache.velocity.runtime.resource.loader.ResourceLoader;
 import org.apache.velocity.util.StringUtils;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
-import java.io.*;
+import java.io.IOException;
+import java.io.StringReader;
+import java.io.StringWriter;
 import java.util.*;
+import java.util.regex.Pattern;
 
 /**
  * @author MYakovlev
@@ -74,89 +65,8 @@ import java.util.*;
 public class FileTemplateUtil{
   private static final Logger LOG = Logger.getInstance("#com.intellij.ide.fileTemplates.FileTemplateUtil");
   private static final CreateFromTemplateHandler ourDefaultCreateFromTemplateHandler = new DefaultCreateFromTemplateHandler();
-  private static final ThreadLocal<FileTemplateManager> ourTemplateManager = new ThreadLocal<FileTemplateManager>();
 
   @NonNls public static final String INTERNAL_PACKAGE_INFO_TEMPLATE_NAME = "package-info";
-
-  private FileTemplateUtil() {
-  }
-
-  static {
-    try{
-      final Class<?>[] interfaces = ResourceManagerImpl.class.getInterfaces();
-      if (interfaces.length != 1 || !interfaces[0].equals(ResourceManager.class)) {
-        throw new IllegalStateException("Incorrect velocity version in the classpath" +
-                                        ", ResourceManager in " + PathManager.getJarPathForClass(ResourceManager.class) +
-                                        ", ResourceManagerImpl in " + PathManager.getJarPathForClass(ResourceManagerImpl.class));
-      }
-
-      LogSystem emptyLogSystem = new LogSystem() {
-        @Override
-        public void init(RuntimeServices runtimeServices) throws Exception {
-        }
-
-        @Override
-        public void logVelocityMessage(int i, String s) {
-          //todo[myakovlev] log somethere?
-        }
-      };
-      Velocity.setProperty(RuntimeConstants.RUNTIME_LOG_LOGSYSTEM, emptyLogSystem);
-      Velocity.setProperty(RuntimeConstants.INPUT_ENCODING, FileTemplate.ourEncoding);
-      Velocity.setProperty(RuntimeConstants.PARSER_POOL_SIZE, 3);
-      Velocity.setProperty(RuntimeConstants.RESOURCE_LOADER, "includes");
-      Velocity.setProperty("includes.resource.loader.instance", new ResourceLoader() {
-        @Override
-        public void init(ExtendedProperties configuration) {
-        }
-
-        @Override
-        public InputStream getResourceStream(String resourceName) throws ResourceNotFoundException {
-          FileTemplateManager templateManager = ourTemplateManager.get();
-          if (templateManager == null) templateManager = FileTemplateManager.getDefaultInstance();
-          final FileTemplate include = templateManager.getPattern(resourceName);
-          if (include == null) {
-            throw new ResourceNotFoundException("Template not found: " + resourceName);
-          }
-          final String text = include.getText();
-          try {
-            return new ByteArrayInputStream(text.getBytes(FileTemplate.ourEncoding));
-          }
-          catch (UnsupportedEncodingException e) {
-            throw new RuntimeException(e);
-          }
-        }
-
-        @Override
-        public boolean isSourceModified(Resource resource) {
-          return true;
-        }
-
-        @Override
-        public long getLastModified(Resource resource) {
-          return 0L;
-        }
-      });
-
-      Thread thread = Thread.currentThread();
-      ClassLoader classLoader = thread.getContextClassLoader();
-      Application application = ApplicationManager.getApplication();
-
-      if (application.isInternal() && !application.isUnitTestMode() &&
-          SystemInfo.isJavaVersionAtLeast("1.6.0_33") && SystemInfo.isAppleJvm) {
-        thread.setContextClassLoader(FileTemplate.class.getClassLoader());
-      }
-
-      try {
-        Velocity.init();
-      }
-      finally {
-        thread.setContextClassLoader(classLoader);
-      }
-    }
-    catch (Exception e){
-      LOG.error("Unable to init Velocity", e);
-    }
-  }
 
   public static String[] calculateAttributes(String templateContent, Properties properties, boolean includeDummies, Project project) throws ParseException {
     Set<String> propertiesNames = new HashSet<String>();
@@ -174,7 +84,7 @@ public class FileTemplateUtil{
     final Set<String> unsetAttributes = new LinkedHashSet<String>();
     final Set<String> definedAttributes = new HashSet<String>();
     //noinspection HardCodedStringLiteral
-    SimpleNode template = RuntimeSingleton.parse(new StringReader(templateContent), "MyTemplate");
+    SimpleNode template = VelocityWrapper.parse(new StringReader(templateContent), "MyTemplate");
     collectAttributes(unsetAttributes, definedAttributes, template, propertiesNames, includeDummies, new HashSet<String>(), project);
     for (String definedAttribute : definedAttributes) {
       unsetAttributes.remove(definedAttribute);
@@ -217,7 +127,7 @@ public class FileTemplateUtil{
             String s = StringUtil.unquoteString(firstToken.toString());
             final FileTemplate includedTemplate = FileTemplateManager.getInstance(project).getTemplate(s);
             if (includedTemplate != null && visitedIncludes.add(s)) {
-              SimpleNode template = RuntimeSingleton.parse(new StringReader(includedTemplate.getText()), "MyTemplate");
+              SimpleNode template = VelocityWrapper.parse(new StringReader(includedTemplate.getText()), "MyTemplate");
               collectAttributes(referenced, defined, template, propertiesNames, includeDummies, visitedIncludes, project);
             }
           }
@@ -285,7 +195,7 @@ public class FileTemplateUtil{
       String name = (String)o;
       context.put(name, attributes.get(name));
     }
-    return mergeTemplate(content, context, useSystemLineSeparators);
+    return mergeTemplate(content, context, useSystemLineSeparators, null);
   }
 
   private static VelocityContext createVelocityContext() {
@@ -294,50 +204,46 @@ public class FileTemplateUtil{
     return context;
   }
 
-  public static String mergeTemplate(Properties attributes, String content, boolean useSystemLineSeparators) throws IOException{
+  public static String mergeTemplate(Properties attributes, String content, boolean useSystemLineSeparators) throws IOException {
+    return mergeTemplate(attributes, content, useSystemLineSeparators, null);
+  }
+
+  public static String mergeTemplate(Properties attributes, String content, boolean useSystemLineSeparators,
+                                     @Nullable Consumer<VelocityException> exceptionHandler) throws IOException {
     VelocityContext context = createVelocityContext();
     Enumeration<?> names = attributes.propertyNames();
     while (names.hasMoreElements()){
       String name = (String)names.nextElement();
       context.put(name, attributes.getProperty(name));
     }
-    return mergeTemplate(content, context, useSystemLineSeparators);
+    return mergeTemplate(content, context, useSystemLineSeparators, exceptionHandler);
   }
 
-  private static String mergeTemplate(String templateContent, final VelocityContext context, boolean useSystemLineSeparators) throws IOException {
+  private static String mergeTemplate(String templateContent, final VelocityContext context, boolean useSystemLineSeparators,
+                                      @Nullable Consumer<VelocityException> exceptionHandler) throws IOException {
     final StringWriter stringWriter = new StringWriter();
     try {
       Project project = null;
       final Object projectName = context.get(FileTemplateManager.PROJECT_NAME_VARIABLE);
       if (projectName instanceof String) {
         Project[] projects = ProjectManager.getInstance().getOpenProjects();
-        project = ContainerUtil.find(projects, new Condition<Project>() {
-          @Override
-          public boolean value(Project project) {
-            return projectName.equals(project.getName());
-          }
-        });
+        project = ContainerUtil.find(projects, project1 -> projectName.equals(project1.getName()));
       }
-      try {
-        ourTemplateManager.set(project == null ? FileTemplateManager.getDefaultInstance() : FileTemplateManager.getInstance(project));
-        Velocity.evaluate(context, stringWriter, "", templateContent);
-      }
-      finally {
-        ourTemplateManager.set(null);
-      }
+      VelocityWrapper.evaluate(project, context, stringWriter, templateContent);
     }
     catch (final VelocityException e) {
       if (ApplicationManager.getApplication().isUnitTestMode()) {
         LOG.error(e);
       }
       LOG.info("Error evaluating template:\n" + templateContent, e);
-      ApplicationManager.getApplication().invokeLater(new Runnable() {
-        @Override
-        public void run() {
-          Messages.showErrorDialog(IdeBundle.message("error.parsing.file.template", e.getMessage()),
-                                   IdeBundle.message("title.velocity.error"));
-        }
-      });
+      if (exceptionHandler == null) {
+        ApplicationManager.getApplication()
+          .invokeLater(() -> Messages.showErrorDialog(IdeBundle.message("error.parsing.file.template", e.getMessage()),
+                                                      IdeBundle.message("title.velocity.error")));
+      }
+      else {
+        exceptionHandler.consume(e);
+      }
     }
     final String result = stringWriter.toString();
 
@@ -429,22 +335,14 @@ public class FileTemplateUtil{
     final String templateText = StringUtil.convertLineSeparators(mergedText);
     final Exception[] commandException = new Exception[1];
     final PsiElement[] result = new PsiElement[1];
-    CommandProcessor.getInstance().executeCommand(project, new Runnable(){
-      @Override
-      public void run(){
-        ApplicationManager.getApplication().runWriteAction(new Runnable(){
-          @Override
-          public void run(){
-            try{
-              result[0] = handler.createFromTemplate(project, directory, fileName_, template, templateText, props_);
-            }
-            catch (Exception ex){
-              commandException[0] = ex;
-            }
-          }
-        });
+    CommandProcessor.getInstance().executeCommand(project, () -> ApplicationManager.getApplication().runWriteAction(() -> {
+      try{
+        result[0] = handler.createFromTemplate(project, directory, fileName_, template, templateText, props_);
       }
-    }, template.isTemplateOfType(StdFileTypes.JAVA) && !"package-info".equals(template.getName())
+      catch (Exception ex){
+        commandException[0] = ex;
+      }
+    }), template.isTemplateOfType(StdFileTypes.JAVA) && !"package-info".equals(template.getName())
        ? IdeBundle.message("command.create.class.from.template")
        : IdeBundle.message("command.create.file.from.template"), null);
     if(commandException[0] != null){
@@ -511,5 +409,63 @@ public class FileTemplateUtil{
     final FileTemplate newTemplate = new CustomFileTemplate(name, extension);
     newTemplate.setText(content);
     return newTemplate;
+  }
+
+  public static Pattern getTemplatePattern(@NotNull FileTemplate template,
+                                           @NotNull Project project,
+                                           @NotNull TIntObjectHashMap<String> offsetToProperty) {
+    String templateText = template.getText().trim();
+    String regex = templateToRegex(templateText, offsetToProperty, project);
+    regex = StringUtil.replace(regex, "with", "(?:with|by)");
+    regex = ".*(" + regex + ").*";
+    return Pattern.compile(regex, Pattern.DOTALL);
+  }
+
+  private static String templateToRegex(String text, TIntObjectHashMap<String> offsetToProperty, Project project) {
+    List<Object> properties = ContainerUtil.newArrayList(FileTemplateManager.getInstance(project).getDefaultProperties().keySet());
+    properties.add("PACKAGE_NAME");
+
+    String regex = escapeRegexChars(text);
+    // first group is a whole file header
+    int groupNumber = 1;
+    for (Object property : properties) {
+      String name = property.toString();
+      String escaped = escapeRegexChars("${" + name + "}");
+      boolean first = true;
+      for (int i = regex.indexOf(escaped); i != -1 && i < regex.length(); i = regex.indexOf(escaped, i + 1)) {
+        String replacement = first ? "([^\\n]*)" : "\\" + groupNumber;
+        int delta = escaped.length() - replacement.length();
+        int[] offs = offsetToProperty.keys();
+        for (int off : offs) {
+          if (off > i) {
+            String prop = offsetToProperty.remove(off);
+            offsetToProperty.put(off - delta, prop);
+          }
+        }
+        offsetToProperty.put(i, name);
+        regex = regex.substring(0, i) + replacement + regex.substring(i + escaped.length());
+        if (first) {
+          groupNumber++;
+          first = false;
+        }
+      }
+    }
+    return regex;
+  }
+
+  private static String escapeRegexChars(String regex) {
+    regex = StringUtil.replace(regex, "|", "\\|");
+    regex = StringUtil.replace(regex, ".", "\\.");
+    regex = StringUtil.replace(regex, "*", "\\*");
+    regex = StringUtil.replace(regex, "+", "\\+");
+    regex = StringUtil.replace(regex, "?", "\\?");
+    regex = StringUtil.replace(regex, "$", "\\$");
+    regex = StringUtil.replace(regex, "(", "\\(");
+    regex = StringUtil.replace(regex, ")", "\\)");
+    regex = StringUtil.replace(regex, "[", "\\[");
+    regex = StringUtil.replace(regex, "]", "\\]");
+    regex = StringUtil.replace(regex, "{", "\\{");
+    regex = StringUtil.replace(regex, "}", "\\}");
+    return regex;
   }
 }

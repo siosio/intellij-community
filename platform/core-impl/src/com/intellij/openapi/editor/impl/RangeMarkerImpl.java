@@ -19,10 +19,15 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.event.DocumentEvent;
 import com.intellij.openapi.editor.ex.DocumentEx;
 import com.intellij.openapi.editor.ex.RangeMarkerEx;
+import com.intellij.openapi.editor.impl.event.DocumentEventImpl;
+import com.intellij.openapi.util.ProperTextRange;
+import com.intellij.openapi.util.TextRange;
+import com.intellij.openapi.util.UnfairTextRange;
 import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.util.Processor;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 public class RangeMarkerImpl extends UserDataHolderBase implements RangeMarkerEx, MutableInterval {
   private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.editor.impl.RangeMarkerImpl");
@@ -169,10 +174,20 @@ public class RangeMarkerImpl extends UserDataHolderBase implements RangeMarkerEx
   protected void changedUpdateImpl(@NotNull DocumentEvent e) {
     if (!isValid()) return;
 
-    // Process if one point.
-    if (intervalStart() == intervalEnd()) {
-      processIfOnePoint(e);
+    TextRange newRange = applyChange(e, intervalStart(), intervalEnd(), isGreedyToLeft(), isGreedyToRight());
+    if (newRange == null) {
+      invalidate(e);
       return;
+    }
+
+    setIntervalStart(newRange.getStartOffset());
+    setIntervalEnd(newRange.getEndOffset());
+  }
+
+  @Nullable
+  static TextRange applyChange(@NotNull DocumentEvent e, int intervalStart, int intervalEnd, boolean isGreedyToLeft, boolean isGreedyToRight) {
+    if (intervalStart == intervalEnd) {
+      return processIfOnePoint(e, intervalStart, isGreedyToRight);
     }
 
     final int offset = e.getOffset();
@@ -180,58 +195,66 @@ public class RangeMarkerImpl extends UserDataHolderBase implements RangeMarkerEx
     final int newLength = e.getNewLength();
 
     // changes after the end.
-    if (intervalEnd() < offset || !isGreedyToRight() && intervalEnd() == offset) {
-      return;
+    if (intervalEnd < offset) {
+      return new UnfairTextRange(intervalStart, intervalEnd);
+    }
+    if (!isGreedyToRight && intervalEnd == offset) {
+      // handle replaceString that was minimized and resulted in insertString at the range end
+      if (e instanceof DocumentEventImpl && oldLength == 0 && ((DocumentEventImpl)e).getInitialStartOffset() < offset) {
+        return new UnfairTextRange(intervalStart, intervalEnd + newLength);
+      }
+      return new UnfairTextRange(intervalStart, intervalEnd);
     }
 
     // changes before start
-    if (intervalStart() > offset + oldLength || !isGreedyToLeft() && intervalStart() == offset + oldLength) {
-      setIntervalStart(intervalStart() + newLength - oldLength);
-      setIntervalEnd(intervalEnd() + newLength - oldLength);
-      return;
+    if (intervalStart > offset + oldLength) {
+      return new UnfairTextRange(intervalStart + newLength - oldLength, intervalEnd + newLength - oldLength);
+    }
+    if (!isGreedyToLeft && intervalStart == offset + oldLength) {
+      // handle replaceString that was minimized and resulted in insertString at the range start
+      if (e instanceof DocumentEventImpl && oldLength == 0 && ((DocumentEventImpl)e).getInitialStartOffset() + ((DocumentEventImpl)e).getInitialOldLength() > offset) {
+        return new UnfairTextRange(intervalStart - oldLength, intervalEnd + newLength - oldLength);
+      }
+      return new UnfairTextRange(intervalStart + newLength - oldLength, intervalEnd + newLength - oldLength);
     }
 
     // Changes inside marker's area. Expand/collapse.
-    if (intervalStart() <= offset && intervalEnd() >= offset + oldLength) {
-      setIntervalEnd(intervalEnd() + newLength - oldLength);
-      return;
+    if (intervalStart <= offset && intervalEnd >= offset + oldLength) {
+      return new ProperTextRange(intervalStart, intervalEnd + newLength - oldLength);
     }
 
     // At this point we either have (myStart xor myEnd inside changed area) or whole area changed.
 
     // Replacing prefix or suffix...
-    if (intervalStart() >= offset && intervalStart() <= offset + oldLength && intervalEnd() > offset + oldLength) {
-      setIntervalEnd(intervalEnd() + newLength - oldLength);
-      setIntervalStart(offset + newLength);
-      return;
+    if (intervalStart >= offset && intervalStart <= offset + oldLength && intervalEnd > offset + oldLength) {
+      return new ProperTextRange(offset + newLength, intervalEnd + newLength - oldLength);
     }
 
-    if (intervalEnd() >= offset && intervalEnd() <= offset + oldLength && intervalStart() < offset) {
-      setIntervalEnd(offset);
-      return;
+    if (intervalEnd >= offset && intervalEnd <= offset + oldLength && intervalStart < offset) {
+      return new UnfairTextRange(intervalStart, offset);
     }
 
-    invalidate(e);
+    return null;
   }
 
-  private void processIfOnePoint(@NotNull DocumentEvent e) {
+  @Nullable
+  private static TextRange processIfOnePoint(@NotNull DocumentEvent e, int intervalStart, boolean greedyRight) {
     int offset = e.getOffset();
     int oldLength = e.getOldLength();
     int oldEnd = offset + oldLength;
-    if (offset < intervalStart() && intervalStart() < oldEnd) {
-      invalidate(e);
-      return;
+    if (offset < intervalStart && intervalStart < oldEnd) {
+      return null;
     }
 
-    if (offset == intervalStart() && oldLength == 0 && isGreedyToRight()) {
-      setIntervalEnd(intervalEnd() + e.getNewLength());
-      return;
+    if (offset == intervalStart && oldLength == 0 && greedyRight) {
+      return new UnfairTextRange(intervalStart, intervalStart + e.getNewLength());
     }
 
-    if (intervalStart() > oldEnd || intervalStart() == oldEnd  && oldLength > 0) {
-      setIntervalStart(intervalStart() + e.getNewLength() - oldLength);
-      setIntervalEnd(intervalEnd() + e.getNewLength() - oldLength);
+    if (intervalStart > oldEnd || intervalStart == oldEnd  && oldLength > 0) {
+      return new UnfairTextRange(intervalStart + e.getNewLength() - oldLength, intervalStart + e.getNewLength() - oldLength);
     }
+
+    return new UnfairTextRange(intervalStart, intervalStart);
   }
 
   @NonNls

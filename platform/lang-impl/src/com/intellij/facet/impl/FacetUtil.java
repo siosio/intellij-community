@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,12 +42,9 @@ public class FacetUtil {
   public static <F extends Facet> F addFacet(Module module, FacetType<F, ?> type) {
     final ModifiableFacetModel model = FacetManager.getInstance(module).createModifiableModel();
     final F facet = createFacet(module, type);
-    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-      @Override
-      public void run() {
-        model.addFacet(facet);
-        model.commit();
-      }
+    ApplicationManager.getApplication().runWriteAction(() -> {
+      model.addFacet(facet);
+      model.commit();
     });
     return facet;
   }
@@ -59,7 +56,7 @@ public class FacetUtil {
   public static void deleteFacet(final Facet facet) {
     new WriteAction() {
       @Override
-      protected void run(final Result result) {
+      protected void run(@NotNull final Result result) {
         if (!isRegistered(facet)) {
           return;
         }

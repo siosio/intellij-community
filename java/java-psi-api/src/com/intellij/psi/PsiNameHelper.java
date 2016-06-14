@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -166,6 +166,16 @@ public abstract class PsiNameHelper {
 
   private static final Pattern WHITESPACE_PATTERN = Pattern.compile("(?:\\s)|(?:/\\*.*\\*/)|(?://[^\\n]*)");
   private static String removeWhitespace(@NotNull String referenceText) {
+    boolean needsChange = false;
+    for (int i = 0; i < referenceText.length(); i++) {
+      char c = referenceText.charAt(i);
+      if (c == '/' || Character.isWhitespace(c)) {
+        needsChange = true;
+        break;
+      }
+    }
+    if (!needsChange) return referenceText;
+
     return WHITESPACE_PATTERN.matcher(referenceText).replaceAll("");
   }
 
@@ -181,7 +191,6 @@ public abstract class PsiNameHelper {
   @NotNull
   public static String[] getClassParametersText(@NotNull String referenceText) {
     if (referenceText.indexOf('<') < 0) return ArrayUtil.EMPTY_STRING_ARRAY;
-    referenceText = removeWhitespace(referenceText);
     final char[] chars = referenceText.toCharArray();
     int afterLastDotIndex = 0;
 
@@ -245,10 +254,6 @@ public abstract class PsiNameHelper {
     }
 
     return result;
-  }
-
-  public static void main(String[] args) {
-    System.out.println(Arrays.asList(PsiNameHelper.getClassParametersText("A<List<String>, B<Integer>>")));
   }
 
   public static boolean isSubpackageOf(@NotNull String subpackageName, @NotNull String packageName) {

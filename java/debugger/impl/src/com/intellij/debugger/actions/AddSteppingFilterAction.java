@@ -42,22 +42,20 @@ public class AddSteppingFilterAction extends DebuggerAction {
     if (process == null) {
       return;
     }
+    final StackFrameProxyImpl proxy = PopFrameAction.getStackFrameProxy(e);
     process.getManagerThread().schedule(new DebuggerCommandImpl() {
       protected void action() throws Exception {
-        final String name = getClassName(debuggerContext.getFrameProxy());
+        final String name = getClassName(proxy != null ? proxy : debuggerContext.getFrameProxy());
         if (name == null) {
           return;
         }
 
         final Project project = e.getData(CommonDataKeys.PROJECT);
-        ApplicationManager.getApplication().invokeLater(new Runnable() {
-          @Override
-          public void run() {
-            String filter = Messages.showInputDialog(project, "", "Add Stepping Filter", null, name, null);
-            if (filter != null) {
-              ClassFilter[] newFilters = ArrayUtil.append(DebuggerSettings.getInstance().getSteppingFilters(), new ClassFilter(filter));
-              DebuggerSettings.getInstance().setSteppingFilters(newFilters);
-            }
+        ApplicationManager.getApplication().invokeLater(() -> {
+          String filter = Messages.showInputDialog(project, "", "Add Stepping Filter", null, name, null);
+          if (filter != null) {
+            ClassFilter[] newFilters = ArrayUtil.append(DebuggerSettings.getInstance().getSteppingFilters(), new ClassFilter(filter));
+            DebuggerSettings.getInstance().setSteppingFilters(newFilters);
           }
         });
       }
@@ -65,7 +63,7 @@ public class AddSteppingFilterAction extends DebuggerAction {
   }
 
   public void update(AnActionEvent e) {
-    e.getPresentation().setEnabled(true);
+    e.getPresentation().setEnabledAndVisible(PopFrameAction.getStackFrameProxy(e) != null);
   }
 
   private static String getClassName(StackFrameProxyImpl stackFrameProxy) {

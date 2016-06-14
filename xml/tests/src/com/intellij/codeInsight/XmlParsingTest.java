@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,14 +23,13 @@ import com.intellij.lang.html.HTMLParserDefinition;
 import com.intellij.lang.xml.XMLLanguage;
 import com.intellij.lang.xml.XMLParserDefinition;
 import com.intellij.lang.xml.XmlASTFactory;
+import com.intellij.lexer.EmbeddedTokenTypesProvider;
 import com.intellij.lexer.FilterLexer;
-import com.intellij.lexer.HtmlEmbeddedTokenTypesProvider;
 import com.intellij.lexer.Lexer;
 import com.intellij.lexer.XmlLexer;
 import com.intellij.openapi.application.Result;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.Document;
-import com.intellij.openapi.extensions.ExtensionPointName;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.impl.DebugUtil;
@@ -44,6 +43,7 @@ import com.intellij.testFramework.ParsingTestCase;
 import com.intellij.testFramework.PlatformTestUtil;
 import com.intellij.util.ThrowableRunnable;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
@@ -222,12 +222,11 @@ public class XmlParsingTest extends ParsingTestCase {
     System.out.println("Plain lexing took " + (System.currentTimeMillis() - time) + "ms lexems count:" + count);
   }
 
-  private void transformAllChildren(final ASTNode file) {
+  private static void transformAllChildren(final ASTNode file) {
     for (ASTNode child = file.getFirstChildNode(); child != null; child = child.getTreeNext()) {
       transformAllChildren(child);
     }
   }
-
 
   public void _testPerformance1() throws Exception {
     final String text = loadFile("pallada.xml");
@@ -259,18 +258,15 @@ public class XmlParsingTest extends ParsingTestCase {
 
     new WriteCommandAction(getProject(), file) {
       @Override
-      protected void run(final Result result) throws Throwable {
-        PlatformTestUtil.startPerformanceTest("XML reparse using PsiBuilder", 2500, new ThrowableRunnable() {
-          @Override
-          public void run() throws Exception {
-            for (int i = 0; i < 10; i++) {
-              final long tm = System.currentTimeMillis();
-              doc.insertString(0, "<additional root=\"tag\"/>");
-              PsiDocumentManager.getInstance(getProject()).commitAllDocuments();
-              System.out.println("Reparsed for: " + (System.currentTimeMillis() - tm));
-            }
+      protected void run(@NotNull final Result result) throws Throwable {
+        PlatformTestUtil.startPerformanceTest("XML reparse using PsiBuilder", 2500, () -> {
+          for (int i = 0; i < 10; i++) {
+            final long tm = System.currentTimeMillis();
+            doc.insertString(0, "<additional root=\"tag\"/>");
+            PsiDocumentManager.getInstance(getProject()).commitAllDocuments();
+            System.out.println("Reparsed for: " + (System.currentTimeMillis() - tm));
           }
-        }).cpuBound().assertTiming();
+        }).cpuBound().useLegacyScaling().assertTiming();
       }
     }.execute();
   }
@@ -422,7 +418,9 @@ public class XmlParsingTest extends ParsingTestCase {
     checkResult("testManualEmptyAttributeParsing.txt", DebugUtil.treeToString(element, false));
   }
 
-  private CompositeElement parseManually(final String value, final IElementType xmlElementDecl, XmlEntityDecl.EntityContextType parseType) {
+  private static CompositeElement parseManually(final String value,
+                                                final IElementType xmlElementDecl,
+                                                XmlEntityDecl.EntityContextType parseType) {
     return (CompositeElement)new DtdParsing(value, xmlElementDecl, parseType, null).parse();
   }
 
@@ -667,6 +665,10 @@ public class XmlParsingTest extends ParsingTestCase {
     doTestXml("<!DOCTYPE x3 [<!NOTATION data-sources SYSTEM \"x3\">]>");
   }
 
+  public void testWhitespaceBeforeName() throws Exception {
+    doTestXml("<a>< a</a>");
+  }
+
   public void testCustomMimeType() throws Exception {
     final Language language = new MyLanguage();
     addExplicitExtension(LanguageHtmlScriptContentProvider.INSTANCE, language, new HtmlScriptContentProvider() {
@@ -683,8 +685,7 @@ public class XmlParsingTest extends ParsingTestCase {
     });
     addExplicitExtension(LanguageParserDefinitions.INSTANCE, HTMLLanguage.INSTANCE, new HTMLParserDefinition());
     addExplicitExtension(LanguageASTFactory.INSTANCE, HTMLLanguage.INSTANCE, new XmlASTFactory());
-    registerExtensionPoint(new ExtensionPointName<HtmlEmbeddedTokenTypesProvider>("com.intellij.html.embeddedTokenTypesProvider"),
-                           HtmlEmbeddedTokenTypesProvider.class);
+    registerExtensionPoint(EmbeddedTokenTypesProvider.EXTENSION_POINT_NAME, EmbeddedTokenTypesProvider.class);
     myLanguage = HTMLLanguage.INSTANCE;
     doTest("<script type=\"application/custom\">Custom Script</script>", "test.html");
   }

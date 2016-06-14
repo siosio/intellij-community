@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
  */
 package com.intellij.psi.impl;
 
-import com.intellij.openapi.Disposable;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressIndicatorProvider;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
@@ -23,7 +23,6 @@ import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Conditions;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vfs.VirtualFileFilter;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.file.impl.JavaFileManager;
 import com.intellij.psi.impl.source.DummyHolderFactory;
@@ -48,6 +47,8 @@ import java.util.concurrent.ConcurrentMap;
  * @author max
  */
 public class JavaPsiFacadeImpl extends JavaPsiFacadeEx {
+  private static final Logger LOG = Logger.getInstance(JavaPsiFacadeImpl.class);
+
   private volatile PsiElementFinder[] myElementFinders;
   private final PsiConstantEvaluationHelper myConstantEvaluationHelper;
   private final ConcurrentMap<String, PsiPackage> myPackageCache = ContainerUtil.createConcurrentSoftValueMap();
@@ -141,7 +142,7 @@ public class JavaPsiFacadeImpl extends JavaPsiFacadeEx {
       return PsiClass.EMPTY_ARRAY;
     }
 
-    if (pkg == null || !pkg.containsClassNamed(className)) {
+    if (pkg == null) {
       return PsiClass.EMPTY_ARRAY;
     }
 
@@ -163,7 +164,7 @@ public class JavaPsiFacadeImpl extends JavaPsiFacadeEx {
       PsiClass[] finderClasses = finder.findClasses(qualifiedName, scope);
       if (finderClasses.length != 0) {
         if (result == null) result = new ArrayList<PsiClass>(finderClasses.length);
-        filterClassesAndAppend(classesFilter, finderClasses, result);
+        filterClassesAndAppend(finder, classesFilter, finderClasses, result);
       }
     }
 
@@ -275,23 +276,23 @@ public class JavaPsiFacadeImpl extends JavaPsiFacadeEx {
       PsiClass[] classes = finder.getClasses(psiPackage, scope);
       if (classes.length == 0) continue;
       if (result == null) result = new ArrayList<PsiClass>(classes.length);
-      filterClassesAndAppend(classesFilter, classes, result);
+      filterClassesAndAppend(finder, classesFilter, classes, result);
     }
 
     return result == null ? PsiClass.EMPTY_ARRAY : result.toArray(new PsiClass[result.size()]);
   }
 
-  private static void filterClassesAndAppend(@Nullable Condition<PsiClass> classesFilter,
+  private static void filterClassesAndAppend(PsiElementFinder finder,
+                                             @Nullable Condition<PsiClass> classesFilter,
                                              @NotNull PsiClass[] classes,
                                              @NotNull List<PsiClass> result) {
-    if (classesFilter == null) {
-      ContainerUtil.addAll(result, classes);
-    }
-    else {
-      for (PsiClass psiClass : classes) {
-        if (classesFilter.value(psiClass)) {
-          result.add(psiClass);
-        }
+    for (PsiClass psiClass : classes) {
+      if (psiClass == null) {
+        LOG.error("Finder " + finder + " returned null PsiClass");
+        continue;
+      }
+      if (classesFilter == null || classesFilter.value(psiClass)) {
+        result.add(psiClass);
       }
     }
   }
@@ -410,8 +411,7 @@ public class JavaPsiFacadeImpl extends JavaPsiFacadeEx {
   }
 
   @TestOnly
-  @Override
-  public void setAssertOnFileLoadingFilter(@NotNull final VirtualFileFilter filter, Disposable parentDisposable) {
-    ((PsiManagerImpl)PsiManager.getInstance(myProject)).setAssertOnFileLoadingFilter(filter, parentDisposable);
+  public void clearFindersCache() {
+    myElementFinders = null;
   }
 }

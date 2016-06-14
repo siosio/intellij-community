@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ import com.intellij.debugger.impl.ClassLoadingUtils;
 import com.intellij.debugger.impl.DebuggerUtilsEx;
 import com.intellij.debugger.jdi.VirtualMachineProxyImpl;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.compiler.ClassObject;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.JavaSdkVersion;
 import com.intellij.openapi.projectRoots.JdkVersionUtil;
@@ -38,8 +39,6 @@ import com.sun.jdi.ClassType;
 import com.sun.jdi.Value;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.jps.incremental.BinaryContent;
-import org.jetbrains.jps.javac.OutputFileObject;
 import org.jetbrains.org.objectweb.asm.ClassReader;
 import org.jetbrains.org.objectweb.asm.ClassVisitor;
 import org.jetbrains.org.objectweb.asm.ClassWriter;
@@ -80,18 +79,13 @@ public abstract class CompilingEvaluator implements ExpressionEvaluator {
     ClassLoaderReference classLoader = ClassLoadingUtils.getClassLoader(evaluationContext, process);
 
     String version = ((VirtualMachineProxyImpl)process.getVirtualMachineProxy()).version();
-    Collection<OutputFileObject> classes = compile(JdkVersionUtil.getVersion(version));
+    Collection<ClassObject> classes = compile(JdkVersionUtil.getVersion(version));
 
     defineClasses(classes, evaluationContext, process, classLoader);
 
     try {
       // invoke base evaluator on call code
-      final Project project = ApplicationManager.getApplication().runReadAction(new Computable<Project>() {
-        @Override
-        public Project compute() {
-          return myPsiContext.getProject();
-        }
-      });
+      final Project project = ApplicationManager.getApplication().runReadAction((Computable<Project>)myPsiContext::getProject);
       ExpressionEvaluator evaluator =
         DebuggerInvocationUtil.commitAndRunReadAction(project, new EvaluatingComputable<ExpressionEvaluator>() {
           @Override
@@ -112,15 +106,15 @@ public abstract class CompilingEvaluator implements ExpressionEvaluator {
     }
   }
 
-  private ClassType defineClasses(Collection<OutputFileObject> classes,
+  private ClassType defineClasses(Collection<ClassObject> classes,
                                   EvaluationContext context,
                                   DebugProcess process,
                                   ClassLoaderReference classLoader) throws EvaluateException {
-    for (OutputFileObject cls : classes) {
-      if (cls.getName().contains(GEN_CLASS_NAME)) {
-        final BinaryContent content = cls.getContent();
+    for (ClassObject cls : classes) {
+      if (cls.getPath().contains(GEN_CLASS_NAME)) {
+        final byte[] content = cls.getContent();
         if (content != null) {
-          byte[] bytes = changeSuperToMagicAccessor(content.toByteArray());
+          final byte[] bytes = changeSuperToMagicAccessor(content);
           ClassLoadingUtils.defineClass(cls.getClassName(), bytes, context, process, classLoader);
         }
       }
@@ -165,6 +159,6 @@ public abstract class CompilingEvaluator implements ExpressionEvaluator {
   ///////////////// Compiler stuff
 
   @NotNull
-  protected abstract Collection<OutputFileObject> compile(@Nullable JavaSdkVersion debuggeeVersion) throws EvaluateException;
+  protected abstract Collection<ClassObject> compile(@Nullable JavaSdkVersion debuggeeVersion) throws EvaluateException;
 
 }

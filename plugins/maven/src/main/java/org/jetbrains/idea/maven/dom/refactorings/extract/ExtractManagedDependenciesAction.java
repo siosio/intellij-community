@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2015 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -124,7 +124,7 @@ public class ExtractManagedDependenciesAction extends BaseRefactoringAction {
 
       new WriteCommandAction(project, getFiles(file, model, usages)) {
         @Override
-        protected void run(Result result) throws Throwable {
+        protected void run(@NotNull Result result) throws Throwable {
           MavenDomDependency addedDependency = model.getDependencyManagement().getDependencies().addDependency();
           addedDependency.getGroupId().setStringValue(dependency.getGroupId().getStringValue());
           addedDependency.getArtifactId().setStringValue(dependency.getArtifactId().getStringValue());
@@ -216,13 +216,11 @@ public class ExtractManagedDependenciesAction extends BaseRefactoringAction {
 
     private static Function<MavenDomProjectModel, Set<MavenDomDependency>> getOccurencesFunction(final MavenDomDependency dependency) {
 
-      return new Function<MavenDomProjectModel, Set<MavenDomDependency>>() {
-        public Set<MavenDomDependency> fun(MavenDomProjectModel model) {
-          DependencyConflictId dependencyId = DependencyConflictId.create(dependency);
-          if (dependencyId == null) return Collections.emptySet();
+      return model -> {
+        DependencyConflictId dependencyId = DependencyConflictId.create(dependency);
+        if (dependencyId == null) return Collections.emptySet();
 
-          return MavenDomProjectProcessorUtils.searchDependencyUsages(model, dependencyId, Collections.singleton(dependency));
-        }
+        return MavenDomProjectProcessorUtils.searchDependencyUsages(model, dependencyId, Collections.singleton(dependency));
       };
     }
 

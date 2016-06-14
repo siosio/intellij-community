@@ -102,8 +102,9 @@ public class RenamePsiPackageProcessor extends RenamePsiElementProcessor {
                                                  searchInNonJavaFiles, false, null) {
       @Override
       public TargetDirectoryWrapper getTargetDirectory(final PsiDirectory dir) {
-        final VirtualFile sourceRoot = index.getSourceRootForFile(dir.getVirtualFile());
-        LOG.assertTrue(sourceRoot != null);
+        final VirtualFile vFile = dir.getVirtualFile();
+        final VirtualFile sourceRoot = index.getSourceRootForFile(vFile);
+        LOG.assertTrue(sourceRoot != null, vFile.getPath());
         return new TargetDirectoryWrapper(dir.getManager().findDirectory(sourceRoot), newName.replaceAll("\\.", "\\/"));
       }
 
@@ -174,14 +175,12 @@ public class RenamePsiPackageProcessor extends RenamePsiElementProcessor {
     final Project project = element.getProject();
     final PsiPackage psiPackage = (PsiPackage)element;
     final String newQualifiedName = PsiUtilCore.getQualifiedNameAfterRename(psiPackage.getQualifiedName(), newName);
-    return new Runnable() {
-      public void run() {
-        final PsiPackage aPackage = JavaPsiFacade.getInstance(project).findPackage(newQualifiedName);
-        if (aPackage == null) {
-          return; //rename failed e.g. when the dir is used by another app
-        }
-        listener.elementRenamed(aPackage);
+    return () -> {
+      final PsiPackage aPackage = JavaPsiFacade.getInstance(project).findPackage(newQualifiedName);
+      if (aPackage == null) {
+        return; //rename failed e.g. when the dir is used by another app
       }
+      listener.elementRenamed(aPackage);
     };
   }
 

@@ -18,7 +18,6 @@ package com.intellij.packageDependencies;
 
 import com.intellij.analysis.AnalysisScope;
 import com.intellij.analysis.AnalysisScopeBundle;
-import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressIndicator;
@@ -28,9 +27,9 @@ import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
-import com.intellij.psi.PsiRecursiveElementVisitor;
 import com.intellij.util.Processor;
 import org.jetbrains.annotations.Nullable;
 
@@ -51,7 +50,7 @@ public class BackwardDependenciesBuilder extends DependenciesBuilder {
 
   public BackwardDependenciesBuilder(final Project project, final AnalysisScope scope, final @Nullable AnalysisScope scopeOfInterest) {
     super(project, scope, scopeOfInterest);
-    myForwardScope = ApplicationManager.getApplication().runReadAction(new Computable<AnalysisScope>() {
+    myForwardScope = scopeOfInterest != null ? scopeOfInterest : ApplicationManager.getApplication().runReadAction(new Computable<AnalysisScope>() {
       @Override
       public AnalysisScope compute() {
         return getScope().getNarrowedComplementaryScope(getProject());
@@ -90,44 +89,43 @@ public class BackwardDependenciesBuilder extends DependenciesBuilder {
       final int fileCount = getScope().getFileCount();
       final boolean includeTestSource = getScope().isIncludeTestSource();
       final ProjectFileIndex fileIndex = ProjectRootManager.getInstance(getProject()).getFileIndex();
-      getScope().accept(new Processor<VirtualFile>() {
-        @Override
-        public boolean process(final VirtualFile virtualFile) {
-          if (!includeTestSource && fileIndex.isInTestSourceContent(virtualFile)) {
-            return true;
-          }
-          ProgressIndicator indicator = ProgressManager.getInstance().getProgressIndicator();
-          if (indicator != null) {
-            if (indicator.isCanceled()) {
-              throw new ProcessCanceledException();
-            }
-            indicator.setText(AnalysisScopeBundle.message("package.dependencies.progress.text"));
-            indicator.setText2(getRelativeToProjectPath(virtualFile));
-            if (fileCount > 0) {
-              indicator.setFraction(((double)++myFileCount) / myTotalFileCount);
-            }
-          }
-          ApplicationManager.getApplication().runReadAction(new Runnable() {
-            public void run() {
-              final PsiFile file = psiManager.findFile(virtualFile);
-              if (file != null) {
-                final Map<PsiFile, Set<PsiFile>> dependencies = builder.getDependencies();
-                for (final PsiFile psiFile : dependencies.keySet()) {
-                  if (dependencies.get(psiFile).contains(file)) {
-                    Set<PsiFile> fileDeps = getDependencies().get(file);
-                    if (fileDeps == null) {
-                      fileDeps = new HashSet<PsiFile>();
-                      getDependencies().put(file, fileDeps);
-                    }
-                    fileDeps.add(psiFile);
-                  }
-                }
-                psiManager.dropResolveCaches();
-              }
-            }
-          });
+      getScope().accept(virtualFile -> {
+        if (!includeTestSource && fileIndex.isInTestSourceContent(virtualFile)) {
           return true;
         }
+        ProgressIndicator indicator = ProgressManager.getInstance().getProgressIndicator();
+        if (indicator != null) {
+          if (indicator.isCanceled()) {
+            throw new ProcessCanceledException();
+          }
+          indicator.setText(AnalysisScopeBundle.message("package.dependencies.progress.text"));
+          indicator.setText2(getRelativeToProjectPath(virtualFile));
+          if (fileCount > 0) {
+            indicator.setFraction(((double)++myFileCount) / myTotalFileCount);
+          }
+        }
+        ApplicationManager.getApplication().runReadAction(() -> {
+          PsiFile file = psiManager.findFile(virtualFile);
+          if (file != null) {
+            final PsiElement navigationElement = file.getNavigationElement();
+            if (navigationElement instanceof PsiFile) {
+              file = (PsiFile)navigationElement;
+            }
+            final Map<PsiFile, Set<PsiFile>> dependencies = builder.getDependencies();
+            for (final PsiFile psiFile : dependencies.keySet()) {
+              if (dependencies.get(psiFile).contains(file)) {
+                Set<PsiFile> fileDeps = getDependencies().get(file);
+                if (fileDeps == null) {
+                  fileDeps = new HashSet<PsiFile>();
+                  getDependencies().put(file, fileDeps);
+                }
+                fileDeps.add(psiFile);
+              }
+            }
+            psiManager.dropResolveCaches();
+          }
+        });
+        return true;
       });
     }
     finally {
@@ -149,5 +147,9 @@ public class BackwardDependenciesBuilder extends DependenciesBuilder {
     for ( final PsiFile psiFile : excluded ) {
       dependencies.remove(psiFile);
     }
+  }
+
+  public AnalysisScope getForwardScope() {
+    return myForwardScope;
   }
 }

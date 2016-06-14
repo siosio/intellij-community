@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,7 +35,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectBundle;
 import com.intellij.openapi.roots.*;
 import com.intellij.openapi.roots.libraries.Library;
-import com.intellij.openapi.roots.ui.configuration.PathUIUtils;
+import com.intellij.openapi.roots.ui.configuration.LibrarySourceRootDetectorUtil;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.ui.popup.ListSeparator;
@@ -128,12 +128,7 @@ public class AttachSourcesNotificationProvider extends EditorNotifications.Provi
           }
         }
 
-        Collections.sort(actions, new Comparator<AttachSourcesProvider.AttachSourcesAction>() {
-          @Override
-          public int compare(AttachSourcesProvider.AttachSourcesAction o1, AttachSourcesProvider.AttachSourcesAction o2) {
-            return o1.getName().compareToIgnoreCase(o2.getName());
-          }
-        });
+        Collections.sort(actions, (o1, o2) -> o1.getName().compareToIgnoreCase(o2.getName()));
 
         AttachSourcesProvider.AttachSourcesAction defaultAction;
         if (findSourceFileInSameJar(file) != null) {
@@ -145,30 +140,24 @@ public class AttachSourcesNotificationProvider extends EditorNotifications.Provi
         actions.add(defaultAction);
 
         for (final AttachSourcesProvider.AttachSourcesAction action : actions) {
-          panel.createActionLabel(GuiUtils.getTextWithoutMnemonicEscaping(action.getName()), new Runnable() {
-            @Override
-            public void run() {
-              List<LibraryOrderEntry> entries = findLibraryEntriesForFile(file);
-              if (!Comparing.equal(libraries, entries)) {
-                Messages.showErrorDialog(myProject, "Can't find library for " + file.getName(), "Error");
-                return;
-              }
-
-              panel.setText(action.getBusyText());
-
-              action.perform(entries);
+          panel.createActionLabel(GuiUtils.getTextWithoutMnemonicEscaping(action.getName()), () -> {
+            List<LibraryOrderEntry> entries = findLibraryEntriesForFile(file);
+            if (!Comparing.equal(libraries, entries)) {
+              Messages.showErrorDialog(myProject, "Can't find library for " + file.getName(), "Error");
+              return;
             }
+
+            panel.setText(action.getBusyText());
+
+            action.perform(entries);
           });
         }
       }
     }
     else {
-      panel.createActionLabel(ProjectBundle.message("class.file.open.source.action"), new Runnable() {
-        @Override
-        public void run() {
-          OpenFileDescriptor descriptor = new OpenFileDescriptor(myProject, sourceFile);
-          FileEditorManager.getInstance(myProject).openTextEditor(descriptor, true);
-        }
+      panel.createActionLabel(ProjectBundle.message("class.file.open.source.action"), () -> {
+        OpenFileDescriptor descriptor = new OpenFileDescriptor(myProject, sourceFile);
+        FileEditorManager.getInstance(myProject).openTextEditor(descriptor, true);
       });
     }
 
@@ -178,21 +167,19 @@ public class AttachSourcesNotificationProvider extends EditorNotifications.Provi
   @Nullable
   private static String getClassFileInfo(VirtualFile file) {
     try {
-      byte[] data = file.contentsToByteArray();
+      byte[] data = file.contentsToByteArray(false);
       if (data.length > 8) {
-        DataInputStream stream = new DataInputStream(new ByteArrayInputStream(data));
-        try {
+        try (DataInputStream stream = new DataInputStream(new ByteArrayInputStream(data))) {
           if (stream.readInt() == 0xCAFEBABE) {
             int minor = stream.readUnsignedShort();
             int major = stream.readUnsignedShort();
             StringBuilder info = new StringBuilder().append("bytecode version: ").append(major).append('.').append(minor);
             LanguageLevel level = ClsParsingUtil.getLanguageLevelByVersion(major);
-            if (level != null) info.append(" (").append(level.getName()).append(')');
+            if (level != null) {
+              info.append(" (").append(level == LanguageLevel.JDK_1_3 ? level.getName() + " or older" : level.getName()).append(')');
+            }
             return info.toString();
           }
-        }
-        finally {
-          stream.close();
         }
       }
     }
@@ -254,7 +241,7 @@ public class AttachSourcesNotificationProvider extends EditorNotifications.Provi
         model.addRoot(root, OrderRootType.SOURCES);
         modelsToCommit.add(model);
       }
-      if (modelsToCommit.isEmpty()) return new ActionCallback.Rejected();
+      if (modelsToCommit.isEmpty()) return ActionCallback.REJECTED;
       new WriteAction() {
         @Override
         protected void run(@NotNull final Result result) {
@@ -264,7 +251,7 @@ public class AttachSourcesNotificationProvider extends EditorNotifications.Provi
         }
       }.execute();
 
-      return new ActionCallback.Done();
+      return ActionCallback.DONE;
     }
 
     @Nullable
@@ -305,10 +292,9 @@ public class AttachSourcesNotificationProvider extends EditorNotifications.Provi
       Library firstLibrary = libraries.get(0).getLibrary();
       VirtualFile[] roots = firstLibrary != null ? firstLibrary.getFiles(OrderRootType.CLASSES) : VirtualFile.EMPTY_ARRAY;
       VirtualFile[] candidates = FileChooser.chooseFiles(descriptor, myProject, roots.length == 0 ? null : PathUtil.getLocalFile(roots[0]));
-      final VirtualFile[] files = PathUIUtils.scanAndSelectDetectedJavaSourceRoots(myParentComponent, candidates);
-      if (files.length == 0) {
-        return new ActionCallback.Rejected();
-      }
+      if (candidates.length == 0) return ActionCallback.REJECTED;
+      VirtualFile[] files = LibrarySourceRootDetectorUtil.scanAndSelectDetectedJavaSourceRoots(myParentComponent, candidates);
+      if (files.length == 0) return ActionCallback.REJECTED;
 
       final Map<Library, LibraryOrderEntry> librariesToAppendSourcesTo = new HashMap<Library, LibraryOrderEntry>();
       for (LibraryOrderEntry library : libraries) {
@@ -350,19 +336,16 @@ public class AttachSourcesNotificationProvider extends EditorNotifications.Provi
         }).showCenteredInCurrentWindow(myProject);
       }
 
-      return new ActionCallback.Done();
+      return ActionCallback.DONE;
     }
 
     private static void appendSources(final Library library, final VirtualFile[] files) {
-      ApplicationManager.getApplication().runWriteAction(new Runnable() {
-        @Override
-        public void run() {
-          Library.ModifiableModel model = library.getModifiableModel();
-          for (VirtualFile virtualFile : files) {
-            model.addRoot(virtualFile, OrderRootType.SOURCES);
-          }
-          model.commit();
+      ApplicationManager.getApplication().runWriteAction(() -> {
+        Library.ModifiableModel model = library.getModifiableModel();
+        for (VirtualFile virtualFile : files) {
+          model.addRoot(virtualFile, OrderRootType.SOURCES);
         }
+        model.commit();
       });
     }
   }

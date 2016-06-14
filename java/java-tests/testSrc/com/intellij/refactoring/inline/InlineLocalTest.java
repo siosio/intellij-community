@@ -156,7 +156,7 @@ public class InlineLocalTest extends LightCodeInsightTestCase {
   }
 
   public void testArrayMethodCallInitialized() throws Exception {
-    doTest(true);
+    doTest(false);
   }
 
   public void testArrayIndex() throws Exception {
@@ -204,6 +204,10 @@ public class InlineLocalTest extends LightCodeInsightTestCase {
     doTest(true);
   }
 
+  public void testLocalVarUsedInLambdaBody() throws Exception {
+    doTest(true);
+  }
+
   public void testCastAroundLambda() throws Exception {
     doTest(true);
   }
@@ -238,6 +242,38 @@ public class InlineLocalTest extends LightCodeInsightTestCase {
 
   public void testCollapseArrayCreation() throws Exception {
     doTest(true);
+  }
+
+  public void testRenameLambdaParamsToAvoidConflicts() throws Exception {
+    doTest(true);
+  }
+
+  public void testParenthesisAroundInlinedLambda() throws Exception {
+    doTest(true);
+  }
+
+  public void testArrayAccessPriority() throws Exception {
+    doTest(true);
+  }
+
+  public void testDecodeRefsBeforeCheckingOverRedundantCasts() throws Exception {
+    doTest(true);
+  }
+
+  public void testDontOpenMultidimensionalArrays() throws Exception {
+    doTest(false);
+  }
+
+  public void testInsertNarrowingCastToAvoidSemanticsChange() throws Exception {
+    doTest(false);
+  }
+
+  public void testInsertCastToGenericTypeToProvideValidReturnType() throws Exception {
+    doTest(false);
+  }
+
+  public void testOperationPrecedenceWhenInlineToStringConcatenation() throws Exception {
+    doTest(false);
   }
 
   public void testLocalVarInsideLambdaBodyWriteUsage() throws Exception {

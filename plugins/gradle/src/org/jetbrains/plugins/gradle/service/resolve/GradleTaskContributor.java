@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -73,6 +73,10 @@ public class GradleTaskContributor implements GradleMethodContextContributor {
           StringUtil.startsWith(methodCallInfo.get(0), GradleSourceSetsContributor.SOURCE_SETS + '.')) {
         GradleResolverUtil.addImplicitVariable(processor, state, place, GradleCommonClassNames.GRADLE_API_SOURCE_SET_CONTAINER);
       }
+      if (place.getText().equals(GradleDistributionsContributor.DISTRIBUTIONS) &&
+          StringUtil.startsWith(methodCallInfo.get(0), GradleDistributionsContributor.DISTRIBUTIONS + '.')) {
+        GradleResolverUtil.addImplicitVariable(processor, state, place, GradleCommonClassNames.GRADLE_API_DISTRIBUTION_CONTAINER);
+      }
     }
   }
 
@@ -85,7 +89,7 @@ public class GradleTaskContributor implements GradleMethodContextContributor {
     if (psiElement instanceof GrMethodCallExpression) {
       GrMethodCallExpression callExpression = (GrMethodCallExpression)psiElement;
       GrArgumentList argumentList = callExpression.getArgumentList();
-      if (argumentList != null && argumentList.getAllArguments().length > 0) {
+      if (argumentList.getAllArguments().length > 0) {
         for (GroovyPsiElement argument : argumentList.getAllArguments()) {
           if (argument instanceof GrNamedArgument) {
             GrNamedArgument namedArgument = (GrNamedArgument)argument;
@@ -135,9 +139,6 @@ public class GradleTaskContributor implements GradleMethodContextContributor {
       return;
     }
     GrArgumentList args = call.getArgumentList();
-    if (args == null) {
-      return;
-    }
 
     int argsCount = GradleResolverUtil.getGrMethodArumentsCount(args);
     argsCount++; // Configuration name is delivered as an argument.

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,14 +28,20 @@ import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.xdebugger.*;
+import com.intellij.xdebugger.breakpoints.SuspendPolicy;
+import com.intellij.xdebugger.breakpoints.XBreakpoint;
+import com.intellij.xdebugger.breakpoints.XBreakpointManager;
+import com.intellij.xdebugger.breakpoints.XLineBreakpoint;
 import com.intellij.xdebugger.frame.XValue;
 import com.jetbrains.env.PyExecutionFixtureTestTask;
 import com.jetbrains.python.console.PythonDebugLanguageConsoleView;
 import com.jetbrains.python.debugger.PyDebugProcess;
 import com.jetbrains.python.debugger.PyDebugValue;
 import com.jetbrains.python.debugger.PyDebuggerException;
+import com.jetbrains.python.debugger.PyThreadInfo;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
 import org.junit.Assert;
 
 import java.io.PrintWriter;
@@ -106,6 +112,7 @@ public abstract class PyBaseDebuggerTask extends PyExecutionFixtureTestTask {
     currentSession.stepInto();
   }
 
+  @TestOnly
   protected void stepIntoMyCode() {
     XDebugSession currentSession = XDebuggerManager.getInstance(getProject()).getCurrentSession();
 
@@ -113,7 +120,7 @@ public abstract class PyBaseDebuggerTask extends PyExecutionFixtureTestTask {
     Assert.assertEquals(0, myPausedSemaphore.availablePermits());
 
     PyDebugProcess debugProcess = (PyDebugProcess)currentSession.getDebugProcess();
-    debugProcess.startStepIntoMyCode();
+    debugProcess.startStepIntoMyCode(currentSession.getSuspendContext());
   }
 
   protected void smartStepInto(String funcName) {
@@ -212,6 +219,35 @@ public abstract class PyBaseDebuggerTask extends PyExecutionFixtureTestTask {
     XDebuggerTestUtil.toggleBreakpoint(getProject(), LocalFileSystem.getInstance().findFileByPath(file), line);
   }
 
+  public static void setBreakpointSuspendPolicy(Project project, int line, SuspendPolicy policy) {
+    XBreakpointManager breakpointManager = XDebuggerManager.getInstance(project).getBreakpointManager();
+    for (XBreakpoint breakpoint : XDebuggerTestUtil.getBreakpoints(breakpointManager)) {
+      if (breakpoint instanceof XLineBreakpoint) {
+        final XLineBreakpoint lineBreakpoint = (XLineBreakpoint)breakpoint;
+
+        if (lineBreakpoint.getLine() == line) {
+          new WriteAction() {
+            @Override
+            protected void run(@NotNull Result result) throws Throwable {
+              lineBreakpoint.setSuspendPolicy(policy);
+            }
+          }.execute();
+        }
+      }
+    }
+  }
+
+  public String getRunningThread() {
+    for (PyThreadInfo thread : myDebugProcess.getThreads()) {
+      if (!thread.isPydevThread()) {
+        if ((thread.getState() == null) || (thread.getState() == PyThreadInfo.State.RUNNING)) {
+          return thread.getName();
+        }
+      }
+    }
+    return null;
+  }
+
   protected Variable eval(String name) throws InterruptedException {
     Assert.assertTrue("Eval works only while suspended", mySession.isSuspended());
     XValue var = XDebuggerTestUtil.evaluate(mySession, name).first;
@@ -278,7 +314,7 @@ public abstract class PyBaseDebuggerTask extends PyExecutionFixtureTestTask {
 
     if (mySession != null) {
       new WriteAction() {
-        protected void run(Result result) throws Throwable {
+        protected void run(@NotNull Result result) throws Throwable {
           mySession.stop();
         }
       }.execute();
@@ -295,12 +331,7 @@ public abstract class PyBaseDebuggerTask extends PyExecutionFixtureTestTask {
 
     final ExecutionResult result = myExecutionResult;
     if (myExecutionResult != null) {
-      UIUtil.invokeLaterIfNeeded(new Runnable() {
-        @Override
-        public void run() {
-          Disposer.dispose(result.getExecutionConsole());
-        }
-      });
+      UIUtil.invokeLaterIfNeeded(() -> Disposer.dispose(result.getExecutionConsole()));
       myExecutionResult = null;
     }
   }
@@ -316,6 +347,8 @@ public abstract class PyBaseDebuggerTask extends PyExecutionFixtureTestTask {
       throw new RuntimeException(output(), e);
     }
     finally {
+      doFinally();
+
       clearAllBreakpoints();
 
       setProcessCanTerminate(true);
@@ -355,12 +388,7 @@ public abstract class PyBaseDebuggerTask extends PyExecutionFixtureTestTask {
     private Thread myThread;
 
     public void start() {
-      myThread = new Thread(new Runnable() {
-        @Override
-        public void run() {
-          doJob();
-        }
-      },"py debugger job");
+      myThread = new Thread(() -> doJob(), "py debugger job");
       myThread.setDaemon(true);
       myThread.start();
     }
@@ -382,8 +410,9 @@ public abstract class PyBaseDebuggerTask extends PyExecutionFixtureTestTask {
       }
     }
 
-    public void stop() {
+    public void stop() throws InterruptedException {
       myThread.interrupt();
+      myThread.join();
     }
   }
 }

@@ -15,6 +15,8 @@
  */
 package com.intellij.diff.util;
 
+import com.intellij.util.Function;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -30,6 +32,14 @@ public enum ThreeSide {
 
   ThreeSide(int index) {
     myIndex = index;
+  }
+
+  @NotNull
+  public static ThreeSide fromIndex(int index) {
+    if (index == 0) return LEFT;
+    if (index == 1) return BASE;
+    if (index == 2) return RIGHT;
+    throw new IndexOutOfBoundsException("index: " + index);
   }
 
   public int getIndex() {
@@ -83,5 +93,21 @@ public enum ThreeSide {
   public <T> T selectNotNull(@NotNull List<T> list) {
     assert list.size() == 3;
     return list.get(myIndex);
+  }
+
+  @Nullable
+  public static <T> ThreeSide fromValue(@NotNull List<? extends T> list, @Nullable T value) {
+    assert list.size() == 3;
+    int index = list.indexOf(value);
+    return index != -1 ? fromIndex(index) : null;
+  }
+
+  @NotNull
+  public static <T> List<T> map(@NotNull Function<ThreeSide, T> function) {
+    return ContainerUtil.list(
+      function.fun(LEFT),
+      function.fun(BASE),
+      function.fun(RIGHT)
+    );
   }
 }
